@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#6B1220">
+<title>iWorship</title>
+<!-- Loading-flash fix [2026-09-05]: these three make iOS treat "Add to Home
+     Screen" launches as a real standalone app from the very first frame,
+     same reasoning as vite.config.js's manifest background_color fix --
+     without apple-mobile-web-app-capable, iOS can briefly show its own
+     Safari-tab chrome even for a home-screen launch, which reads as exactly
+     the "browser screen loading" flash Jared described. black-translucent
+     lets the topbar's own dark maroon show through behind the status-bar
+     clock/icons instead of a mismatched white bar. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="iWorship">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,500&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<!-- Perf fix [2026-09-15] -- Jared: "the app is very slow on my phone." Once
+     signed in, the very first thing that happens is Firestore/Auth opening a
+     connection to these two hosts (onSnapshot listeners for songs/profile/
+     notifications, sign-in). Warming the TLS handshake for them now, in
+     parallel with the HTML/CSS/JS still downloading, means that first real
+     data round trip doesn't also have to pay DNS+TLS setup cost on top of it
+     -- worth doing unconditionally since an idle preconnect a demo-mode build
+     never uses just times out harmlessly, same as the two above already did
+     before any font was even confirmed needed. -->
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin>
+<link rel="stylesheet" href="/src/styles.css">
+<style>
+  /* Splash screen — inlined (not in styles.css) so it paints instantly on
+     first load with zero flash, before the stylesheet or app.js have even
+     finished fetching. Hidden by the small script at the bottom of <body>
+     the moment the app's first real screen lands in #main. */
+  #splash{
+    position:fixed; inset:0; z-index:9999;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:22px;
+    background:#6B1220; /* matches the icon's own baked-in background exactly,
+                            so the icon's rounded-square edges disappear */
+    transition:opacity .35s ease;
+  }
+  #splash.hide{ opacity:0; pointer-events:none; }
+  #splash img{
+    width:104px; height:104px;
+    animation:splash-in .5s ease;
+  }
+  #splash .splash-word{
+    font-family:'EB Garamond', Georgia, serif;
+    font-size:1.5rem; font-weight:600; letter-spacing:.02em;
+    color:#F6EFDD;
+  }
+  #splash .splash-dots{ display:flex; gap:9px; height:11px; align-items:center; }
+  #splash .splash-dots span{
+    width:9px; height:9px; border-radius:50%;
+    background:#E1BD73;
+    animation:splash-bounce 1.1s ease-in-out infinite;
+  }
+  #splash .splash-dots span:nth-child(2){ animation-delay:.15s; }
+  #splash .splash-dots span:nth-child(3){ animation-delay:.3s; }
+  @keyframes splash-in{ from{ opacity:0; transform:scale(.9); } to{ opacity:1; transform:scale(1); } }
+  @keyframes splash-bounce{
+    0%, 60%, 100%{ transform:translateY(0); opacity:.5; }
+    30%{ transform:translateY(-7px); opacity:1; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    #splash img{ animation:none; }
+    #splash .splash-dots span{ animation:none; opacity:.85; }
+  }
+</style>
+</head>
+<body>
+
+<div id="splash" aria-hidden="true">
+  <img src="/icons/icon-512.png" alt="" width="104" height="104">
+  <span class="splash-word">iWorship</span>
+  <span class="splash-dots"><span></span><span></span><span></span></span>
+</div>
+
+<div class="app">
+  <!-- Top bar [redesigned 2026-09-10] -- Jared: "the menu at the top is
+       crowded though, can you redesign it?" Down from 6 tap targets (book+
+       wordmark, avatar, bell, home, theme, hamburger) to 3: brand (tap =
+       home hub), avatar, notifications bell. Mode-switching (Hymnal/Host/
+       Fellowship) moved to the persistent bottom tab bar below; dark mode
+       moved into Settings (Preferences); the hamburger drawer is now opened
+       from the bottom tab bar's MORE tab instead of living up here. -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-row">
+        <button class="brand" id="brandHome" aria-label="iWorship, go home">
+          <svg viewBox="0 0 48 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round">
+            <path d="M24 6 C19 2, 9 1, 4 4 L4 27 C9 24, 19 25, 24 29 C29 25, 39 24, 44 27 L44 4 C39 1, 29 2, 24 6 Z"/>
+            <line x1="24" y1="6" x2="24" y2="29"/>
+          </svg>
+          <span class="brand-text">
+            <span class="brand-name">iWorship</span>
+            <!-- Tagline updated [2026-09-16] -- Jared: "this is no longer a
+                 hymnal and chord book" -- the app has grown well past that
+                 (sermons, Bible, media/AVP, live hosting, Fellowship's own
+                 social layer), so the header no longer sells it short. Kept
+                 to a similarly short "X & Y" shape as the original --
+                 .brand-tag's own aggressive letter-spacing (see styles.css)
+                 makes a longer phrase risk the ellipsis-truncation this rule
+                 already has on narrow/mobile widths. -->
+            <span class="brand-tag uc">Worship &amp; Fellowship</span>
+          </span>
+        </button>
+      </div>
+      <span class="topbar-icons">
+        <!-- Notifications bell [2026-09-09, social redesign; changed to a
+             pop-down v36] -- hidden until signed in. Click no longer jumps
+             straight to the full Notifications page (Jared: "notifs at the
+             left and notifs at the top? a bit redundant, just keep the one
+             at the top... make it a pop down from there first") -- it now
+             toggles #notifDropdown open instead, see renderNotifDropdown()/
+             toggleNotifDropdown() in app.js. -->
+        <span class="topbar-icon-wrap">
+          <button class="icon-btn" id="notifBtn" aria-label="Notifications" hidden style="position:relative;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5Z"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+            <span class="notif-badge" id="notifBadge" hidden>0</span>
+          </button>
+          <div class="topbar-dropdown" id="notifDropdown" hidden></div>
+        </span>
+        <!-- Messages icon [v36] -- Jared: "I think it's good if it has its
+             own icon just like in facebook, then the messages pop at the
+             bottom (in PC version, okay), but in mobile, you can make it
+             like messenger." Hidden until signed in, same as the bell.
+             On desktop this toggles #msgDropdown (a list of conversations);
+             on mobile it navigates straight into the full Messages hub --
+             see renderHeaderChrome()'s click-handler wiring in app.js. -->
+        <span class="topbar-icon-wrap">
+          <button class="icon-btn" id="msgTopBtn" aria-label="Messages" hidden style="position:relative;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3C6.5 3 2 6.9 2 11.8c0 2.8 1.5 5.3 3.9 6.9V22l3.6-2c.8.2 1.6.3 2.5.3 5.5 0 10-3.9 10-8.8S17.5 3 12 3Z"/><path d="m7 13.5 3.6-3.8 2.7 2 3.6-3.8"/></svg>
+            <span class="notif-badge" id="msgBadge" hidden>0</span>
+          </button>
+          <div class="topbar-dropdown" id="msgDropdown" hidden></div>
+        </span>
+        <!-- Header avatar [2026-09-09, social redesign] -- Jared: "the
+             iworship app has the user's profile pic at the top, like next
+             to the logo... when it's clicked, the user can view their own
+             profile." Hidden until signed in -- see renderHeaderChrome() in
+             app.js, which fills headerAvatarSlot. -->
+        <button class="header-avatar-btn" id="headerAvatarBtn" aria-label="View your profile" hidden>
+          <span id="headerAvatarSlot"></span>
+        </button>
+      </span>
+    </div>
+  </header>
+
+  <!-- Desktop sidebar nav [2026-09-10] -- Jared: "look at Facebook's PC
+       interface and Mobile interface. They differ. what if you do it like
+       that?" Hidden below the desktop breakpoint (see styles.css's
+       "Desktop navigation redesign" section) -- on a phone, the bottom tab
+       bar above is still the whole story, unchanged. On a wide screen this
+       replaces it entirely (bottom tabs are hidden there) AND absorbs the
+       hamburger drawer's contents, so nothing on desktop is hidden behind
+       a menu the way Facebook's own left rail keeps navigation always
+       visible. The three primary buttons mirror the bottom tabs exactly
+       (same click handlers, see app.js) -- #sidebarExtraSlot is rebuilt
+       live every render() by renderSidebarExtra(), same pattern as the
+       hamburger drawer's own body. -->
+  <nav class="sidebar-nav" id="sidebarNav" aria-label="Main navigation">
+    <div class="sidebar-scroll">
+      <div class="sidebar-section">
+        <button type="button" class="sidebar-item" id="sideHymnalBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c4-2 8-1 8 1v13c0-2-4-3-8-1V5Z"/><path d="M20 5c-4-2-8-1-8 1v13c0-2 4-3 8-1V5Z"/></svg>
+          <span>Hymnal</span>
+        </button>
+        <button type="button" class="sidebar-item" id="sideHostBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span>Host</span>
+        </button>
+        <button type="button" class="sidebar-item" id="sideFellowshipBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-10-9.3C.4 8.4 2 5 5.4 5c2 0 3.4 1.1 4.1 2.2C10.2 6.1 11.6 5 13.6 5 17 5 18.6 8.4 17 11.7 15.5 16.4 12 21 12 21Z"/></svg>
+          <span>Fellowship</span>
+        </button>
+      </div>
+      <div class="sidebar-divider"></div>
+      <div id="sidebarExtraSlot"></div>
+    </div>
+  </nav>
+
+  <main id="main"></main>
+
+  <footer class="appfoot" id="appfoot">iWorship — your congregation's hymnal, chords, and worship planning.</footer>
+
+  <!-- Bottom tab bar [2026-09-10] -- Jared: "I need you to come up with a
+       smoother and better looking way to switch between hymnal mode, host
+       mode, and fellowship mode." A 4th MORE tab replaces the old top-bar
+       hamburger button, opening the exact same drawer (#hamburgerOverlay
+       below) -- see renderBottomTabs()/inFellowshipMode()/inHostMode() in
+       app.js for how the active tab is picked. Hidden on the standalone
+       stage/projector view alongside the topbar/footer (see body.stage-page
+       in styles.css). -->
+  <nav class="bottom-tabs" id="bottomTabs">
+    <button type="button" class="bottom-tab" id="tabHymnalBtn" aria-label="Hymnal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c4-2 8-1 8 1v13c0-2-4-3-8-1V5Z"/><path d="M20 5c-4-2-8-1-8 1v13c0-2 4-3 8-1V5Z"/></svg>
+      <span>HYMNAL</span>
+    </button>
+    <button type="button" class="bottom-tab" id="tabHostBtn" aria-label="Host">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      <span>HOST</span>
+    </button>
+    <button type="button" class="bottom-tab" id="tabFellowshipBtn" aria-label="Fellowship">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-10-9.3C.4 8.4 2 5 5.4 5c2 0 3.4 1.1 4.1 2.2C10.2 6.1 11.6 5 13.6 5 17 5 18.6 8.4 17 11.7 15.5 16.4 12 21 12 21Z"/></svg>
+      <span>FELLOWSHIP</span>
+    </button>
+    <button type="button" class="bottom-tab" id="tabMoreBtn" aria-label="More">
+      <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+      <span>MORE</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Hamburger drawer [2026-09-09] -- a right-side slide-in overlay, filled
+     live by renderHamburgerDrawer() in app.js. Sits outside .app so it
+     overlays everything including the stage/projector view (though the
+     hamburger button itself is hidden there, see body.stage-hide-chrome). -->
+<div class="hamburger-overlay" id="hamburgerOverlay" hidden>
+  <button class="hamburger-scrim" id="hamburgerScrim" aria-label="Close menu"></button>
+  <div class="hamburger-drawer" id="hamburgerDrawer" role="dialog" aria-label="Menu" aria-modal="true">
+    <div id="hamburgerDrawerBody"></div>
+  </div>
+</div>
+
+<!-- Story viewer [2026-09-09] -- a full-screen overlay, filled live by
+     renderStoryViewer() in app.js while state.storyViewerIndex is set. -->
+<div class="story-viewer-overlay" id="storyViewerOverlay" hidden>
+  <div id="storyViewerBody"></div>
+</div>
+
+<!-- Floating chat dock [v36, desktop only] -- Jared: "the messages pop at
+     the bottom (in PC version, okay)". A single Messenger-style popup
+     window, docked bottom-right (mirroring the existing in-session
+     .chat-fab/.chat-floating-panel host chat widget's position, just its
+     own distinct class names since the two can coexist on host/live
+     screens where the host chat widget is also visible). Sits outside
+     .app like the overlays above so it survives every render()'s wholesale
+     rewrite of #main; filled live by renderChatDock() in app.js, which
+     also hides it entirely on mobile widths and on any stage/live/host
+     screen so it never collides with the presenter tools or projector
+     view. -->
+<div class="chat-dock" id="chatDock" hidden></div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+  <span id="toastMsg">Saved</span>
+</div>
+
+<script type="module" src="/src/app.js"></script>
+<script>
+  // Hide the splash the moment the app's first real screen lands in #main
+  // (app.js's very first synchronous render()), rather than on a fixed
+  // timer -- so it's never on screen a moment longer than it needs to be,
+  // whether the app boots instantly or a phone/weak signal makes it slower.
+  // A hard fallback timeout means it can never get stuck showing forever if
+  // something goes wrong.
+  (function(){
+    var splash = document.getElementById('splash');
+    var main = document.getElementById('main');
+    if(!splash || !main) return;
+    var hidden = false;
+    function hideSplash(){
+      if(hidden) return;
+      hidden = true;
+      splash.classList.add('hide');
+      setTimeout(function(){ if(splash.parentNode) splash.parentNode.removeChild(splash); }, 400);
+    }
+    if(main.childNodes.length){ hideSplash(); return; }
+    var mo = new MutationObserver(function(){
+      hideSplash();
+      mo.disconnect();
+    });
+    mo.observe(main, { childList:true });
+    setTimeout(hideSplash, 4000); // safety net
+  })();
+</script>
+</body>
+</html>

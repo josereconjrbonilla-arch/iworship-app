@@ -1,0 +1,8 @@
+# Netlify's CDN does not serve files that live inside a dot-prefixed
+# directory (like .well-known/) even when they're present in the deployed
+# bundle -- a rewrite that targets another path *inside* that same
+# dot-directory doesn't help, since the destination is just as unreachable.
+# The fix: keep the real file at a normal, non-hidden path and rewrite the
+# dot-path request to it. This is what makes Android's
+# /.well-known/assetlinks.json (TWA/App Links verification) actually work.
+/.well-known/assetlinks.json  /assetlinks.json  200!

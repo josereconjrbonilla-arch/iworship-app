@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.firebase/
+service-account.json
+*.log
+.DS_Store
+
+# Historical build/source snapshots (not needed in version control)
+iworship-deploy-v*.zip
+iworship-full-source-v*.zip
+dist.zip

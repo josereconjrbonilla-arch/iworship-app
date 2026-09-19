@@ -1,0 +1,860 @@
+rules_version = '2';
+
+// iWorship data model & access rules.
+//
+// Nine collections:
+//   songs/{songId}   -- the shared hymnal. Everyone can read it (including
+//                        signed-out visitors); only the worship-team
+//                        "editors" allowlist OR someone with monetization
+//                        add-song rights (see below) can add to it.
+//   users/{uid}       -- one profile per signed-in person (display name,
+//                        church name, text size, theme, favorites, and now
+//                        role/churchId/pastorTitle/isBetaTester -- see
+//                        below). That person can always read/write their
+//                        own doc; an admin can also read/write ANY profile
+//                        (see "BETA PHASE" below).
+//   rooms/{code}      -- a live worship session. Readable by anyone (so a
+//                        congregant can join by code, or browse public
+//                        rooms, without signing in) -- but only the
+//                        original host can update or end one, and only
+//                        someone with hosting rights can create one.
+//   rooms/{code}/messages/{msgId}
+//                     -- in-session chat, split by a `channel` field rather
+//                        than separate collections. "everyone" is open to
+//                        anyone in the room, signed in or not (the room
+//                        itself already works that way); "musicians" is
+//                        gated to worship-team editors only (still just the
+//                        legacy allowlist -- the monetization roles don't
+//                        touch this channel yet, see architecture doc).
+//                        Adding another private channel later just needs
+//                        another disjunct below, mirroring "musicians".
+//   editors/{uid}     -- legacy worship-team allowlist, doc-exists-only,
+//                        hand-managed in the console (see below).
+//   admins/{uid}      -- the app's Admins (Jared + one friend), doc-exists-
+//                        only, hand-managed in the console exactly like
+//                        editors/{uid} -- see below.
+//   churches/{churchId} -- a registered church: name, plan, seatLimits,
+//                        hiddenSongIds, gracePeriodDays, billingCadence.
+//                        Readable by anyone; writable only by Admins -- see
+//                        "BETA PHASE" below.
+//   songRequests/{requestId} -- a free-access member's suggestion for a song
+//                        to add, with optional pasted lyrics. Created by the
+//                        submitter, reviewed (approved-and-added, or
+//                        rejected) by a worship-team editor or Admin -- see
+//                        "SONG REQUESTS" below.
+//   sermons/{sermonId} -- a host-built ordered list of preaching slides,
+//                        presented live through the same rooms/{code} live-
+//                        sync mechanism songs use. Readable by anyone (a
+//                        room viewer/projector needs to read whichever one
+//                        a room names by id); writable only by its own
+//                        creator, PLUS a narrow self-service carve-out for
+//                        sharing -- see "SERMONS" below.
+//   directory/{uid}   -- a narrow, publicly-readable mirror of just
+//                        {uid, displayName, churchName} from users/{uid},
+//                        kept in sync by saveProfile(). Exists so any
+//                        signed-in person can search for someone to share
+//                        a sermon with by name/church, without opening up
+//                        read access to full profiles (role/churchId/
+//                        isBetaTester etc stay Admin-only) -- see
+//                        "DIRECTORY" below.
+//   media/{mediaId}   -- Media/AVP [2026-09-06]: a metadata doc describing
+//                        one uploaded/linked media item (an image, a video,
+//                        an ordered image slideshow imported from a
+//                        presentation, or a live embed link) presented the
+//                        same way a sermon is -- via rooms/{code}'s
+//                        currentContentType now also allowing 'media'. The
+//                        actual image/video BYTES live in Cloud Storage
+//                        (storage.rules), not here -- this doc only ever
+//                        holds a title, a type, download URL(s)/storage
+//                        path(s), and (for a slideshow) an ordered slides
+//                        array of {url, storagePath} pairs, or (for an
+//                        embed) the pasted URL + a provider label. Mirrors
+//                        sermons/{sermonId}'s exact access shape (wide-open
+//                        read, creator-only write, the same sharedWithUids
+//                        self-service carve-out) -- see "MEDIA" below.
+//   mediaFolders/{folderId} -- Media Folders [2026-09-06]: a small doc
+//                        holding just a folder name + creator, letting an
+//                        AVP team member organize media/{mediaId} docs into
+//                        folders for prep work outside a live session.
+//                        media/{mediaId} docs point INTO a folder via their
+//                        own folderId field (null/absent = unfiled) --
+//                        nothing here lists its contents, so deleting a
+//                        folder never cascades: see "MEDIA FOLDERS" below
+//                        for how the un-filing actually happens (in the
+//                        app's deleteMediaFolder(), not in these rules).
+//   posts/{postId}    -- Fellowship [2026-09-08]: a public feed post (text
+//                        and/or one image/video). Wide open read, same "no
+//                        data walls" reasoning as songs/rooms/sermons --
+//                        blocking is enforced by each VIEWER's own client
+//                        filtering a blocked author's posts out of their
+//                        feed, not by hiding the post from the world. See
+//                        "FELLOWSHIP" below.
+//   reports/{reportId} -- Fellowship: a report against a post or a profile,
+//                        reviewed by an Admin/beta tester -- same
+//                        pending/resolved shape as songRequests/{id}.
+//   dmThreads/{threadId} -- Fellowship: one thread per PAIR of people ever,
+//                        keyed by a deterministic id (both uids, sorted) so
+//                        there's exactly one thread per pair, never a
+//                        duplicate. Readable/writable only by its two
+//                        participants -- see "FELLOWSHIP" below for how
+//                        blocking is also enforced here at write-time, not
+//                        just client-side.
+//   dmThreads/{threadId}/messages/{msgId} -- one private message.
+//   groupChats/{groupId} -- Fellowship: a named, owner-managed, multi-
+//                        member chat. Readable/writable only by its current
+//                        members; a member may remove only themselves.
+//   groupChats/{groupId}/messages/{msgId} -- one group message.
+//
+// Social redesign [2026-09-09] adds seven more:
+//   likes/{likeId}       -- one doc per (kind, itemId, uid) like, kind
+//                        being 'posts' or 'shorts'; denormalized onto a
+//                        likeCount field on the liked doc.
+//   comments/{commentId} -- flat, filtered by kind+itemId; denormalized
+//                        onto a commentCount field the same way.
+//   follows/{followId}   -- one-directional (Instagram/Twitter-style, not a
+//                        two-sided friend request); denormalized onto
+//                        followerCount/followingCount on directory/{uid}.
+//   notifications/{recipientUid}/items/{itemId} -- written by the actor
+//                        whose action (like/comment/follow/repost)
+//                        triggered it, into the recipient's own inbox.
+//   stories/{storyId}    -- 24h ephemeral photo/video; expiry is enforced
+//                        client-side, not by these rules.
+//   shorts/{shortId}     -- short-form vertical video, its own feed.
+//   users/{uid}/saved/{savedId} -- a private per-user bookmarks list.
+// See "FELLOWSHIP REDESIGN" near the bottom of this file for all seven.
+//
+// "Editor" (worship team member) status is a separate collection,
+// editors/{uid}, that ONLY exists as a document -- its content doesn't
+// matter, just whether the doc is present. It's managed by hand in the
+// Firebase console (Firestore Database -> Data -> editors -> Add document,
+// with the document ID set to that person's uid -- see README.md, "Adding
+// worship team members"), not by the app itself, since the free "Spark"
+// plan has no Cloud Functions to do it any more safely than that. The app
+// mostly never needs to read it directly (it just attempts a write to songs
+// or rooms and shows a friendly toast if that write is rejected) -- except
+// to decide whether to show someone the Musicians chat tab at all, which is
+// why editors/{uid} now allows a person to read (only) their own doc. This
+// legacy allowlist is left completely untouched by everything below --
+// anyone already on it keeps exactly the add-song/hosting access they have
+// today, regardless of the new monetization role system.
+//
+// admins/{uid} -- same doc-exists-only pattern as editors/{uid}, hand-
+// managed in the console. Jared + one friend, added [2026-09-03]. Being an
+// Admin grants full bypass access to every paid capability (see
+// hasFullAccess() below) plus the ability to write directly to churches/{id}
+// and any user's profile -- see "BETA PHASE" immediately below for why that
+// write access exists at all.
+//
+// ============================================================= BETA PHASE
+// [2026-09-03] Jared asked to build the monetization backend for a beta
+// test WITHOUT Cloud Functions (Blaze billing isn't enabled yet). The
+// original plan (see claude/monetization-plan.md, "Infrastructure
+// implications") was for churches/{id} and cross-user profile writes to go
+// through Cloud Functions ONLY, specifically so no client could ever grant
+// itself a paid plan or role. For this beta phase, that gate is relaxed to
+// "any Admin can write directly" instead of "no client can write at all" --
+// Admins are two specific, trusted, hand-added people (Jared + one friend),
+// not the general public, so this is a deliberate, disclosed, and much
+// narrower trust boundary than the original "nobody but a payment-verified
+// Cloud Function" design, not an abandonment of it. Concretely:
+//   - churches/{churchId}: allow write: if isAdmin() -- an Admin registers
+//     a church and sets its plan/seatLimits/hiddenSongIds by hand (through
+//     a new in-app Admin screen) instead of a registerChurchCloud Function.
+//   - users/{uid}: an Admin can also write role/churchId/pastorTitle/
+//     isBetaTester onto ANY user's profile (again via the Admin screen),
+//     replacing what assignRole's Cloud Function would otherwise do.
+// Once Blaze is enabled and functions/ actually deploys, the plan is to
+// tighten these back down (client writes to churches/{id} back to `if
+// false`, users/{uid} cross-profile writes removed) and route everything
+// through the real Cloud Functions + a payment webhook instead -- see
+// claude/architecture-and-decisions.md's "Monetization, phase 3" for that
+// migration note. functions/index.js's scaffolded Cloud Functions still
+// exist and are unaffected by this (they use the Admin SDK, which bypasses
+// these rules entirely) -- they're just not deployed yet.
+//
+// Real enforcement is now live for three things, per Jared's explicit
+// decision to turn this on for everyone right now, not just beta testers:
+//   - Play Mode (viewing chords/transpose) -- UI-only gating (see
+//     canUsePlayMode() in app.js); there's no separate Firestore write to
+//     restrict, since song data (lyrics+chords together) is already fully
+//     public-readable. A determined user could still view chords via
+//     browser dev tools -- an explicitly disclosed "deter casual use, not
+//     bank-grade" tradeoff, the same shape as the existing room-password
+//     hashing tradeoff.
+//   - Adding songs (songs/{songId} create/update).
+//   - Hosting a session (rooms/{code} create).
+// Both of the real Firestore-enforced ones (add-song, hosting) accept
+// EITHER the legacy isEditor() allowlist OR the new monetization role
+// system (canAddSongsRole()/canHostRole() below) OR an Admin OR a beta
+// tester -- so nobody currently on the legacy editors/{uid} allowlist loses
+// anything they have today; the new role system is additive.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isEditor() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/editors/$(request.auth.uid));
+    }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    // The requesting user's OWN profile fields -- never someone else's.
+    // Only ever called after confirming isSignedIn(); returns an empty map
+    // (so .role/.isBetaTester read as null/false) if the profile doc
+    // doesn't exist yet, e.g. mid-onboarding right after first sign-in.
+    function myProfile() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+    }
+    function myRole() {
+      return isSignedIn() ? myProfile().role : null;
+    }
+    function hasFullAccess() {
+      return isAdmin() || (isSignedIn() && myProfile().isBetaTester == true);
+    }
+    function canAddSongsRole() {
+      return hasFullAccess() || myRole() == 'editor' || myRole() == 'individualPremium';
+    }
+    function canHostRole() {
+      return hasFullAccess() ||
+        myRole() == 'editor' || myRole() == 'musicDirector' || myRole() == 'individualPremium';
+    }
+    // Fellowship [2026-09-08] helpers -- see "FELLOWSHIP" below. blockedUidsOf
+    // reads another uid's OWN block list (never mine) so a DM/message write
+    // can check both directions: did I block them, or did they block me.
+    // Safe to call for any uid, signed-in or not (a doc that doesn't exist
+    // yet just has no one blocked).
+    function blockedUidsOf(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        ? get(/databases/$(database)/documents/users/$(uid)).data.get('blockedUids', [])
+        : [];
+    }
+    // Given a 2-element participantUids array, returns whichever uid ISN'T
+    // the caller -- there's no loop construct in rules, but a fixed-size-2
+    // array only ever needs this one ternary.
+    function dmOtherUid(participantUids) {
+      return participantUids[0] == request.auth.uid ? participantUids[1] : participantUids[0];
+    }
+
+    match /songs/{songId} {
+      allow read: if true;
+      allow create, update: if isEditor() || canAddSongsRole();
+      allow delete: if false; // no delete UI in the app; keep the hymnal append-only for now
+    }
+
+    match /users/{uid} {
+      // This same rule also safely covers an Admin *listing* the whole
+      // users collection unfiltered (see watchAllUsers() in
+      // firestore-data-layer.js, which powers the Admin screen's "find by
+      // name" search) -- it depends only on request.auth, never on
+      // resource.data, so Firestore can prove it holds for every document
+      // given a fixed auth context: true for all of them when isAdmin(),
+      // false for all of them otherwise (a non-admin's unfiltered list
+      // query is denied outright, not silently trimmed to just their own
+      // doc).
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+    }
+
+    match /editors/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false; // managed by hand in the console only
+    }
+
+    // Save / Bookmark [2026-09-09, social redesign] -- a private per-user
+    // list of saved posts/shorts, nested under the same users/{uid} doc it
+    // belongs to but never covered by that doc's own owner-or-Admin rule
+    // above (a subcollection needs its own match block regardless). Owner-
+    // only, full stop -- unlike a favorite hymn (public, mirrored to
+    // directory/{uid}) a saved post is explicitly private, closer to a
+    // bookmarks folder than a profile detail.
+    match /users/{uid}/saved/{savedId} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Push notification tokens [2026-09-10] -- one doc per device/browser
+    // that's granted Notification permission, doc id = the FCM registration
+    // token itself (see enablePushNotifications() in
+    // firestore-data-layer.js). Owner-only, same shape as saved/{savedId}
+    // above -- the token is only ever read by the (admin-SDK, rules-
+    // bypassing) sendPushOnNotification Cloud Function, never by another
+    // client.
+    match /users/{uid}/pushTokens/{tokenId} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /admins/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false; // managed by hand in the console only, like editors/{uid}
+    }
+
+    match /rooms/{code} {
+      allow read: if true;
+      allow create: if (isEditor() || canHostRole()) && request.resource.data.hostUid == request.auth.uid;
+      // Co-hosting [2026-09-05]: Jared: "hosts can assign other hosts to
+      // their session and grant controls to one person at a time." The
+      // owner (hostUid) can still do anything, same as before. A co-host
+      // only gets a write in when they're the CURRENT controller
+      // (controllerUid, which the owner alone hands out -- see coHostUids/
+      // controllerUid in createRoom()) -- and even then, only for actually
+      // running the presentation: they may not touch hostUid, coHostUids,
+      // or controllerUid itself, so a controlling co-host can't self-promote
+      // to owner, edit the roster, or refuse to hand control back. There's
+      // still no per-content-field allowlist beyond that (same "wide open"
+      // reasoning as every other room-doc addition -- see the file-level
+      // comment above), since the two fields that actually gate WHO can
+      // write at all are now protected.
+      allow update: if isSignedIn() && (
+        resource.data.hostUid == request.auth.uid ||
+        (
+          resource.data.get('controllerUid', resource.data.hostUid) == request.auth.uid &&
+          request.resource.data.hostUid == resource.data.hostUid &&
+          request.resource.data.get('coHostUids', []) == resource.data.get('coHostUids', []) &&
+          request.resource.data.get('controllerUid', resource.data.hostUid) == resource.data.get('controllerUid', resource.data.hostUid)
+        )
+      );
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+
+      match /messages/{msgId} {
+        allow read: if resource.data.channel == 'everyone' || isEditor();
+        allow create: if request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000 &&
+          (
+            request.resource.data.channel == 'everyone' ||
+            (request.resource.data.channel == 'musicians' && isEditor())
+          );
+        allow update: if false;
+        allow delete: if isEditor(); // lets endRoom() clear a session's chat when it ends
+      }
+    }
+
+    match /churches/{churchId} {
+      allow read: if true;
+      allow write: if isAdmin(); // beta-phase direct write -- see "BETA PHASE" above
+    }
+
+    // ========================================================= SONG REQUESTS
+    // [2026-09-04] The free-access path for someone who can't add songs
+    // directly (see canAddSongsRole() above) to still suggest a hymn: they
+    // submit a title (and optionally paste lyrics), a worship-team editor or
+    // Admin reviews it. Deliberately gated to the legacy isEditor()
+    // allowlist plus hasFullAccess() (Admin or beta tester) -- NOT the
+    // broader canAddSongsRole(), so an individualPremium person (a paid
+    // *personal* plan, not a team-moderation role) doesn't end up reviewing
+    // other congregations' submissions; they can already add songs directly
+    // themselves and have no reason to use this queue. Same reviewer set as
+    // the "musicians" chat channel, which is the closest existing precedent
+    // for "worship team only, not just anyone with add-song rights."
+    match /songRequests/{requestId} {
+      // Two independent read paths, each provable on its own so an
+      // unfiltered or filtered list query is never silently trimmed:
+      //  - resource.data.submittedByUid == request.auth.uid: provable for a
+      //    where('submittedByUid','==',uid) query the same way
+      //    rooms/{code}'s hostUid==uid disjunct already is for
+      //    watchHostRooms(uid) -- see firestore-data-layer.js.
+      //  - isEditor() || hasFullAccess(): depends only on request.auth, so
+      //    provable for the review queue's unfiltered/status-filtered query
+      //    the same way users/{uid}'s isAdmin() disjunct already is for
+      //    watchAllUsers() -- see that rule's comment above.
+      allow read: if isSignedIn() &&
+        (resource.data.submittedByUid == request.auth.uid || isEditor() || hasFullAccess());
+      // Anyone signed in can submit their own request -- never "on behalf
+      // of" someone else -- with basic shape/size validation so a request
+      // can't smuggle in an already-reviewed status or an unbounded lyrics
+      // blob. lyricsRaw is genuinely optional (title-only requests are
+      // allowed, matching the app's "leave blank to just suggest the
+      // title" copy).
+      allow create: if isSignedIn() &&
+        request.resource.data.submittedByUid == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 200 &&
+        (!('lyricsRaw' in request.resource.data) ||
+          (request.resource.data.lyricsRaw is string && request.resource.data.lyricsRaw.size() <= 20000));
+      // Only a reviewer can update -- to set status/reviewedByUid/
+      // reviewedByName/reviewNote/reviewedAt -- and only while still
+      // pending, so a request can't be reviewed twice (no "un-reject" or
+      // "un-approve" path; if that's ever needed, it's a new request).
+      // There's no submitter-side edit UI, so the submitter never needs
+      // write access to their own request past creation.
+      allow update: if isSignedIn() && (isEditor() || hasFullAccess()) && resource.data.status == 'pending';
+      allow delete: if false;
+    }
+
+    // =============================================================== SERMONS
+    // [2026-09-04] A sermon is an ordered list of slides a host builds ahead
+    // of time, then presents live -- reusing the exact same
+    // rooms/{code}.currentSongId/currentSectionIndex live-sync mechanism
+    // above, generalized to currentContentType ('song'|'sermon') +
+    // currentSermonId + currentSlideIndex (no rules change needed for that
+    // part -- rooms/{code}'s update rule already allows the host to patch
+    // any field, not just the original three).
+    match /sermons/{sermonId} {
+      // Wide open on purpose, same as songs/{songId} and rooms/{code} --
+      // unlike songRequests above, there is no list-query read anywhere in
+      // this app for sermons a person doesn't own (no "browse all sermons"
+      // screen exists). A room viewer or the Presenter/Projector tab only
+      // ever reads ONE specific sermon, by the id the room names in
+      // currentSermonId, via watchSermon(id) -- a single-doc get, not a
+      // query -- so this openness is just "know the id, read the doc,"
+      // the same shape as reading a room by its code.
+      allow read: if true;
+      // Only a host-eligible person can create a sermon, and only as
+      // themselves (createdByUid must match) -- mirrors canHostRole() below
+      // rather than canAddSongsRole(), since presenting a sermon is part of
+      // hosting a live session, not a hymnal-editing action. Basic
+      // shape/size validation (title required, a slide-count cap) so this
+      // can't be used to smuggle in an arbitrarily large document.
+      allow create: if isSignedIn() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        (isEditor() || canHostRole()) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 200 &&
+        request.resource.data.slides is list && request.resource.data.slides.size() <= 100;
+      // Update: the sermon's own creator can change anything (mirrors
+      // rooms/{code}'s hostUid-based ownership) -- OR, [2026-09-04] for
+      // SHARING, any other signed-in person may update the doc if
+      // sharedWithUids is the ONLY field being touched. That second
+      // disjunct is what lets a recipient add or remove THEMSELVES via a
+      // ?sermon=<id> link (see shareSermon()/unshareSermon() in
+      // firestore-data-layer.js) without becoming able to touch the
+      // sermon's actual content (title/speaker/slides). It doesn't
+      // separately prove the array only gained/lost the caller's own uid
+      // rather than someone else's -- a deliberately accepted, low-stakes
+      // gap given sermons are already fully public-readable anyway (see
+      // "read" above), the same "deter casual misuse, not bank-grade"
+      // tradeoff already documented for Play Mode gating near the top of
+      // this file. The owner's own share-panel action (adding someone
+      // ELSE's uid) also qualifies under this same disjunct, which is
+      // fine -- it's a strict subset of what the first disjunct already
+      // lets them do.
+      allow update: if isSignedIn() && (
+        resource.data.createdByUid == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt'])
+      );
+      // Delete: creator, or an Admin/beta tester cleaning up on their
+      // behalf (same hasFullAccess() bypass every other collection here
+      // gives Admins).
+      allow delete: if isSignedIn() && (resource.data.createdByUid == request.auth.uid || hasFullAccess());
+    }
+
+    // ================================================================ MEDIA
+    // [2026-09-06] See the header comment on media/{mediaId} above. Deliberately
+    // as close to a line-for-line copy of sermons/{sermonId} just above as the
+    // shape allows -- same reasoning throughout, just for a media item instead
+    // of a sermon's slide list. The actual file bytes are NOT covered here --
+    // see storage.rules for who can upload/read/delete the Cloud Storage
+    // objects a media doc's url/storagePath fields point at.
+    match /media/{mediaId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        (isEditor() || canHostRole()) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 200 &&
+        request.resource.data.type in ['image', 'video', 'slideshow', 'embed'] &&
+        (!('slides' in request.resource.data) || (request.resource.data.slides is list && request.resource.data.slides.size() <= 60));
+      // Update: creator can change anything, OR (same SHARING carve-out as
+      // sermons) any other signed-in person may touch ONLY sharedWithUids --
+      // e.g. adding themselves via a future share link, or the owner sharing
+      // with someone found in the directory search.
+      allow update: if isSignedIn() && (
+        resource.data.createdByUid == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt'])
+      );
+      allow delete: if isSignedIn() && (resource.data.createdByUid == request.auth.uid || hasFullAccess());
+    }
+
+    // ======================================================= MEDIA FOLDERS
+    // [2026-09-06] See the header comment on mediaFolders/{folderId} above.
+    // Much smaller than MEDIA just above -- there's no sharedWithUids here
+    // (folders are a personal/team prep tool, not a presented item, so
+    // there's nothing to share) and no slides/type shape to validate, just
+    // a name. Deleting a folder does NOT delete the media inside it -- the
+    // app un-files every affected media/{mediaId} doc (sets folderId to
+    // null) as part of deleteMediaFolder(), which is allowed under MEDIA's
+    // own update rule above (the creator can change anything on their doc).
+    match /mediaFolders/{folderId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        (isEditor() || canHostRole()) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100;
+      // Update: creator only (e.g. renaming) -- no sharing carve-out needed.
+      allow update: if isSignedIn() && resource.data.createdByUid == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.createdByUid == request.auth.uid || hasFullAccess());
+    }
+
+    // ============================================================= DIRECTORY
+    // [2026-09-04] See the header comment on directory/{uid} above. Every
+    // field here already appears elsewhere in the app in a context any
+    // signed-in (or even signed-out, for churchName via room chat) person
+    // can already see -- a display name shows on every chat message and
+    // song-request submission, a church name shows the same way -- so this
+    // collection doesn't expose anything new, it just makes the existing
+    // "public-within-the-app" name/church pair searchable instead of
+    // requiring someone already have the Account ID pasted to them.
+    match /directory/{uid} {
+      allow read: if true;
+      // Only the owning person can write their own entry, and only ever
+      // the fields listed below -- mirrors what saveProfile() actually
+      // sends (see firestore-data-layer.js). No delete path; an empty
+      // displayName just makes someone effectively unsearchable, same as
+      // never having set one.
+      //
+      // [Bug found 2026-09-09, fixed v28] saveProfile() only ever sends the
+      // fields actually touched by a given call -- a photo-only save sends
+      // just {uid, photoURL, updatedAt}, no displayName/churchName at all.
+      // For anyone who ALREADY has a directory doc (has saved a display
+      // name at least once before), Firestore's rule evaluation correctly
+      // simulates the post-merge document, so displayName/churchName carry
+      // over from the existing doc and this rule always saw them. But for
+      // someone whose very FIRST-EVER write to this collection is a
+      // photo/bio/favorites-only save (e.g. uploading a profile photo
+      // before ever completing the "Almost There" name step, or a link
+      // straight into My Profile) -- this is a `create`, not an `update`,
+      // and a create's resulting document is exactly the fields given, no
+      // merge partner to fall back on. `request.resource.data.displayName`
+      // then references a key that doesn't exist in the map at all, which
+      // throws during rule evaluation -- and same as the dmThreads
+      // null-resource bug below, Firestore treats an evaluation error as
+      // the rule failing (denying the write), surfacing as a bare
+      // `permission-denied` with no further detail. Fixed with `.get(key,
+      // default)`, the same pattern `rooms/{code}`'s co-hosting rule above
+      // already uses for an optional field -- a missing displayName/
+      // churchName now reads as '' instead of throwing, and every existing
+      // size-limit/type check still applies to whatever value that is.
+      allow create, update: if isSignedIn() && request.auth.uid == uid &&
+        request.resource.data.uid == uid &&
+        request.resource.data.get('displayName', '') is string && request.resource.data.get('displayName', '').size() <= 200 &&
+        request.resource.data.get('churchName', '') is string && request.resource.data.get('churchName', '').size() <= 200 &&
+        // photoURL [2026-09-08, Fellowship] -- optional; either absent, an
+        // explicit null (no photo), or a real download URL string.
+        (!('photoURL' in request.resource.data) || request.resource.data.photoURL == null ||
+          (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 2000)) &&
+        // bio + favorites [2026-09-08, Fellowship profile page] -- a public
+        // profile page needs both visible cross-church (see saveProfile()'s
+        // comment for why these two specifically graduate from
+        // users/{uid}-private to directory-public); both optional/absent
+        // for anyone who hasn't touched their profile page yet.
+        (!('bio' in request.resource.data) || (request.resource.data.bio is string && request.resource.data.bio.size() <= 500)) &&
+        (!('favorites' in request.resource.data) || (request.resource.data.favorites is list && request.resource.data.favorites.size() <= 500)) &&
+        // followerCount/followingCount [2026-09-09, social redesign] --
+        // optional numeric fields; see the second `allow update` just below
+        // for the (much more common) cross-user followerCount bump.
+        (!('followerCount' in request.resource.data) || request.resource.data.followerCount is int) &&
+        (!('followingCount' in request.resource.data) || request.resource.data.followingCount is int);
+      // Follow system [2026-09-09]: followerCount lives on the TARGET's
+      // directory doc, bumped by whichever OTHER signed-in person just
+      // followed/unfollowed them (see followUser()/unfollowUser()) -- a
+      // narrow, single-field carve-out, same "deter casual misuse, not
+      // bank-grade" shape as posts/{postId}'s counter update above (can't
+      // prove it moved by exactly +-1 without a live read to diff against).
+      allow update: if isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followerCount']) &&
+        request.resource.data.followerCount is int;
+      allow delete: if false;
+    }
+
+    // ============================================================ FELLOWSHIP
+    // [2026-09-08] Jared: "add something like a social media in here as
+    // well... profile with social details... post anything, plain text to
+    // videos and images... a bio... profile pics... DMs... group chats."
+    // Confirmed cross-church (same "no data walls" design as the hymnal
+    // itself) and confirmed to include block/report from day one, not as a
+    // later add-on. Profile additions themselves (bio/photoURL/
+    // photoStoragePath/blockedUids) need no rules change on users/{uid} --
+    // they're just more fields there, already covered by that match block's
+    // existing "owner or Admin" read/write rule above. bio and favorites
+    // ALSO get mirrored into directory/{uid} (see that match block just
+    // above and saveProfile()'s comment) so a public profile page can show
+    // them cross-church without relaxing users/{uid}'s private-by-default
+    // read rule -- blockedUids in particular must never become publicly
+    // readable that way.
+
+    match /posts/{postId} {
+      // Wide open read, same reasoning as songs/rooms/sermons -- see the
+      // header comment on posts/{postId} above for why blocking doesn't
+      // live here.
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.get('text', '') is string &&
+        request.resource.data.get('text', '').size() <= 2000 &&
+        // A post needs SOME content -- real text, an attached image/video,
+        // or [2026-09-09, social redesign] being a repost of someone else's
+        // post (repostOf is a client-supplied snapshot, not a live
+        // reference -- see repostPost() in both data layers).
+        (request.resource.data.get('text', '').size() > 0 ||
+          request.resource.data.get('mediaUrl', null) != null ||
+          request.resource.data.get('repostOf', null) != null);
+      // No content-edit UI -- delete and repost is still the simplest
+      // moderation story (matches songs/{songId}'s own "no update path for
+      // the thing that would need re-review" shape). [2026-09-09, social
+      // redesign] The ONE thing that IS now updatable is the three
+      // denormalized engagement counters, and by design any signed-in
+      // person may bump them (not just the author) -- liking/commenting on
+      // someone else's post has to touch THEIR doc's counter, the same
+      // reasoning as directory/{uid}'s followerCount carve-out below. This
+      // can't validate the counter only moved by exactly +-1 (no "old value
+      // + 1 == new value" check across a live doc read is available here
+      // any more cheaply than that), so a bad actor could in principle set
+      // an arbitrary count -- an explicitly accepted, low-stakes "deter
+      // casual misuse, not bank-grade" tradeoff, the same shape already
+      // documented for Play Mode gating and sermons' sharedWithUids carve-
+      // out elsewhere in this file.
+      allow update: if isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount', 'commentCount', 'repostCount']);
+      allow delete: if isSignedIn() && (resource.data.authorUid == request.auth.uid || hasFullAccess());
+    }
+
+    match /reports/{reportId} {
+      // Same list-safety shape as songRequests/{requestId} above: a
+      // reporter's own-report read is provable per-doc
+      // (reportedByUid==auth.uid); an Admin/beta tester's queue read is
+      // provable unfiltered (depends only on request.auth).
+      allow read: if isSignedIn() &&
+        (resource.data.reportedByUid == request.auth.uid || hasFullAccess());
+      allow create: if isSignedIn() &&
+        request.resource.data.reportedByUid == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.targetType in ['post', 'profile'] &&
+        request.resource.data.targetId is string && request.resource.data.targetId.size() > 0 &&
+        request.resource.data.reason is string &&
+        request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500;
+      // Only a reviewer resolves -- no "un-resolve," mirrors songRequests'
+      // one-way pending->reviewed shape.
+      allow update: if isSignedIn() && hasFullAccess() && resource.data.status == 'pending';
+      allow delete: if false;
+    }
+
+    match /dmThreads/{threadId} {
+      // [Bug found 2026-09-09, fixed v26] ensureDmThread() (both data
+      // layers) always does a getDoc() FIRST to check whether a thread for
+      // this pair already exists, before conditionally creating one -- the
+      // very first time two real people message each other, that doc
+      // genuinely doesn't exist yet, so `resource` is null for that read.
+      // The original rule unconditionally dereferenced
+      // `resource.data.participantUids`, which throws on a null resource --
+      // Firestore treats that as the rule failing closed, so the READ
+      // itself came back permission-denied before the code ever reached the
+      // create step. `resource == null` short-circuits that case: there's
+      // nothing to leak from a thread that doesn't exist, and the second
+      // disjunct still requires actual participant membership once one
+      // does. This is why the very first real-account DM ever attempted
+      // failed even with correct rules already published -- every
+      // subsequent message in an already-existing thread was never at risk
+      // (an existing doc always has a real resource).
+      allow read: if isSignedIn() && (resource == null || request.auth.uid in resource.data.participantUids);
+      // Exactly two participants, the caller is one of them, and NEITHER
+      // direction of blocking applies -- a blocked (or blocking) person
+      // can't even open the thread in the first place, not just send into
+      // it (see the messages subcollection below for the same check
+      // re-applied on every message, in case someone blocks mid-
+      // conversation after a thread already exists).
+      allow create: if isSignedIn() &&
+        request.resource.data.participantUids is list &&
+        request.resource.data.participantUids.size() == 2 &&
+        request.auth.uid in request.resource.data.participantUids &&
+        !(dmOtherUid(request.resource.data.participantUids) in blockedUidsOf(request.auth.uid)) &&
+        !(request.auth.uid in blockedUidsOf(dmOtherUid(request.resource.data.participantUids)));
+      // Either participant may update lastMessageText/lastMessageAt (see
+      // sendDmMessage() in both data layers) -- there's no "leave a DM"
+      // concept the way there is for a group, so nothing narrower is needed.
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+      allow delete: if false;
+
+      match /messages/{msgId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantUids;
+        allow create: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantUids &&
+          request.resource.data.senderUid == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 2000 &&
+          !(dmOtherUid(get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantUids) in blockedUidsOf(request.auth.uid)) &&
+          !(request.auth.uid in blockedUidsOf(dmOtherUid(get(/databases/$(database)/documents/dmThreads/$(threadId)).data.participantUids)));
+        allow update, delete: if false;
+      }
+    }
+
+    match /groupChats/{groupId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.auth.uid in request.resource.data.memberUids &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100 &&
+        request.resource.data.memberUids is list && request.resource.data.memberUids.size() <= 50;
+      // The owner can change anything (rename, add/remove members) -- OR
+      // any CURRENT member may update ONLY memberUids, and only by removing
+      // themselves (never adding/removing anyone else) -- a self-service
+      // "leave group" carve-out mirroring sermons/media's sharedWithUids
+      // self-removal pattern above.
+      allow update: if isSignedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        (
+          request.auth.uid in resource.data.memberUids &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
+          resource.data.memberUids.removeAll([request.auth.uid]) == request.resource.data.memberUids
+        ) ||
+        (
+          // Messages [v36]: sendGroupChatMessage()/markGroupChatRead() (both
+          // data layers) let any CURRENT member merge-write lastMessageText/
+          // updatedAt plus ONLY their own readAt.<uid> entry -- never
+          // anyone else's -- same self-service idea as the memberUids
+          // self-removal carve-out just above, just one map level deeper
+          // (readAt.diff().affectedKeys() instead of a plain top-level
+          // field list) since it's their own entry inside a shared map
+          // field rather than a whole top-level field. Before this
+          // existed, a non-owner member's sendGroupChatMessage() could add
+          // the message itself fine but this follow-up parent-doc update
+          // always failed permission-denied (only memberUids/updatedAt
+          // were ever allowed for non-owners, and only in the exact
+          // self-removal shape) -- caught while wiring up the unread badge.
+          request.auth.uid in resource.data.memberUids &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt', 'updatedAt', 'lastMessageText']) &&
+          resource.data.get('readAt', {}).diff(request.resource.data.get('readAt', {})).affectedKeys().hasOnly([request.auth.uid])
+        )
+      );
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+
+      match /messages/{msgId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/groupChats/$(groupId)).data.memberUids;
+        allow create: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/groupChats/$(groupId)).data.memberUids &&
+          request.resource.data.senderUid == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 2000;
+        allow update, delete: if false;
+      }
+    }
+
+    // ================================================ FELLOWSHIP REDESIGN
+    // [2026-09-09] Jared: "make the fellowship part look like an actual
+    // social media feed... likes, comments, share/repost, save/bookmark...
+    // a Shorts video feed... notifications, explore/discover, stories...
+    // search for people and interact just like facebook." See
+    // claude/fellowship-plan.md for the full writeup of every judgment call
+    // (follow is one-directional, not a two-sided friend request; trending
+    // is computed client-side from the existing feed rather than a new
+    // query; stories expire client-side, same as everywhere else in this
+    // app avoids Cloud Functions).
+
+    // likes/{likeId} -- one doc per (kind, itemId, uid), id deterministic
+    // so "like" is idempotent and "unlike" is just deleting that one doc.
+    // kind is 'posts' or 'shorts' -- one shared collection for both rather
+    // than four (posts/shorts x likes/comments), so app.js's action bar can
+    // use the exact same functions regardless of which feed it's on.
+    match /likes/{likeId} {
+      // Read is scoped to "my own likes" -- provable for a
+      // where('uid','==',me) query the same way every other owner-filtered
+      // list query in this app already is (see watchHostRooms() etc).
+      // There's no "who else liked this" list screen, so nothing wider is
+      // needed; the actual like COUNT is the denormalized likeCount field
+      // on the post/short doc itself, publicly readable via that doc's own
+      // wide-open read rule.
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.kind in ['posts', 'shorts'] &&
+        request.resource.data.itemId is string &&
+        likeId == (request.resource.data.kind + '_' + request.resource.data.itemId + '_' + request.auth.uid);
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // comments/{commentId} -- flat collection (not a subcollection) so a
+    // single where(kind==, itemId==) query reads a post's or a short's
+    // comments the same way; wide-open read to match the post/short it's
+    // attached to (a comment is exactly as public as its parent).
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.kind in ['posts', 'shorts'] &&
+        request.resource.data.itemId is string &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000;
+      allow update: if false;
+      // The commenter can delete their own comment, or an Admin/beta tester
+      // can moderate one away -- deliberately NOT the post's own author (an
+      // author removing someone else's comment they merely dislike isn't a
+      // feature that was asked for; REPORT + a real Admin is the same
+      // moderation path every other piece of content in this app already
+      // uses).
+      allow delete: if isSignedIn() && (resource.data.authorUid == request.auth.uid || hasFullAccess());
+    }
+
+    // follows/{followId} -- one-directional, id = "<followerUid>_<targetUid>"
+    // so following someone twice is a no-op rather than a duplicate row, and
+    // unfollowing is just deleting this one doc. Wide-open read (same "no
+    // data walls" reasoning as everything else) since follower/following
+    // lists and counts are public, Facebook/Instagram-style.
+    match /follows/{followId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.followerUid == request.auth.uid &&
+        request.resource.data.targetUid is string &&
+        request.resource.data.targetUid != request.auth.uid &&
+        followId == (request.resource.data.followerUid + '_' + request.resource.data.targetUid);
+      allow delete: if isSignedIn() && resource.data.followerUid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // notifications/{recipientUid}/items/{itemId} -- written by the ACTOR
+    // whose like/comment/follow/repost/DM triggered it, INTO the
+    // recipient's own subcollection -- the inverse of every other
+    // ownership rule in this file (the writer isn't the owner of the path
+    // they're writing into, on purpose). Only the recipient can ever read
+    // their own inbox or mark something read; the actor gets no read
+    // access to what they just wrote, matching "you fired the
+    // notification, you don't get to watch it arrive."
+    match /notifications/{recipientUid}/items/{itemId} {
+      allow read, update, delete: if isSignedIn() && request.auth.uid == recipientUid;
+      allow create: if isSignedIn() &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.type is string &&
+        request.resource.data.read == false;
+    }
+
+    // stories/{storyId} -- 24h ephemeral photo/video, wide-open read/cross-
+    // church like posts/{postId}; the 24h expiry is enforced entirely
+    // client-side (watchActiveStories() filters by age), not by this rule,
+    // same "no Cloud Function to sweep old docs" reasoning as the rest of
+    // this app -- an expired story's doc quietly outlives its own display
+    // window until its author's next deleteExpiredStoriesFor() cleanup call.
+    match /stories/{storyId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.mediaUrl is string && request.resource.data.mediaUrl.size() > 0;
+      allow update: if false;
+      allow delete: if isSignedIn() && (resource.data.authorUid == request.auth.uid || hasFullAccess());
+    }
+
+    // shorts/{shortId} -- short-form vertical video, its own feed separate
+    // from posts/{postId} (Jared: "like it'll be another interface on its
+    // own"). Same wide-open-read/creator-delete shape as posts, plus the
+    // same counters-only update carve-out.
+    match /shorts/{shortId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.videoUrl is string && request.resource.data.videoUrl.size() > 0 &&
+        request.resource.data.get('caption', '').size() <= 500;
+      allow update: if isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount', 'commentCount']);
+      allow delete: if isSignedIn() && (resource.data.authorUid == request.auth.uid || hasFullAccess());
+    }
+
+    // Everything else is denied by default.
+  }
+}

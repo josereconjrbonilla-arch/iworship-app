@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "hillsidegrace.jaredtech.iworship",
+        "sha256_cert_fingerprints": ["A1:EB:B5:1F:58:3C:28:1D:EB:17:C4:0F:98:73:97:1F:0F:58:AA:D7:FC:51:4C:9A:A8:69:BD:08:9D:E1:07:4C"]
+      }
+    }]

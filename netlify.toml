@@ -1,0 +1,66 @@
+# Netlify build config.
+#
+# [2026-09-10] Jared's Netlify deploy started failing at the "secrets
+# scanning" stage, not the actual Vite build -- Netlify's scanner flags any
+# string in the build output that LOOKS like a secret (an "AIzaSy..."
+# pattern in particular), and src/firebase-config.js's apiKey matches that
+# pattern exactly.
+#
+# This is a false positive, not a real leak: Firebase's own Web SDK config
+# (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId)
+# is DESIGNED to ship inside the client bundle -- it identifies which
+# Firebase project to talk to, nothing more. It is not a credential in the
+# usual sense; the actual access control lives entirely in firestore.rules
+# and storage.rules (see those files, and claude/architecture-and-
+# decisions.md), which is exactly why this whole project pastes those rules
+# straight into the Firebase console rather than hiding any key. Google's
+# own Firebase documentation says explicitly that this config is safe to
+# expose publicly. This repo has never held any real server-side secret
+# (no service account key, no payment/API credential) -- there is nothing
+# here secrets scanning is actually protecting, so it's disabled outright
+# rather than narrowly allowlisting one value.
+[build.environment]
+  SECRETS_SCAN_SMART_DETECTION_ENABLED = "false"
+
+# Cache headers [2026-09-17] -- Jared: "the app is still a bit slow. Cache
+# saving can really fix this." v42 (see claude/architecture-and-decisions.md)
+# already fixed one real serial-load bug and added a Bible-text preloader,
+# but never actually set any Cache-Control headers -- Netlify's own default
+# for static files is a short, safe-but-unremarkable cache window, so even
+# a REPEAT visit was re-validating every hashed JS/CSS file with the server
+# on every load (a real network round trip, on top of whatever the service
+# worker's own precache was doing) instead of trusting the browser's local
+# copy outright.
+#
+# Every file under /assets/ is Vite's own content-hashed build output
+# (index-<hash>.js, index-<hash>.css, etc, per vite.config.js) -- the
+# filename itself changes the instant the content does, so it is ALWAYS
+# safe to tell the browser (and any CDN in front of it) to cache one
+# forever and never even ask the server if it changed. This is a standard,
+# well-established pattern for hashed build output, not something that
+# needs its own before/after measurement the way v42's architectural fix
+# did -- there's no real tradeoff here to weigh.
+#
+# index.html and sw.js are the deliberate opposite: index.html is what
+# REFERENCES the current set of hashed asset filenames, and sw.js is the
+# service worker itself (see src/sw.js and app.js's registerSW() call,
+# which drives the "UPDATE NOW" banner) -- both need to be re-checked with
+# the server on every visit, or a returning visitor could get stuck on an
+# old index.html pointing at assets that don't exist in this deploy anymore
+# (or never see a new version's update banner at all). must-revalidate
+# keeps them at effectively zero staleness without disabling caching
+# outright.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

@@ -1,0 +1,1900 @@
+
+  /* ============ TOKENS ============ */
+  :root{
+    --ground:#F6EFDD;
+    --surface:#FFFBF2;
+    --surface-2:#EFE4C8;
+    --ink:#2A1F16;
+    --ink-soft:#5B4C3B;
+    --border:#D9C9A8;
+    --wine:#6B1220;
+    --wine-ink:#4A0C17;
+    --wine-tint:#F3DEE0;
+    --gold:#9C7A28;
+    --gold-strong:#5E4614;
+    --gold-tint:#F1E3BE;
+    --pine:#2F5233;
+    --pine-tint:#DCE8DC;
+    --focus:#1E63B8;
+    --shadow: 0 1px 2px rgba(42,31,22,.06), 0 6px 20px rgba(42,31,22,.10);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#1B1510;
+      --surface:#241C15;
+      --surface-2:#2E2419;
+      --ink:#F1E7D0;
+      --ink-soft:#C9B99A;
+      --border:#463A29;
+      --wine:#FAA9B6;
+      --wine-ink:#F0A2AE;
+      --wine-tint:#3A1B21;
+      --gold:#E1BD73;
+      --gold-strong:#F0D08F;
+      --gold-tint:#3A3018;
+      --pine:#7CB088;
+      --pine-tint:#1E2E22;
+      --focus:#7FB2F0;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#1B1510;
+    --surface:#241C15;
+    --surface-2:#2E2419;
+    --ink:#F1E7D0;
+    --ink-soft:#C9B99A;
+    --border:#463A29;
+    --wine:#D9576B;
+    --wine-ink:#F0A2AE;
+    --wine-tint:#3A1B21;
+    --gold:#E1BD73;
+    --gold-strong:#F0D08F;
+    --gold-tint:#3A3018;
+    --pine:#7CB088;
+    --pine-tint:#1E2E22;
+    --focus:#7FB2F0;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.45);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:'Atkinson Hyperlegible', system-ui, -apple-system, Segoe UI, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{
+    font-family:'EB Garamond', Georgia, 'Times New Roman', serif;
+    font-weight:600;
+    text-wrap:balance;
+    margin:0;
+  }
+  button{font-family:inherit;}
+  a{color:inherit;}
+  ::selection{background:var(--gold-tint);}
+  :focus-visible{outline:3px solid var(--focus); outline-offset:2px; border-radius:6px;}
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;}
+  }
+
+  .uc{ text-transform:uppercase; letter-spacing:.08em; }
+
+  /* ============ LAYOUT SHELL ============ */
+  .app{ min-height:100dvh; display:flex; flex-direction:column; }
+
+  header.topbar{
+    position:sticky; top:0; z-index:20;
+    background:var(--wine);
+    color:var(--gold-tint);
+    box-shadow:var(--shadow);
+  }
+  .topbar-inner{
+    max-width:920px; margin:0 auto;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 20px;
+    gap:12px;
+  }
+  .brand{ display:flex; align-items:center; gap:12px; background:none; border:none; cursor:pointer; padding:4px; color:inherit; min-width:0; }
+  .brand svg{ width:34px; height:26px; flex:none; }
+  /* min-width:0 lets this flex child actually shrink below its text's natural
+     width instead of forcing the row wider than the viewport -- a plain flex
+     item's default min-width is `auto` (its content size), which is exactly
+     what was pushing the icon cluster (and the hamburger button with it)
+     past the right edge of a phone screen [reported 2026-09-09, fixed v24]. */
+  .brand-text{ display:flex; flex-direction:column; align-items:flex-start; min-width:0; }
+  .brand-name, .brand-tag{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .brand-name{ font-family:'EB Garamond',serif; font-weight:700; font-size:1.5rem; letter-spacing:.06em; }
+  .brand-tag{ font-size:.68rem; letter-spacing:.16em; opacity:.8; }
+  .icon-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:52px; height:52px; border-radius:14px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.25);
+    color:inherit; cursor:pointer;
+    flex:none; /* never let a tap target get squeezed narrower than this -- see note above */
+  }
+  .icon-btn:hover{ background:rgba(255,255,255,.16); }
+  .icon-btn svg{ width:24px; height:24px; }
+  /* The icon cluster (bell/home/theme/hamburger) never shrinks -- the BRAND
+     (logo+title) is what gives way first, via the ellipsis rule above, so
+     every icon keeps its full tap target no matter how narrow the screen. */
+  .topbar-icons{ display:flex; align-items:center; gap:10px; flex:none; }
+
+  /* Bottom tab bar [2026-09-10] -- Jared: "I need you to come up with a
+     smoother and better looking way to switch between hymnal mode, host
+     mode, and fellowship mode." Persistent, Instagram-style 4-tab bar
+     (Hymnal / Host / Fellowship / More) -- see renderBottomTabs() in app.js
+     for how the active tab is picked, and index.html for the markup (lives
+     outside #main so it survives every render() untouched). --bottom-tabs-h
+     is a single source of truth other rules below (main's own padding, the
+     toast, the update banner) subtract against so nothing ends up hidden
+     behind the bar or floating awkwardly above it. */
+  :root{ --bottom-tabs-h: 62px; }
+  .bottom-tabs{
+    position:fixed; left:0; right:0; bottom:0; z-index:40;
+    display:flex; background:var(--surface); border-top:1px solid var(--border);
+    box-shadow:0 -2px 10px rgba(0,0,0,.06);
+    height:var(--bottom-tabs-h);
+    /* iPhone home-indicator clearance -- 0 on every device without a notch. */
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .bottom-tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3px; background:none; border:none; cursor:pointer; color:var(--ink-soft);
+    padding:6px 4px;
+  }
+  .bottom-tab svg{ width:23px; height:23px; }
+  .bottom-tab span{ font-size:.62rem; font-weight:700; letter-spacing:.06em; }
+  .bottom-tab-active{ color:var(--wine); }
+  /* Hidden on the standalone stage/projector view, same as the topbar/footer
+     -- a live presentation has no business showing app nav. */
+  body.stage-page .bottom-tabs,
+  body.stage-hide-chrome .bottom-tabs{ display:none; }
+
+  main{
+    flex:1; max-width:920px; width:100%; margin:0 auto;
+    padding:22px 20px calc(80px + var(--bottom-tabs-h));
+  }
+  /* The stage/projector view has no bottom tab bar (see above), so it
+     shouldn't reserve space for one either. */
+  body.stage-page main{ padding-bottom:22px; }
+
+  .proto-badge{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--gold-tint); color:var(--gold-strong);
+    border:1px solid var(--border);
+    padding:6px 14px; border-radius:999px;
+    font-size:.72rem; font-weight:700; letter-spacing:.1em;
+    margin-bottom:18px;
+  }
+  .proto-badge svg{ width:14px; height:14px; }
+
+  /* ============ LANDING ============ */
+  .landing-hero{ text-align:center; padding:18px 6px 6px; }
+  .landing-greeting{ font-size:2.1rem; }
+  .landing-sub{ color:var(--ink-soft); margin-top:10px; font-size:1.08rem; max-width:52ch; margin-left:auto; margin-right:auto; }
+  .switch-account{ background:none; border:none; color:var(--wine); font-weight:700; font-size:.85rem; cursor:pointer; margin-top:10px; padding:8px; }
+
+  .verse-card{
+    position:relative; background:var(--surface); border:1px solid var(--border); border-radius:22px;
+    padding:36px 30px; margin:26px 0; box-shadow:var(--shadow); text-align:center;
+  }
+  .verse-eyebrow{ font-size:.72rem; font-weight:700; letter-spacing:.14em; color:var(--gold-strong); margin-bottom:14px; }
+  .verse-text{ font-family:'EB Garamond',serif; font-style:italic; font-weight:500; font-size:1.5rem; line-height:1.6; color:var(--ink); max-width:56ch; margin:0 auto; }
+  .verse-ref{ margin-top:16px; font-weight:700; letter-spacing:.06em; color:var(--wine); font-size:1.02rem; }
+  .verse-tag{ display:inline-block; margin-top:12px; }
+
+  .signin-card{ background:var(--wine-tint); border:1px solid var(--border); border-radius:20px; padding:24px; margin-bottom:24px; }
+  .signin-card h3{ font-size:1.2rem; margin-bottom:6px; }
+  .signin-card p{ margin:0 0 16px; color:var(--ink-soft); }
+  .signin-card .action-row{ margin-top:0; }
+  .btn[disabled]{ opacity:.55; cursor:not-allowed; }
+  .quick-links{ display:flex; flex-wrap:wrap; gap:12px; margin-bottom:8px; }
+  .quick-links .btn{ flex:1 1 auto; }
+
+  /* ============ WORSHIP SESSIONS ============ */
+  .session-card{ background:var(--surface-2); border:1px solid var(--border); border-radius:20px; padding:24px; margin-bottom:24px; }
+  .session-card h3{ font-size:1.2rem; margin-bottom:6px; }
+  .session-card p{ margin:0 0 16px; color:var(--ink-soft); }
+  .session-choice-row{ display:flex; flex-wrap:wrap; gap:12px; }
+  .session-choice-row .btn{ flex:1 1 220px; }
+  .toggle-row{ display:flex; gap:10px; margin-bottom:18px; }
+  .toggle-row button{
+    flex:1; padding:16px; border-radius:14px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink); font-weight:700; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px; min-height:56px;
+  }
+  .toggle-row button.active{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  .toggle-row button svg{ width:20px; height:20px; }
+
+  .plan-card{ border:1px solid var(--border); }
+  .plan-price{ font-family:'EB Garamond',serif; font-weight:700; font-size:1.7rem; color:var(--wine); margin:0 0 16px; }
+  .plan-feature-list{ list-style:none; padding:0; margin:0; }
+  .plan-feature-list li{ padding:6px 0 6px 30px; position:relative; color:var(--ink); }
+  .plan-feature-list li::before{
+    content:'\2713'; position:absolute; left:0; top:6px; color:var(--pine); font-weight:700;
+  }
+  .plan-feature-excluded{ margin-top:8px; }
+  .plan-feature-excluded li{ color:var(--ink-soft); }
+  .plan-feature-excluded li::before{ content:'\2715'; color:var(--ink-soft); }
+
+  .code-display{
+    text-align:center; background:var(--wine); color:var(--gold-tint); border-radius:18px;
+    padding:20px; margin-bottom:22px;
+  }
+  .code-display .code{ font-family:'EB Garamond',serif; font-weight:700; font-size:2.4rem; letter-spacing:.28em; }
+  .code-display .code-label{ font-size:.72rem; font-weight:700; letter-spacing:.12em; opacity:.85; }
+
+  .live-badge{
+    display:inline-flex; align-items:center; gap:8px; background:var(--wine); color:#fff;
+    padding:6px 14px; border-radius:999px; font-size:.78rem; font-weight:700; letter-spacing:.1em;
+  }
+  .live-dot{ width:9px; height:9px; border-radius:50%; background:#fff; }
+
+  .slide-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:24px;
+    padding:44px 30px; margin:22px 0; box-shadow:var(--shadow); text-align:center; min-height:220px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .slide-card .section-label{ margin-bottom:16px; }
+  .slide-card .lyric-line{ text-align:center; }
+  .slide-nav{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }
+  .slide-progress{ text-align:center; color:var(--ink-soft); font-size:.9rem; margin-bottom:18px; }
+  .section-jump-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px; justify-content:center; }
+  .section-jump{
+    padding:10px 14px; border-radius:12px; border:2px solid var(--border); background:var(--surface);
+    color:var(--ink-soft); font-weight:700; font-size:.8rem; cursor:pointer;
+  }
+  .section-jump.active{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+
+  .room-list-card{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:18px; margin-bottom:12px; box-shadow:var(--shadow); flex-wrap:wrap;
+  }
+  .room-list-meta p{ margin:0; }
+  .room-list-meta .room-name{ font-weight:700; font-size:1.1rem; }
+  .room-list-meta .room-sub{ color:var(--ink-soft); font-size:.85rem; margin-top:2px; }
+
+  .confirm-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .host-song-picker-btn{ text-align:left; justify-content:flex-start; }
+
+  /* ============ HOME / LIST ============ */
+  .search-row{ display:flex; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
+  .search-box{
+    flex:1 1 260px; position:relative;
+  }
+  .search-box svg{ position:absolute; left:16px; top:50%; transform:translateY(-50%); width:22px; height:22px; color:var(--ink-soft); }
+  .search-box input{
+    width:100%; font-size:1.15rem; padding:16px 16px 16px 48px;
+    border-radius:16px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink);
+  }
+  .search-box input::placeholder{ color:var(--ink-soft); opacity:.8; }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:10px;
+    font-size:1.05rem; font-weight:700; letter-spacing:.04em;
+    padding:16px 22px; border-radius:16px; border:2px solid transparent;
+    cursor:pointer; text-decoration:none; min-height:56px;
+  }
+  .btn svg{ width:22px; height:22px; flex:none; }
+  .btn-primary{ background:var(--wine); color:var(--gold-tint); box-shadow:var(--shadow); }
+  .btn-primary:hover{ background:var(--wine-ink); }
+  .btn-ghost{ background:var(--surface); color:var(--ink); border-color:var(--border); }
+  .btn-ghost:hover{ background:var(--surface-2); }
+  .btn-block{ width:100%; }
+  .btn-lg{ padding:20px 24px; font-size:1.2rem; }
+
+  .hymn-list{ display:flex; flex-direction:column; gap:12px; list-style:none; padding:0; margin:0; }
+  .hymn-card{
+    display:flex; align-items:stretch;
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  .hymn-card:hover{ border-color:var(--gold); }
+  .hymn-card-main{
+    display:flex; align-items:center; gap:16px; flex:1; min-width:0;
+    background:none; border:none; padding:16px 18px; cursor:pointer; text-align:left;
+    color:inherit; font:inherit;
+  }
+  .heart-btn{
+    flex:none; width:60px; display:flex; align-items:center; justify-content:center;
+    background:none; border:none; border-left:1px solid var(--border);
+    cursor:pointer; color:var(--border); min-height:44px;
+  }
+  .heart-btn:hover{ color:var(--wine); }
+  .heart-btn svg{ width:26px; height:26px; }
+  .heart-btn.active{ color:var(--wine); }
+  .heart-btn.active svg{ fill:var(--wine); }
+  .hymn-num{
+    flex:none; width:52px; height:52px; border-radius:50%;
+    background:var(--wine-tint); color:var(--wine-ink);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'EB Garamond',serif; font-weight:700; font-size:1.3rem;
+  }
+  .hymn-meta{ flex:1; min-width:0; }
+  .hymn-title{ font-size:1.28rem; font-weight:600; margin:0 0 4px; }
+  .hymn-sub{ font-size:.92rem; color:var(--ink-soft); display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .pill{
+    display:inline-block; padding:3px 10px; border-radius:999px;
+    font-size:.72rem; font-weight:700; letter-spacing:.08em;
+    background:var(--gold-tint); color:var(--gold-strong); border:1px solid var(--border);
+  }
+  .pill-pine{ background:var(--pine-tint); color:var(--pine); }
+  .pill-wine{ background:var(--wine-tint); color:var(--wine-ink); }
+  .chev{ flex:none; width:22px; height:22px; color:var(--ink-soft); }
+  .empty-state{ text-align:center; padding:60px 20px; color:var(--ink-soft); }
+  .empty-state svg{ width:56px; height:56px; margin-bottom:14px; opacity:.6; }
+
+  .filter-row{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px; }
+  .chip{
+    display:inline-flex; align-items:center; gap:7px;
+    padding:11px 18px; border-radius:999px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink); font-weight:700; font-size:.85rem;
+    letter-spacing:.03em; cursor:pointer; min-height:46px;
+  }
+  .chip:hover{ border-color:var(--gold); }
+  .chip.active{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  .chip svg{ width:18px; height:18px; flex:none; }
+  .chip.active svg{ fill:currentColor; }
+
+  .section-heading{ display:flex; align-items:baseline; justify-content:space-between; margin:30px 0 14px; gap:12px; flex-wrap:wrap; }
+  .section-heading h2{ font-size:1.15rem; }
+  .count-note{ color:var(--ink-soft); font-size:.9rem; }
+
+  /* ============ DETAIL ============ */
+  .back-row{ display:flex; align-items:center; gap:10px; margin-bottom:18px; }
+  .back-btn{
+    display:inline-flex; align-items:center; gap:8px;
+    background:none; border:none; color:var(--wine); cursor:pointer;
+    font-weight:700; font-size:1rem; padding:10px 6px; min-height:44px;
+  }
+  :root[data-theme="dark"] .back-btn, .back-btn{ color:var(--wine); }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .back-btn{ color:var(--wine); } }
+  .back-btn svg{ width:22px; height:22px; }
+
+  .hymn-header{ margin-bottom:18px; }
+  .hymn-header .hymn-title{ font-size:2rem; }
+  .hymn-header .hymn-author{ color:var(--ink-soft); font-size:1rem; margin-top:4px; }
+  .badge-row{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .action-row{ display:flex; gap:12px; flex-wrap:wrap; margin-top:16px; }
+  .btn-fav.active{ background:var(--wine-tint); border-color:var(--wine); color:var(--wine-ink); }
+  .btn-fav svg.filled{ fill:currentColor; }
+  .btn-youtube{ background:#B3121B; color:#fff; border-color:#B3121B; }
+  .btn-youtube:hover{ background:#8f0e15; }
+
+  .mode-switch{
+    display:grid; grid-template-columns:1fr 1fr; gap:8px;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:18px; padding:6px;
+    margin:20px 0;
+  }
+  .mode-switch button{
+    border:none; background:none; padding:16px 10px; border-radius:14px;
+    font-weight:700; font-size:1.05rem; cursor:pointer; color:var(--ink-soft);
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .mode-switch button svg{ width:20px; height:20px; }
+  .mode-switch button.active{ background:var(--wine); color:var(--gold-tint); box-shadow:var(--shadow); }
+  .mode-switch button.locked{ color:var(--ink-soft); opacity:0.65; }
+
+  .control-bar{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:12px 14px; margin-bottom:22px;
+  }
+  .control-group{ display:flex; align-items:center; gap:8px; }
+  .control-label{ font-size:.72rem; font-weight:700; color:var(--ink-soft); margin-right:2px; }
+  .stepper{ display:flex; align-items:center; gap:0; border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .stepper button{
+    width:48px; height:48px; border:none; background:var(--surface-2); color:var(--ink);
+    font-size:1.3rem; font-weight:700; cursor:pointer;
+  }
+  .stepper button:hover{ background:var(--gold-tint); }
+  .stepper .val{ min-width:64px; text-align:center; font-weight:700; font-size:1.05rem; }
+
+  .lyric-sheet{ background:var(--surface); border:1px solid var(--border); border-radius:22px; padding:34px; box-shadow:var(--shadow); }
+  .verse-block{ max-width:64ch; margin:0 auto 30px; }
+  .verse-block:last-child{ margin-bottom:0; }
+  .section-label{
+    font-family:'EB Garamond',serif; font-weight:700; font-size:.95rem;
+    letter-spacing:.14em; margin-bottom:10px;
+  }
+  .section-label.type-verse{ color:var(--ink-soft); }
+  .section-label.type-chorus{ color:var(--gold-strong); }
+  .section-label.type-refrain{ color:var(--pine); }
+  .section-label.type-bridge{ color:var(--wine); }
+  /* [2026-09-10] the synthetic title-slide "section" every song now
+     presents first -- see songSectionsForPresenting() in app.js. */
+  .section-label.type-title{ color:var(--gold-strong); }
+  .lyric-line{ line-height:2.15; font-size:calc(1.28rem * var(--scale, 1)); margin:0; }
+  .chorus .lyric-line, .refrain .lyric-line{ padding-left:18px; border-left:3px solid var(--gold-tint); }
+  .refrain .lyric-line{ border-left-color:var(--pine-tint); }
+  .chord{
+    display:inline-block; font-weight:700; color:var(--wine);
+    font-size:.72em; vertical-align:.6em; margin:0 .12em 0 .32em;
+    font-family:'Atkinson Hyperlegible', sans-serif;
+  }
+  .hide-chords .chord{ display:none; }
+  .sing .lyric-line{ font-size:calc(1.7rem * var(--scale,1)); line-height:1.9; }
+  .sing .section-label{ font-size:1.05rem; }
+
+  .capo-note{ margin-top:18px; text-align:center; color:var(--ink-soft); font-size:.9rem; }
+
+  /* ============ ADD SONG ============ */
+  .field{ margin-bottom:18px; }
+  .field label{ display:block; font-weight:700; font-size:.85rem; letter-spacing:.04em; margin-bottom:8px; }
+  .field input[type=text], .field input[type=email], .field input[type=password], .field textarea, .field select{
+    width:100%; font-size:1.05rem; padding:14px 16px;
+    border-radius:14px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink); font-family:inherit;
+  }
+  .field textarea{ min-height:220px; line-height:1.7; resize:vertical; }
+  /* Search-icon overlap fix [reported 2026-09-09, fixed v24] -- several
+     screens (Messages' "start a new conversation", group-chat member add,
+     sermon/media sharing, Admin's role/beta-tester search) nest a
+     `.search-box` (icon + input, input needs 48px of left padding to clear
+     the icon) inside a `.field` wrapper for its label. `.field input[type=
+     text]` just above has an extra attribute selector, giving it higher CSS
+     specificity than `.search-box input` regardless of source order, so its
+     plain 16px padding was silently winning and leaving the typed text
+     sitting directly under the magnifying-glass icon. Re-asserted here with
+     equal-or-higher specificity so the search-box variant always wins when
+     both apply -- .search-box used on its own (not inside .field) is
+     unaffected either way. */
+  .field .search-box input[type=text]{ padding:16px 16px 16px 48px; }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:560px){ .field-row{ grid-template-columns:1fr; } }
+  .theme-picker{ display:flex; flex-wrap:wrap; gap:8px; }
+  .hint{ font-size:.85rem; color:var(--ink-soft); margin-top:6px; }
+  .bulk-example{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:12px;
+    padding:14px 16px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.82rem;
+    line-height:1.6; color:var(--ink-soft); white-space:pre-wrap; overflow-x:auto; margin:0 0 18px;
+  }
+
+  .setlist-items{ list-style:none; margin:0 0 4px; padding:0; }
+  .setlist-item{
+    display:flex; align-items:center; gap:10px; padding:10px 4px;
+    border-bottom:1px solid var(--border);
+  }
+  .setlist-item:last-child{ border-bottom:none; }
+  .setlist-num{
+    flex-shrink:0; width:26px; height:26px; border-radius:50%; background:var(--surface);
+    border:1px solid var(--border); color:var(--ink-soft); font-weight:700; font-size:.78rem;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .setlist-title{ flex:1; font-weight:600; color:var(--ink); }
+  .setlist-controls{ display:flex; align-items:center; gap:4px; flex-shrink:0; }
+  .icon-btn-sm{
+    width:30px; height:30px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink-soft); font-size:1rem; font-weight:700;
+    cursor:pointer; line-height:1;
+  }
+  .icon-btn-sm:hover:not(:disabled){ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  .icon-btn-sm:disabled{ opacity:.35; cursor:default; }
+  .setlist-tap{
+    all:unset; box-sizing:border-box; display:flex; align-items:center; width:100%;
+    padding:10px 4px; cursor:pointer; color:var(--ink);
+  }
+  .setlist-current .setlist-title{ color:var(--wine); font-weight:700; }
+
+  .chat-card{ padding:20px; }
+  .chat-tabs{ display:flex; gap:8px; margin-bottom:14px; }
+  .chat-tab{
+    padding:8px 16px; border-radius:999px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink-soft); font-weight:700; font-size:.82rem;
+    cursor:pointer; letter-spacing:.02em;
+  }
+  .chat-tab.active{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  .chat-messages{
+    max-height:260px; overflow-y:auto; background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; padding:12px 14px; margin-bottom:12px;
+  }
+  .chat-msg{ padding:6px 0; border-bottom:1px solid var(--border); }
+  .chat-msg:last-child{ border-bottom:none; }
+  .chat-msg-name{ font-weight:700; color:var(--wine); margin-right:8px; font-size:.88rem; }
+  .chat-msg-text{ color:var(--ink); word-break:break-word; }
+  .chat-empty{ margin:0; text-align:center; }
+  .chat-compose{ display:flex; gap:8px; margin-top:4px; }
+  .chat-compose input{
+    flex:1; padding:12px 14px; border-radius:12px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink); font-size:.95rem;
+  }
+  .chat-compose .btn{ flex-shrink:0; padding:0 18px; }
+
+  .detect-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:16px; margin-bottom:14px;
+  }
+  .detect-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+  .detect-head-left{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .detect-head select{ padding:10px 12px; border-radius:10px; border:2px solid var(--border); background:var(--surface-2); font-weight:700; }
+  .low-confidence{ border-color:var(--gold); }
+  .low-confidence-flag{ display:inline-flex; align-items:center; gap:6px; color:var(--gold-strong); font-size:.78rem; font-weight:700; }
+  .manual-flag{ color:var(--pine); }
+  .detect-body{ white-space:pre-wrap; font-size:1rem; line-height:1.7; color:var(--ink-soft); }
+  .detect-input{
+    width:100%; font-size:1.02rem; line-height:1.7; padding:12px 14px;
+    border-radius:12px; border:2px solid var(--border); background:var(--ground);
+    color:var(--ink); font-family:inherit; resize:vertical;
+  }
+  .remove-btn{
+    flex:none; width:38px; height:38px; border-radius:50%;
+    border:2px solid var(--border); background:var(--surface); color:var(--ink-soft);
+    cursor:pointer; font-size:1.3rem; line-height:1; display:flex; align-items:center; justify-content:center;
+  }
+  .remove-btn:hover{ border-color:var(--wine); color:var(--wine); }
+  .add-section-row{ display:flex; flex-wrap:wrap; gap:10px; margin:2px 0 26px; }
+  .add-section-row .btn{ flex:1 1 auto; }
+  .sections-empty{ color:var(--ink-soft); padding:18px 4px; }
+
+  /* Host-screen reorganization [2026-09-04] -- Jared: "the presenter
+     controls screen is a little crowded... organize it so it's more
+     user friendly." Two changes, both borrowed from common patterns in
+     presentation/meeting-control software (a segmented control for one
+     mutually-exclusive choice instead of several same-weight full-size
+     buttons -- ProPresenter's and mobile OSes' tab-style pickers; a
+     compact icon toolbar with short captions for secondary/less-frequent
+     tools, instead of giving them the same full-size buttons as primary
+     actions -- Zoom/Meet-style control bars) plus a collapsible chat panel
+     (closed by default -- most of a service, a host is watching the room,
+     not the chat). See renderSessionHost() for how these are assembled. */
+  .content-segmented{
+    display:flex; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:16px; padding:4px; gap:4px;
+  }
+  .segment-btn{
+    flex:1 1 0; min-width:0; display:flex; align-items:center; justify-content:center; gap:6px;
+    background:none; border:none; border-radius:12px; cursor:pointer;
+    padding:12px 6px; font-size:.78rem; font-weight:700; letter-spacing:.03em;
+    color:var(--ink-soft);
+  }
+  .segment-btn svg{ width:18px; height:18px; flex:none; }
+  .segment-btn span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .segment-btn.active{ background:var(--wine); color:var(--gold-tint); box-shadow:var(--shadow); }
+
+  /* Presenter keyboard shortcuts [2026-09-08] -- Jared: "add other keyboard
+     shortcuts for other buttons in the presenter controls. Indicate them as
+     well in the interface." .kbd-hint is a small outlined key-cap badge
+     dropped inline next to a button's own label (the segmented tabs, GO
+     LIVE) -- border/text both use `currentColor` rather than a fixed color
+     so it stays legible whether the button it's riding on is in its normal
+     state or its wine-filled `.active`/primary state, with no separate
+     background of its own to clash with either. Hidden on a touch-primary
+     device (`hover:none` -- no fine pointer, so almost certainly no physical
+     keyboard either) since a key hint is meaningless there and would just
+     be visual noise on the phone/tablet layout this app is used on just as
+     often as a desktop. */
+  .kbd-hint{
+    display:inline-block; flex:none; margin-left:2px; padding:0 5px; border-radius:5px;
+    border:1.5px solid currentColor; opacity:.65; font-size:.62rem; font-weight:800;
+    line-height:1.5; font-family:inherit;
+  }
+  @media (hover:none) and (pointer:coarse){ .kbd-hint{ display:none; } }
+
+  .presenter-toolbar{ display:flex; gap:8px; margin:14px 0 0; justify-content:center; flex-wrap:wrap; }
+  .icon-tool-btn{
+    position:relative; /* containing block for .icon-tool-kbd below */
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    flex:1 1 0; min-width:68px; max-width:120px;
+    background:var(--surface); border:1.5px solid var(--border); border-radius:14px;
+    padding:10px 6px; cursor:pointer; color:var(--ink);
+    font-size:.64rem; font-weight:700; letter-spacing:.03em; text-align:center;
+  }
+  .icon-tool-btn svg{ width:20px; height:20px; }
+  .icon-tool-btn:hover{ background:var(--surface-2); }
+  .icon-tool-btn.active{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  /* Presenter keyboard shortcuts [2026-09-08]: this toolbar's buttons are
+     narrow, fixed-caption columns (see above) with no room to fit a key
+     hint inline next to their text without wrapping, so this one's a small
+     corner badge instead -- same currentColor/no-background treatment as
+     .kbd-hint, same touch-device hiding rule. */
+  .icon-tool-kbd{
+    position:absolute; top:4px; right:6px; padding:0 4px; border-radius:4px;
+    border:1.5px solid currentColor; opacity:.6; font-size:.6rem; font-weight:800; line-height:1.4;
+  }
+  @media (hover:none) and (pointer:coarse){ .icon-tool-kbd{ display:none; } }
+
+  /* Host-screen reorganization, round 2 [2026-09-04] -- Jared: "put the
+     'now live' section as a non moving part somewhere... chat can just be
+     a floating chat at the bottom right... hard to navigate because
+     there's a lot of scrolling." Two more patterns borrowed from common
+     app conventions: a fixed "mini player" bar (Spotify/Apple Music/
+     YouTube's sticky player) pinned to the bottom of the viewport for the
+     live content + PREV/NEXT -- the single most-repeated action during a
+     service, now reachable with zero scrolling regardless of where else
+     on the page a host has scrolled to; and a floating chat-widget FAB
+     (Intercom/Crisp/Drift's pattern) instead of an inline chat card. See
+     renderNowLiveBar() and renderSessionHost() in app.js for the markup.
+     --now-live-bar-h is set by JS (the bar's actual measured height, which
+     varies by content length and expand state) so the FAB/panel and the
+     scrollable page's own bottom padding stay clear of it either way.
+
+     Bug found [2026-09-14, v40] -- Jared: "host controls are still hidden
+     underneath the tab switchers." This bar predates the v34 bottom tab
+     bar (it shipped 2026-09-04, the tab bar landed 2026-09-10) and was
+     never revisited once that bar existed: both are `position:fixed;
+     bottom:0`, and .bottom-tabs' higher z-index (40 vs. this bar's 30)
+     draws it on top, physically covering whatever part of THIS bar's own
+     content lands in that bottom ~62px+safe-area band -- which is always
+     the LAST thing in the bar's markup, `.now-live-row` (GO LIVE, PREV/
+     NEXT, the expand toggle), since content flows top-down inside a
+     bottom-anchored box. Confirmed directly: `document.elementFromPoint()`
+     at the GO LIVE button's own on-screen center returned the bottom
+     tab bar's MORE button, not the GO LIVE button itself -- it wasn't
+     just visually covered, it was genuinely unclickable. Fixed by lifting
+     this bar's own `bottom` above the tab bar on the widths where the tab
+     bar actually shows (below 900px; desktop's sidebar never overlaps it,
+     so `bottom:0` there is still correct and untouched) -- see the
+     `--bottom-tabs-h`-based override just below. The chat FAB/panel that
+     sit on top of this bar (per the comment above) need the identical
+     extra lift on the same breakpoint, or they'd now float too low and
+     collide with the bar itself; see their own rules further down. */
+  .now-live-bar{
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    background:var(--surface); border-top:1px solid var(--border);
+    box-shadow:0 -6px 20px rgba(0,0,0,.14);
+    max-height:70vh; overflow-y:auto;
+  }
+  @media (max-width: 899px){
+    .now-live-bar{ bottom: calc(var(--bottom-tabs-h) + env(safe-area-inset-bottom)); }
+  }
+  /* Controls-panel indicator [2026-09-07] -- Jared: "add a clear indicator
+     that that window below is the controls." A small always-visible label
+     strip along the very top edge of the bar (both collapsed and expanded),
+     so it reads unambiguously as an interactive staging panel rather than
+     a plain status readout -- distinct from .preview-tag below, which only
+     shows once something is actually staged-but-not-live. */
+  .now-live-bar-label{
+    max-width:920px; margin:0 auto; padding:6px 14px 0;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-soft); text-align:center;
+  }
+  /* Presenter keyboard shortcuts [2026-09-08] -- Jared: "indicate them as
+     well in the interface." One authoritative, always-visible legend line
+     right under the "Your Controls" label lists every shortcut this screen
+     answers to, each key shown as a small outlined `<kbd>` (a plainer,
+     bordered cousin of .kbd-hint above -- this line already has its own
+     text color to sit against, so a fixed border reads better here than
+     currentColor would). Hidden on touch-primary devices, same reasoning
+     as .kbd-hint/.icon-tool-kbd -- there's no keyboard to hint at there. */
+  .shortcuts-legend{
+    max-width:920px; margin:2px auto 0; padding:0 14px; font-size:.68rem;
+    color:var(--ink-soft); text-align:center; line-height:1.7;
+  }
+  .shortcuts-legend kbd{
+    display:inline-block; padding:0 5px; border-radius:5px; border:1.5px solid var(--border);
+    font-size:.68rem; font-weight:700; margin:0 1px; background:var(--surface); font-family:inherit;
+  }
+  @media (hover:none) and (pointer:coarse){ .shortcuts-legend{ display:none; } }
+  .now-live-expanded-body{ padding:14px 14px 0; max-width:920px; margin:0 auto; }
+  .now-live-expanded-body .slide-card{ margin:0 0 12px; padding:28px 22px; min-height:0; }
+  .now-live-jump-row{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:14px; }
+  .now-live-row{
+    display:flex; align-items:center; gap:10px; padding:10px 14px;
+    max-width:920px; margin:0 auto;
+  }
+  .now-live-expand-toggle{
+    flex:none; width:36px; height:36px; border-radius:50%; border:1.5px solid var(--border);
+    background:var(--surface); color:var(--ink-soft); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .now-live-expand-toggle svg{ width:18px; height:18px; }
+  .now-live-status{
+    flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:8px;
+    font-weight:700; font-size:.86rem; color:var(--ink);
+  }
+  .now-live-status svg{ width:18px; height:18px; flex:none; color:var(--wine); }
+  .now-live-status span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .now-live-nav-btn{
+    flex:none; width:40px; height:40px; border-radius:50%; border:1.5px solid var(--border);
+    background:var(--surface); color:var(--ink); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .now-live-nav-btn svg{ width:18px; height:18px; }
+  .now-live-nav-btn:disabled{ opacity:.35; cursor:not-allowed; }
+  .now-live-nav-btn.primary{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+
+  /* Preview/Go Live [2026-09-06] -- Jared: "...if the host is good with the
+     preview, he can [click] on go live." .preview-tag is a small pill in
+     the (now staging, not live) bar's status row, shown only while the
+     preview actually differs from what's live (see renderPreviewBar()'s
+     `dirty` param). .go-live-btn is the publish action itself, always at
+     the end of that row; .live-readout is the small read-only "what's
+     actually live right now" line inside the expanded body. */
+  .preview-tag{
+    flex:none; background:var(--gold-tint); color:var(--wine); font-weight:800; font-size:.62rem;
+    letter-spacing:.06em; padding:3px 8px; border-radius:8px;
+  }
+  .go-live-btn{
+    flex:none; height:40px; padding:0 16px; border-radius:20px; border:none;
+    background:var(--wine); color:var(--gold-tint); font-weight:800; font-size:.78rem;
+    letter-spacing:.04em; cursor:pointer; display:flex; align-items:center; gap:6px;
+  }
+  .go-live-btn svg{ width:16px; height:16px; }
+  .go-live-btn:disabled{ opacity:.35; cursor:not-allowed; }
+  .live-readout{
+    display:flex; align-items:center; gap:8px; margin:0 0 12px; font-size:.78rem;
+    color:var(--ink-soft); letter-spacing:.02em;
+  }
+  .live-readout .live-dot{ background:var(--wine); }
+
+  .chat-fab{
+    position:fixed; right:20px; bottom:calc(var(--now-live-bar-h, 72px) + 16px); z-index:40;
+    width:56px; height:56px; border-radius:50%; background:var(--wine); color:var(--gold-tint);
+    border:none; box-shadow:var(--shadow); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .chat-fab svg{ width:24px; height:24px; }
+  .chat-fab:hover{ background:var(--wine-ink); }
+  .chat-floating-panel{
+    position:fixed; right:20px; bottom:calc(var(--now-live-bar-h, 72px) + 84px); z-index:41;
+    width:340px; max-width:calc(100vw - 40px); max-height:60vh;
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    box-shadow:var(--shadow); overflow-y:auto;
+  }
+  /* Same host-controls-vs-tab-bar fix as .now-live-bar above: these two sit
+     directly on top of that bar (see its own comment), so once its bottom
+     edge lifts above the tab bar on mobile, these need to lift by the exact
+     same amount or they'd float back down into the tab bar's band again. */
+  @media (max-width: 899px){
+    .chat-fab{ bottom: calc(var(--now-live-bar-h, 72px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 16px); }
+    .chat-floating-panel{ bottom: calc(var(--now-live-bar-h, 72px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 84px); }
+  }
+  .chat-floating-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; font-weight:700; border-bottom:1px solid var(--border);
+    position:sticky; top:0; background:var(--surface);
+  }
+  .chat-floating-close{
+    background:none; border:none; font-size:1.4rem; line-height:1; color:var(--ink-soft); cursor:pointer; padding:2px 6px;
+  }
+  .chat-floating-panel .chat-card{ margin:0; border:none; border-radius:0; background:none; padding:14px 16px; }
+  .chat-floating-panel .chat-card h3{ display:none; }
+
+  @media (max-width:480px){
+    .chat-fab{ right:12px; }
+    .chat-floating-panel{ right:8px; }
+  }
+
+  .toast{
+    /* calc() clears the new bottom tab bar [2026-09-10] -- was a flat 26px.
+       pointer-events:none while hidden [2026-09-10, found in testing] --
+       that round only fixed the SYMPTOM (it silently ate every tap where it
+       sat), not the actual bug: translateY(120%) moves the toast down by
+       120% of its OWN (small, ~48px) height, which cleared the old flat
+       26px `bottom` offset fine, but the math only fully hides it when
+       `bottom` <= ~20% of the toast's height. Once `bottom` grew to
+       `--bottom-tabs-h` (62px) + safe-area + 14px -- comfortably more than
+       20% of 48px -- translateY(120%) stopped clearing it at all: even in
+       the "hidden" (no .show) state the toast sits fully ON SCREEN, right
+       on top of the bottom tab bar, forever -- confirmed by loading the
+       app fresh, before showToast() is ever called once, and finding the
+       default "Saved" pill already fully inside the viewport. This is
+       Jared's "the annoying saved thing that won't go away... even on my
+       phone" [2026-09-14] -- not a stuck timer or a repeated trigger, a
+       permanently-visible default state. Fixed [2026-09-14] by making the
+       hidden-state offset self-contained: instead of a fixed 120%, it adds
+       the exact same `bottom` offset (plus a flat 40px buffer) on top of
+       its own 100% height, so however tall --bottom-tabs-h/safe-area ever
+       get, the hidden toast always lands at least 40px below the
+       viewport's bottom edge -- fully off-screen, not just approximately. */
+    position:fixed; bottom:calc(var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 14px); left:50%; transform:translateX(-50%) translateY(calc(100% + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 40px));
+    background:var(--pine); color:#fff; padding:14px 24px; border-radius:14px;
+    font-weight:700; box-shadow:var(--shadow); transition:transform .25s ease; z-index:50;
+    display:flex; align-items:center; gap:10px;
+    pointer-events:none; cursor:pointer;
+  }
+  .toast.show{ transform:translateX(-50%) translateY(0); pointer-events:auto; }
+  .toast svg{ width:20px; height:20px; }
+  /* Fix [2026-09-15]: Jared, hosting on his phone: "the Live now pop up
+     takes too long to go away and it blocks the bottom view especially
+     in mobile." The generic .toast (this is the SAME element the "Saved"
+     pill uses -- see goLive()'s showToast('You're live.') call) already
+     sits above the bottom tab bar (see this rule's own comment above),
+     but on the session-host screen there's ANOTHER fixed bar directly
+     above that -- .now-live-bar, the host's own GO LIVE/PREV/NEXT
+     controls -- and this toast's `bottom` offset never accounted for it,
+     so "You're live." popped up right on top of those controls for its
+     whole ~3s and (since .toast.show is pointer-events:auto) genuinely
+     blocked taps on them too, at the exact moment right after going live
+     when a host is most likely to want to immediately move on. Lifted by
+     the same var(--now-live-bar-h) this app already uses for the chat
+     FAB/panel (see the comment above those two) whenever body.hosting-page
+     is set (renderCurrentView(), app.js -- true only on session-host), so
+     it clears those controls instead of sitting on top of them. */
+  @media (max-width: 899px){
+    body.hosting-page .toast{
+      bottom: calc(var(--now-live-bar-h, 72px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 14px);
+    }
+  }
+
+  /* App update banner [2026-09-10, v29, removed v31, restored v32] --
+     Jared's ask flip-flopped once he'd actually seen both: v29 built this
+     prompt, v31 replaced it with a fully silent auto-update per his
+     follow-up request, and now ("make sure the prompt comes about
+     updating") he wants the prompt back. Built from the same --surface/
+     --ink/--border pairing every card in this app already uses (rather
+     than a solid accent color like .toast's --pine background),
+     specifically because that pairing is the one guaranteed to read
+     correctly in both light and dark mode -- --wine/--pine invert
+     lightness between the two themes and would silently turn into
+     low-contrast white-on-pale-pink in dark mode otherwise. Deliberately
+     persistent (no auto-hide timer like .toast) since it needs an actual
+     decision, not just a passing notice. */
+  .update-banner{
+    /* Sits above the bottom tab bar [2026-09-10] instead of under it. */
+    position:fixed; left:0; right:0; bottom:var(--bottom-tabs-h); z-index:60;
+    background:var(--surface); color:var(--ink); border-top:1px solid var(--border);
+    box-shadow:var(--shadow); padding:14px 20px;
+    display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
+  }
+  .update-banner-btn{
+    border-radius:10px; padding:9px 18px; font-weight:700; font-size:.9rem; cursor:pointer; border:1px solid var(--border);
+  }
+  .update-banner-btn-primary{ background:var(--ink); color:var(--ground); border-color:var(--ink); }
+  .update-banner-btn-secondary{ background:transparent; color:var(--ink-soft); }
+
+  footer.appfoot{ text-align:center; color:var(--ink-soft); font-size:.82rem; padding:30px 20px 40px; }
+
+  /* ===== Presenter / Projector ("stage") view [2026-09-04] ===== */
+  /* Full-bleed, chrome-less, large-type read-only display -- meant to be
+     opened in its own browser tab/window (see the host screen's "PROJECTOR
+     VIEW" button) and dragged onto a second monitor/projector, then
+     fullscreened with the browser's own F11. clamp() keeps it legible from
+     a distance on a big screen without needing a fixed size that would look
+     wrong on a phone or tablet used the same way. */
+  .stage-view{
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:40px; background:var(--ground); position:relative; overflow:hidden;
+  }
+  @media (max-width: 480px){
+    /* Extra headroom on a phone-sized screen -- less side/top/bottom padding
+       means more width for a verse line before it has to wrap, and reclaims
+       real vertical budget too. This view is really meant for a second
+       monitor/projector (see the comment above), so a phone is already the
+       tightest case fitStageLines() has to handle. */
+    .stage-view{ padding:20px; }
+  }
+  .stage-label{ font-size:1.6rem; letter-spacing:.12em; color:var(--ink-soft); margin-bottom:28px; }
+  /* font-size lives in a custom property, not a plain declaration, so
+     fitStageLines() (app.js) can actually override it. It used to set
+     `.style.fontSize` on the `.stage-lines` WRAPPER div, but the text is in
+     the `p` children below, which had their own `font-size:clamp(...)`
+     rule directly -- a more specific declaration than anything a parent's
+     inline style can hand down through inheritance, so every shrink attempt
+     was silently winning the cascade against nothing, having zero visible
+     effect. Custom properties inherit AND can be overridden inline on the
+     wrapper, so this is what actually lets the JS shrink the text. */
+  .stage-lines{ --stage-font-size:clamp(2.2rem, 5vw, 4.2rem); }
+  .stage-lines p{ font-size:var(--stage-font-size); line-height:1.4; font-weight:700; color:var(--ink); margin:0 0 .4em; }
+  /* [2026-09-10] the auto-generated title slide (see songSectionsForPresenting()
+     in app.js) gets its own, larger presence -- it's a title card, not a
+     lyric line, so it earns a bit more scale and letter-spacing than the
+     shared --stage-font-size default just above. Still subject to the same
+     JS auto-fit shrink for an unusually long song title. */
+  .stage-lines.type-title{ --stage-font-size:clamp(2.6rem, 7vw, 5.6rem); text-align:center; }
+  .stage-lines.type-title p{ letter-spacing:.02em; }
+  .stage-footer{ margin-top:36px; font-size:1.2rem; color:var(--ink-soft); }
+  .stage-waiting{ font-size:1.6rem; color:var(--ink-soft); }
+  .stage-exit-btn{
+    position:absolute; top:20px; right:24px; width:44px; height:44px; border-radius:50%;
+    border:1px solid var(--border); background:var(--surface); color:var(--ink-soft);
+    font-size:1.4rem; line-height:1; cursor:pointer;
+  }
+  /* Fade transition [2026-09-06] -- Jared: "can we add a quick fade
+     transition to any change in the live view?" Wraps renderStageSlide()'s
+     output (both the ?stage= projector and the split-screen host stage
+     column) -- app.js only adds this class when the actual content
+     identity changed since the previous render (see lastStageSignature),
+     so an unrelated re-render (a chat message, a toggle) never replays it. */
+  @keyframes stageFadeIn{ from{ opacity:0; } to{ opacity:1; } }
+  .stage-fade-in{ animation:stageFadeIn .4s ease; }
+  @media (prefers-reduced-motion: reduce){
+    .stage-fade-in{ animation:none; }
+  }
+
+  /* Media/AVP [2026-09-06] -- image/video/slideshow/embed content
+     deliberately renders full-bleed (no stage-label/stage-footer chrome --
+     see renderStageSlide()'s comment) by going position:absolute; inset:0
+     against the nearest positioned ancestor -- .stage-view above already
+     has position:relative, and .host-stage-col below is position:sticky
+     (which establishes the same kind of containing block), so this same
+     frame fills either the full projector screen or the split-screen
+     host stage column, edge to edge, rather than sitting padded and small
+     the way a lyric slide does. background:#000 letterboxes any image/
+     video whose aspect ratio doesn't exactly match the screen -- the same
+     convention EasyWorship/ProPresenter use for stage media. */
+  .stage-media-frame{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:#000; overflow:hidden;
+  }
+  .stage-media-img, .stage-media-video{ max-width:100%; max-height:100%; width:100%; height:100%; object-fit:contain; }
+  .stage-media-embed{ width:100%; height:100%; border:0; }
+  /* Browser autoplay policy [2026-09-06] -- see syncStageMediaVideo()'s
+     comment in app.js for why this button exists at all (muted autoplay is
+     allowed everywhere; unmuting anywhere needs a real click/tap on that
+     specific tab). Bottom-right so it never sits over likely subject
+     matter in the middle of a frame. */
+  .stage-media-unmute{
+    position:absolute; right:18px; bottom:18px; width:52px; height:52px; border-radius:50%;
+    border:1px solid rgba(255,255,255,.35); background:rgba(0,0,0,.55); color:#fff;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2;
+  }
+  .stage-media-unmute svg{ width:24px; height:24px; }
+
+  /* The host screen's in-page "split screen" toggle -- controls on one
+     side, a bigger, clean read-only preview of the exact same live slide on
+     the other, so a host on a laptop can see what the projector/
+     congregation sees without a second window open. Falls back to a single
+     stacked column on narrow viewports (phone/small tablet), which reads as
+     a simple toggle (preview above controls) on those devices rather than a
+     true side-by-side split -- matches "it can be used in mobile and
+     tablets as well, it's just toggled" from the feature request.
+     Preview alongside live [2026-09-08]: a third column (the staged PREVIEW,
+     see app.js's renderSessionHost()) sits between controls and LIVE, so
+     three equal-ish tracks fit here now instead of two. */
+  .host-split-grid{ display:grid; grid-template-columns:1.1fr 1fr 1fr; gap:24px; align-items:start; }
+  /* .preview-badge mirrors .live-badge's pill shape but in the same gold/
+     wine coloring as .preview-tag (the bottom bar's own "staged, not live
+     yet" indicator) -- so at a glance, gold/wine reads as "preview" and the
+     wine-filled .live-badge reads as "live" everywhere in this app. */
+  .preview-badge{
+    display:inline-flex; align-items:center; gap:8px; background:var(--gold-tint); color:var(--wine);
+    padding:6px 14px; border-radius:999px; font-size:.78rem; font-weight:800; letter-spacing:.1em;
+  }
+  .preview-badge-dot{ width:9px; height:9px; border-radius:50%; background:var(--wine); }
+  .host-stage-col{
+    background:var(--surface); border:1px solid var(--border); border-radius:24px; padding:32px 20px;
+    text-align:center; position:sticky; top:20px;
+    /* Media/AVP [2026-09-06]: a live image/video/embed renders via
+       .stage-media-frame, which is position:absolute -- taken out of flow,
+       so it contributes NO height of its own to this column (unlike a
+       song/sermon slide's ordinary in-flow paragraphs). Without an explicit
+       min-height this column would collapse to just its LIVE badge's
+       height and the media would render squashed into that sliver. Applies
+       to every content type (not just media) since it's just a floor -- and
+       now also the floor the native resize handle below won't let the host
+       drag the square smaller than. */
+    min-height:340px;
+    /* Resizable squares [2026-09-16] -- Jared: "give the user an option to
+       resize the squares so they don't have to scroll up and down." This
+       used to have no set height at all, so a long passage made the square
+       (and the whole page around it) grow tall enough that reaching the
+       rest of the controls meant scrolling past it. `resize:vertical` adds
+       the browser's own drag handle at the bottom-right corner (needs
+       `overflow` to not be `visible` to actually appear -- see
+       attachStageColResize() in app.js for how a drag gets remembered as an
+       explicit inline height across re-renders, since a plain CSS resize on
+       its own would forget the moment this element's markup gets rebuilt);
+       `overflow:auto` means content taller than whatever size the host
+       settles on scrolls INSIDE the square instead of pushing the page
+       down. max-height is capped against the fixed "YOUR CONTROLS" bar's
+       own real height (--now-live-bar-h, kept live by app.js) rather than a
+       flat vh number -- this element is position:sticky pinned 20px from
+       the top of the viewport, so on a merely tall-ish passage (not even a
+       dragged square) its bottom edge, and the resize handle riding along
+       with it, could otherwise land UNDERNEATH that fixed bar and become
+       impossible to grab at all. This keeps the handle reachable no matter
+       how long the presented content is or how tall the host has dragged
+       the square. */
+    max-height:calc(100vh - 20px - var(--now-live-bar-h, 90px) - 24px);
+    overflow:auto; resize:vertical;
+  }
+  .host-stage-col .stage-label{ font-size:1.1rem; margin-bottom:16px; }
+  /* Fixed size [2026-09-16] -- Jared: "just set the text to a certain
+     size" instead of the vw-based clamp() this used to scale with viewport
+     width. A fixed size also just makes more sense now that the square
+     itself is user-resizable (above) rather than the text trying to guess
+     the right scale on its own -- if a line wraps oddly the host can just
+     drag the square wider/taller instead. */
+  .host-stage-col .stage-lines p{ font-size:1.6rem; margin:0 0 .3em; }
+  /* Preview/Go Live [2026-09-06]: no nav row on either .host-stage-col
+     anymore (the duplicate prev/next this class used to hold; removed along
+     with renderStageNavRow() in app.js) since advancing content happens via
+     the preview bar + GO LIVE instead. Preview alongside live [2026-09-08]:
+     this class is now shared by BOTH the staged-PREVIEW column and the
+     read-only LIVE column -- see app.js's renderSessionHost() -- so every
+     rule here (and the narrow-viewport stacking below) applies to both. */
+  @media (max-width: 900px){
+    .host-split-grid{ grid-template-columns:1fr; }
+    /* Media/AVP [2026-09-06]: position:relative, not the plain :static this
+       used to be -- :static would stop this column from being the
+       containing block for .stage-media-frame's position:absolute (see
+       that rule's comment above), so a live image/video/embed in the
+       split-screen preview would blow up to cover the whole viewport
+       instead of staying inside this card once the layout drops to a
+       single stacked column below 900px. position:relative with no
+       top/left offset lays out exactly like :static otherwise. */
+    .host-stage-col{ position:relative; margin-bottom:8px; }
+    /* Controls buried below two stage cards, fixed [2026-09-14]: this
+       stacked layout used to put `order:-1` on .host-stage-col so the ONE
+       preview card (back when there was only one, pre-2026-09-08) showed
+       above the controls -- "reads as a simple toggle" per the comment
+       above. Once "Preview alongside live" [2026-09-08] made .host-stage-
+       col a shared class rendered TWICE (a PREVIEW card AND a LIVE card),
+       that same order:-1 pushed BOTH above .host-controls-col, so on a
+       real phone the actual controls -- the SONGS/SERMON/BIBLE/MEDIA
+       picker, Setlist, END SESSION -- ended up below two full slide cards,
+       often a full screen or more of scrolling away. Jared: "the host
+       controls in mobile disappeared... I can't see or toggle the controls
+       at all" -- confirmed via a real Split Screen + mobile-viewport
+       reproduction, not something visible on the normal (non-split) host
+       screen. Removing order:-1 above restores plain DOM order (controls
+       column first, then PREVIEW, then LIVE), so the controls are the
+       first thing on screen exactly like the non-split host view, and the
+       two stage cards are still reachable by scrolling down. */
+  }
+
+  /* ===== Desktop/computer-screen sizing [2026-09-04] =====
+     Before this, the app was capped at a single 920px-wide mobile-style
+     column no matter how wide the browser window was -- fine on a phone,
+     but a lot of wasted space and an oddly narrow, stretched-thin feel on
+     an actual computer screen. Two changes, kept intentionally modest
+     rather than a full desktop redesign: `main` (and the topbar, so the
+     header stays aligned with the content below it) gets wider on larger
+     viewports, and the hymnal-style list views + the Plans & Pricing cards
+     switch from one long stacked column to a responsive multi-column grid
+     so that extra width is actually used for something, not just margin.
+     Text-heavy single-column content (forms, the verse-of-the-day card,
+     slide displays) already has its own narrower max-width/ch caps
+     elsewhere in this file, so it stays a comfortable reading width even
+     inside a wider `main`. Placed at the end of the file, after the plain
+     `.hymn-list`/`.topbar-inner`/`main` rules above, so it reliably wins
+     the cascade at equal selector specificity regardless of media-query
+     nesting -- a rule earlier in source order loses to an identical-
+     specificity rule later in the file even when the earlier one's media
+     condition also matches. */
+  @media (min-width: 900px){
+    .topbar-inner{ max-width:1100px; }
+    main{ max-width:1100px; }
+    .hymn-list{
+      display:grid; grid-template-columns:repeat(auto-fill, minmax(380px,1fr));
+      gap:14px; align-items:start;
+    }
+    .plans-grid{
+      display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr));
+      gap:20px; align-items:start;
+    }
+    .plans-grid .plan-card{ margin-bottom:0; }
+  }
+  @media (min-width: 1400px){
+    .topbar-inner{ max-width:1320px; }
+    main{ max-width:1320px; }
+  }
+
+  /* ===== Built-in KJV Bible [2026-09-04] =====
+     Public-domain KJV text (1769 edition), bundled as a lazily-loaded
+     static JSON chunk (src/content/kjv.json, ~4.3MB) so it never adds to
+     the app's initial page-load bundle -- only fetched the first time
+     someone actually opens Bible from the landing page. Reuses
+     .chip/.filter-row (book and chapter pickers, same look as the topical
+     theme filters) and .lyric-sheet (the reading pane, same look as a
+     song's lyric sheet) rather than a parallel set of list/card styles. */
+  .bible-verse-p{ margin:0 0 .9em; line-height:1.8; font-size:calc(1.1rem * var(--scale,1)); }
+  .bible-verse-num{
+    font-weight:700; color:var(--wine); font-size:.7em; vertical-align:super;
+    margin-right:3px;
+  }
+  .bible-search-result{
+    display:block; width:100%; text-align:left; background:none; border:none;
+    padding:12px 0; border-bottom:1px solid var(--border); cursor:pointer; color:inherit;
+  }
+  .bible-search-result:hover{ background:var(--surface-2); }
+  .bible-search-result .hint{ margin:2px 0 0; }
+  /* Multi-verse selection [2026-09-15, redesigned 2026-09-15] -- toggle
+     SELECT MULTIPLE VERSES on in the host Bible picker's browse list, then
+     tap a row's checkbox (or the row itself) to add it to a combined
+     passage instead of presenting it right away; see
+     hostVerseSelectMode/toggleVerseMultiSelect()/presentSelectedVerses()
+     in app.js. (Originally Ctrl/Cmd-click, with no visible checkbox at
+     all -- replaced outright per Jared: "still hard to pick multiple
+     verses... what if we just add a function to pick multiple verses and
+     then a checkbox appears before the verses" -- a modifier key has no
+     equivalent on a touchscreen at all, so it never had a chance to work
+     reliably on his phone.) */
+  .bible-search-result-selected{ background:var(--wine-tint); }
+  .bible-search-result-selected .hymn-title{ color:var(--wine); }
+  .verse-checkbox{
+    display:inline-block; flex:none; width:18px; height:18px; margin-right:10px;
+    border:2px solid var(--border); border-radius:4px; position:relative;
+    background:var(--surface);
+  }
+  .verse-checkbox.checked{ background:var(--wine); border-color:var(--wine); }
+  .verse-checkbox.checked::after{
+    content:''; position:absolute; left:4px; top:0; width:5px; height:9px;
+    border:solid #fff; border-width:0 2px 2px 0; transform:rotate(45deg);
+  }
+  .bible-crumb{ color:var(--ink-soft); font-size:.85rem; margin-bottom:6px; letter-spacing:.04em; text-transform:uppercase; }
+  /* Inline text-link button inside a breadcrumb line (e.g. the live-session
+     Bible verse browser's "All books > Book > Chapter N" trail, see
+     renderVerseBrowseBody() in app.js) -- same idea as .switch-account but
+     sized to sit inline in a sentence instead of standing alone. */
+  .link-btn{
+    background:none; border:none; padding:0; margin:0; cursor:pointer;
+    color:var(--wine); font-weight:700; font-size:inherit; letter-spacing:inherit;
+    text-transform:inherit; text-decoration:underline; text-underline-offset:2px;
+  }
+  .link-btn:hover{ opacity:.8; }
+
+  /* ===== Wide-desktop follow-up [2026-09-04] =====
+     Jared, after trying the previous desktop-sizing pass on an actual big
+     monitor: "there are still blank spaces at the sides in PC version."
+     One more incremental width tier, same pattern as the two already
+     above (900px/1400px) -- still capped, not edge-to-edge, since
+     text-heavy screens (forms, prose) stay readable at their own ch-based
+     max-widths regardless of how wide `main` gets. Placed after those two
+     rules for the same cascade-order reason documented up there. */
+  @media (min-width: 1700px){
+    .topbar-inner{ max-width:1560px; }
+    main{ max-width:1560px; }
+  }
+
+  /* ===== Desktop navigation redesign — Facebook-style split [2026-09-10] =====
+     Jared: "I think you could give it a cleaner look. Just look at
+     Facebook's PC interface and Mobile interface. They differ. what if you
+     do it like that?" Everything above this point still just widens the
+     same mobile-style column/bottom-tab-bar layout -- functional, but
+     visibly a stretched phone screen on an actual monitor. From this
+     breakpoint up, navigation itself changes shape: the bottom tab bar
+     (and everything the hamburger drawer used to hold) is replaced by a
+     persistent left sidebar, Facebook's own left-rail pattern -- see
+     index.html's #sidebarNav markup and app.js's renderSidebarExtra()/
+     renderBottomTabs() for the live content. `.app` switches from a plain
+     flex column to a 2-column grid (topbar spanning both, sidebar running
+     the full height of main+footer) -- same breakpoint as the existing
+     desktop-sizing tier above, so "wider content" and "sidebar nav" always
+     arrive together, never one without the other. */
+  @media (min-width: 900px){
+    .bottom-tabs{ display:none; }
+    .sidebar-nav{
+      display:flex; flex-direction:column;
+      grid-area:sidebar;
+      width:260px; border-right:1px solid var(--border);
+      background:var(--surface); overflow-y:auto;
+    }
+    .app{
+      display:grid;
+      grid-template-columns:260px minmax(0,1fr);
+      grid-template-rows:auto 1fr auto;
+      grid-template-areas:"topbar topbar" "sidebar main" "sidebar footer";
+      min-height:100dvh;
+    }
+    header.topbar{ grid-area:topbar; }
+    main{ grid-area:main; padding-bottom:34px; } /* no bottom tab bar to clear here anymore */
+    .appfoot{ grid-area:footer; }
+    /* Fix [2026-09-15]: Jared: "the top bar where the logo and the other
+       buttons are, they're not aligned to the sidebar." Before this,
+       .topbar-inner (below) just centered itself (max-width + margin:auto)
+       against the FULL viewport width -- fine back when there was no
+       sidebar, but once .app's 2-column grid above reserved the left
+       260px for .sidebar-nav, that centering no longer had anything to do
+       with where the sidebar/main columns actually sit, so the brand logo
+       floated somewhere over the middle of `main` instead of sitting above
+       the sidebar, and the icon cluster didn't line up with main's right
+       edge either. Mirroring the exact same 260px/1fr split as `.app`'s
+       grid-template-columns here, with the brand in column 1 and the icon
+       cluster in column 2, guarantees both stay pixel-aligned with the
+       sidebar and main below them at every width, instead of two
+       independent centering calculations that only agreed by coincidence. */
+    .topbar-inner{
+      display:grid; grid-template-columns:260px minmax(0,1fr); align-items:center;
+      max-width:none; margin:0; padding:14px 0; gap:0;
+    }
+    .brand-row{ display:flex; align-items:center; padding-left:20px; }
+    /* padding-right (not a right-side padding on .topbar-inner itself) so
+       the icon cluster's own right edge lines up with `main`'s right-
+       padded text content, not just its outer box -- see the sizing note
+       above main{padding:...} for why main's box already reaches the same
+       column edge regardless. */
+    .topbar-icons{ width:100%; max-width:1100px; margin:0 auto; padding-right:20px; justify-content:flex-end; }
+  }
+  @media (min-width: 1400px){ .topbar-icons{ max-width:1320px; } }
+  @media (min-width: 1700px){ .topbar-icons{ max-width:1560px; } }
+  /* The projector/stage view (see body.stage-page/body.stage-hide-chrome
+     elsewhere in this file) has to stay genuinely full-bleed even from a
+     desktop browser -- plugging a laptop into a TV/projector is a normal
+     way to run this app, not an edge case. Collapse the grid back to a
+     plain flex column and hide the sidebar exactly like the topbar/footer/
+     bottom-tabs already are for those two body classes, so nothing reserves
+     the 260px sidebar column's width on the one screen that must fill the
+     viewport edge to edge. */
+  @media (min-width: 900px){
+    body.stage-page .app, body.stage-hide-chrome .app{ display:flex; flex-direction:column; }
+  }
+  body.stage-page .sidebar-nav, body.stage-hide-chrome .sidebar-nav{ display:none; }
+
+  /* Fellowship feed's desktop right rail (Suggested People / Trending) --
+     see renderFellowshipRail() in app.js. Facebook's own desktop feed
+     keeps a right-hand suggestions column; this reuses the exact same data
+     Explore already computes rather than a new query. Stacked (rail
+     hidden) below its own breakpoint, wider than the general desktop tier
+     above so the main feed column always has comfortable room left over
+     once the 260px sidebar + 300px rail are both on screen. */
+  .fellowship-rail{ display:none; }
+  @media (min-width: 1280px){
+    .fellowship-layout{ display:flex; align-items:flex-start; gap:28px; }
+    .fellowship-main-col{ flex:1; min-width:0; }
+    .fellowship-rail{ display:block; width:300px; flex:none; }
+  }
+  .fellowship-rail-card{
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:14px 16px; margin-bottom:16px; position:sticky; top:96px;
+  }
+  .fellowship-rail-card h3{ font-size:.8rem; letter-spacing:.1em; color:var(--ink-soft); margin:0 0 8px; }
+  .fellowship-rail-trending-row{
+    display:block; width:100%; text-align:left; background:none; border:none;
+    padding:10px 2px; border-bottom:1px solid var(--border); cursor:pointer; color:inherit;
+  }
+  .fellowship-rail-trending-row:last-child{ border-bottom:none; }
+  .fellowship-rail-trending-row:hover{ background:var(--surface-2); }
+  .fellowship-rail-trending-row p{ margin:2px 0 0; font-size:.85rem; }
+  .fellowship-rail-trending-row p:first-child{ margin-top:0; font-size:.9rem; }
+
+  /* The Presenter/Projector ("stage") view is documented above as
+     "full-bleed" but was actually still trapped inside `main`'s max-width
+     cap once the desktop-sizing rules above existed -- on a wide monitor
+     that meant big blank gutters on exactly the screen most meant to fill
+     one edge-to-edge (a projector/TV, read from across a room). app.js's
+     render() dispatcher toggles this class on <main> only while
+     state.view === 'session-projector', so every other screen keeps its
+     normal centered-column width untouched. */
+  main.main-full-bleed{ max-width:none; padding:0; }
+
+/* Stage-view sizing fix [2026-09-04, follow-up] -- the full-bleed change
+   above fixed the WIDTH ("blank spaces at the sides"), but the projector
+   view was still overflowing vertically even with fitStageLines() (above)
+   trying to shrink the text to fit: .stage-view set its own
+   `min-height:100vh`, a constraint on the CHILD itself, independent of how
+   much room `main` (its flex parent, already `flex:1` inside `.app`'s
+   `min-height:100dvh` flex column -- see the base `.app`/`main` rules near
+   the top of this file) actually had left after the real header above it
+   and footer below it. That forced the page to always be taller than one
+   screen by roughly the header+footer height, no matter how small the
+   text got, which is exactly the "too big" overflow Jared saw.
+
+   Fixing that needs two things together, not just one:
+   1. `.app` (normally `min-height:100dvh` -- a FLOOR, so ordinary pages
+      can still grow taller than one screen and scroll, e.g. a long hymn)
+      needs a hard `height:100dvh` CAP instead, but only on this view --
+      capping it globally would clip content on every other screen. app.js's
+      render() dispatcher toggles a `stage-page` class on <body> for exactly
+      this, alongside the existing `main-full-bleed` toggle on <main>.
+   2. Every flex link in the chain from `.app` down to `.stage-view` needs
+      `min-height:0` -- flex items default to `min-height:auto`, which
+      means "never shrink below your own content's natural size" and would
+      otherwise silently defeat the cap above, letting content push .app
+      taller regardless (the same overflow bug, just moved one layer down).
+   With both in place, header + stage content + footer are FORCED to add up
+   to exactly one screen, so .stage-view's rendered height becomes a fixed,
+   reliable number instead of a "moving target" that grows to match
+   whatever font-size fitStageLines() (app.js) last tried -- which is what
+   lets that function measure its budget directly off the container instead
+   of window.innerHeight minus a guess. Any content that still doesn't fit
+   once fitStageLines() has shrunk the text down to its own legible floor
+   simply clips at the edges rather than growing the page -- the right
+   trade-off for something meant to always fill one screen during a live
+   service, vs. silently requiring a scroll no one presenting can see. */
+body.stage-page{ height:100dvh; }
+body.stage-page .app{ height:100dvh; min-height:0; }
+main.main-full-bleed{ display:flex; flex-direction:column; min-height:0; }
+main.main-full-bleed .stage-view{ min-height:0; flex:1 1 auto; width:100%; }
+/* The "iWorship — your congregation's..." promo line has no reason to be
+   on an actual projector/stage display, and on a short/narrow screen it's
+   real budget the slide text needs -- hiding it here (not just in
+   presentation mode, see body.stage-hide-chrome below) is a straight win
+   on both counts. */
+body.stage-page .appfoot{ display:none; }
+
+  /* Presentation mode [2026-09-04] -- Jared: "add an option for the share
+     screen itself to be full screen and not show the head bar or any
+     interface." A second circular button (mirroring .stage-exit-btn,
+     opposite corner) toggles this on the standalone stage/projector view
+     -- both hides iWorship's own header/footer chrome AND requests the
+     browser's real Fullscreen API (see fitStageLines()'s neighboring
+     fullscreen handler in app.js), so what's on the projector/TV is
+     nothing but the slide, edge to edge, no address bar either. */
+  body.stage-hide-chrome .topbar,
+  body.stage-hide-chrome .appfoot{ display:none; }
+  .stage-fullscreen-btn{
+    position:absolute; top:20px; left:24px; width:44px; height:44px; border-radius:50%;
+    border:1px solid var(--border); background:var(--surface); color:var(--ink-soft);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .stage-fullscreen-btn svg{ width:20px; height:20px; }
+
+  /* Musician chart view [2026-09-04] -- Jared: "what if ... the musicians
+     that join can see the chords as well instead of just the lyrics."
+     .chart-gate is the "you can't see this" screen (not signed in, or
+     signed in without Play Mode access) -- deliberately plain, matching
+     the app's other empty-state text rather than looking like an error.
+     .chart-active-section/.chart-now-badge highlight whichever section
+     the host is currently on within the full scrollable chart, reusing
+     .live-badge's pill/dot look at a smaller size rather than a whole new
+     component. */
+  .chart-gate{ max-width:52ch; margin:60px auto; text-align:center; }
+  .chart-gate-title{ font-family:'EB Garamond',serif; font-size:1.6rem; font-weight:700; margin-bottom:10px; }
+  .chart-gate-body{ color:var(--ink-soft); margin-bottom:22px; }
+  .chart-note{ text-align:center; color:var(--ink-soft); margin-bottom:20px; }
+  .chart-active-section{
+    background:var(--gold-tint); border-radius:16px; padding:14px 18px; margin-left:-18px; margin-right:-18px;
+  }
+  .chart-now-badge{
+    display:inline-flex; margin-left:10px; padding:2px 10px; font-size:.68rem; vertical-align:middle;
+  }
+
+  /* Presentation builder [2026-09-08] -- see app.js's big comment above
+     SLIDE_BACKGROUNDS/renderSlideCanvas() for the full data-model story.
+     Short version: a slide is a free canvas of independently positioned/
+     sized blocks, each stored as a PERCENTAGE of the slide (x/y/w/h), so
+     the very same markup renders correctly whether it's small inside a
+     .slide-card thumbnail, being dragged around in the editor, or filling
+     an entire projector screen -- only the outer .slide-canvas-* variant
+     class changes the container's own sizing; every block inside just
+     says "I'm at 20%,15%, I'm 60% wide" and doesn't care how big that
+     turns out to be in pixels. `container-type:inline-size` on
+     .slide-canvas is what makes block TEXT scale the same way: block font
+     sizes below are set in `cqw` (% of .slide-canvas's own width, not the
+     viewport), so a heading reads at the same relative size on a phone-
+     sized card, a laptop's split-screen column, and a 1080p projector
+     alike, with rem floors/ceilings (in the clamp()s) so text never goes
+     unreadably small on a tiny thumbnail or absurdly huge on a giant
+     screen. */
+  .slide-canvas{
+    position:relative; container-type:inline-size; background:var(--surface); overflow:hidden;
+  }
+  .slide-canvas-card, .slide-canvas-edit{ width:100%; aspect-ratio:16/9; border-radius:18px; }
+  .slide-canvas-edit{ border:2px solid var(--border); margin-bottom:14px; touch-action:none; }
+  /* Matches .stage-media-frame's convention exactly (see that rule's
+     comment above): position:absolute; inset:0 against the nearest
+     positioned ancestor -- .stage-view or .host-stage-col -- so a blocks-
+     based sermon slide fills the projector/split-screen column edge to
+     edge, same as image/video content already does. */
+  .slide-canvas-stage{ position:absolute; inset:0; }
+  .slide-canvas-bg-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  /* Default block text color is --ink (reads fine against light presets --
+     Ivory/Pine/Gold); slideBgMeta()'s `dark` flag (also forced true for any
+     custom uploaded image, since this app doesn't inspect pixel brightness)
+     swaps in a warm off-white instead, so text stays legible on Wine/Black/
+     photo backgrounds without a host having to think about contrast. */
+  .slide-canvas-dark .slide-block-text{ color:#F5ECD6; }
+
+  .slide-block{ position:absolute; overflow:hidden; }
+  .slide-block-text{
+    display:flex; flex-direction:column; justify-content:center; height:100%;
+    padding:2% 3%; color:var(--ink); line-height:1.25;
+  }
+  .slide-block-text p{ margin:0 0 .3em; }
+  .slide-block-text p:last-child{ margin-bottom:0; }
+  .block-align-left{ text-align:left; align-items:flex-start; }
+  .block-align-center{ text-align:center; align-items:center; }
+  .block-align-right{ text-align:right; align-items:flex-end; }
+  .block-size-sm p{ font-size:clamp(.7rem, 2.6cqw, 1.3rem); }
+  .block-size-md p{ font-size:clamp(.85rem, 3.6cqw, 1.9rem); }
+  .block-size-lg p{ font-size:clamp(1rem, 5cqw, 2.6rem); }
+  .block-size-xl p{ font-size:clamp(1.2rem, 7cqw, 3.6rem); }
+  .block-bold p{ font-weight:800; }
+  .slide-block-image{ display:flex; align-items:center; justify-content:center; height:100%; }
+  .slide-block-image img{ width:100%; height:100%; object-fit:contain; }
+  .slide-block-empty{
+    display:flex; align-items:center; justify-content:center; width:100%; height:100%;
+    border:2px dashed var(--border); border-radius:8px; color:var(--ink-soft); font-size:.85rem;
+  }
+
+  /* Editor-only interactivity -- see wireSlideCanvasInteractions() in
+     app.js for the drag/resize logic these hook into. A plain read-only
+     render (card/stage variants) never gets these classes at all. */
+  .slide-canvas-edit .slide-block{ cursor:grab; outline:1px dashed transparent; user-select:none; }
+  .slide-canvas-edit .slide-block:hover{ outline-color:var(--border); }
+  .slide-block-selected{ outline:2px solid var(--wine) !important; }
+  .slide-block-handle{
+    position:absolute; right:-7px; bottom:-7px; width:16px; height:16px; border-radius:50%;
+    background:var(--wine); border:2px solid var(--surface); cursor:nwse-resize; touch-action:none; z-index:2;
+  }
+
+  .slide-builder-toolbar{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .btn-sm{ min-height:38px; padding:8px 14px; font-size:.82rem; border-radius:10px; }
+
+  .slide-bg-row{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .bg-swatch{
+    flex:none; width:32px; height:32px; border-radius:50%; border:2px solid var(--border);
+    cursor:pointer; padding:0; position:relative;
+  }
+  .bg-swatch.active{ border-color:var(--wine); box-shadow:0 0 0 2px var(--wine-tint); }
+  .bg-swatch-default{ background:var(--surface); }
+  .bg-swatch-wine{ background:var(--wine); }
+  .bg-swatch-pine{ background:var(--pine-tint); }
+  .bg-swatch-gold{ background:var(--gold-tint); }
+  .bg-swatch-black{ background:#000; }
+  .bg-swatch-image-upload{
+    display:flex; align-items:center; justify-content:center; background:var(--surface-2);
+    color:var(--ink-soft); font-size:1.1rem; font-weight:700; border-style:dashed;
+  }
+
+  .verse-insert-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .verse-insert-row input[type=text]{
+    flex:1 1 220px; padding:10px 14px; border-radius:12px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink); font-family:inherit;
+  }
+
+  .block-properties{ border-top:1px solid var(--border); padding-top:14px; margin-top:4px; }
+  .block-properties textarea{
+    width:100%; font-size:1rem; padding:12px 14px; border-radius:12px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink); font-family:inherit; min-height:90px; resize:vertical;
+  }
+  .block-controls-row{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px; }
+  .block-controls-row select{
+    padding:8px 10px; border-radius:10px; border:2px solid var(--border); background:var(--surface); font-weight:700;
+  }
+  /* .icon-tool-btn's default shape (stacked icon+caption, min-width:68px)
+     is built for the big presenter toolbar -- BOLD here is a plain small
+     text-only toggle sharing that same class for its active/hover coloring,
+     so it needs its own compact, single-row layout instead. */
+  .block-controls-row .icon-tool-btn{
+    flex:none; flex-direction:row; min-width:0; padding:8px 14px; font-size:.72rem; border-radius:10px;
+  }
+  /* .remove-btn's default shape (a round 38x38 circle sized to hold a
+     single "x" glyph -- see every other use of this class, e.g. removing
+     a setlist section or a sermon slide) breaks once real words go inside
+     it: "REMOVE BLOCK" doesn't fit a 38px circle, so it wrapped and spilled
+     out over whatever sat next to it (the BOLD toggle) instead of staying
+     inside its own button. .remove-block-btn overrides just the shape --
+     a normal pill/rectangle sized to its text -- while keeping .remove-btn
+     itself (and its hover color) for the plain icon buttons elsewhere. */
+  .remove-block-btn{
+    width:auto; height:auto; border-radius:10px; padding:8px 14px; font-size:.72rem; font-weight:700;
+  }
+  .align-group{ display:inline-flex; border:2px solid var(--border); border-radius:10px; overflow:hidden; }
+  .align-btn{
+    background:var(--surface); border:none; padding:8px 10px; font-size:.72rem; font-weight:700;
+    color:var(--ink-soft); cursor:pointer; border-right:1px solid var(--border);
+  }
+  .align-btn:last-child{ border-right:none; }
+  .align-btn.active{ background:var(--wine); color:var(--gold-tint); }
+
+  /* ============ FELLOWSHIP [2026-09-08] ============
+     Feed post cards, profile cards, and admin report cards all reuse
+     .room-list-card/.session-card/.confirm-row/.setlist-items as-is (see
+     app.js's renderFeedPostCard()/renderProfileView()/
+     renderAdminReportsSection()) -- only the message-bubble styling below
+     is genuinely new, since nothing existing in this file looks like a
+     chat bubble. */
+  .msg-bubble{
+    border-radius:14px; padding:8px 12px; white-space:pre-wrap; word-break:break-word;
+  }
+  .msg-bubble-mine{ background:var(--pine); color:var(--gold-tint); }
+  .msg-bubble-theirs{ background:var(--surface-2); color:var(--ink); }
+  .msg-row{ display:flex; flex-direction:column; max-width:78%; }
+  .msg-row-mine{ align-self:flex-end; align-items:flex-end; }
+  .msg-row-theirs{ align-self:flex-start; align-items:flex-start; }
+  .thread-scroll-body{
+    max-height:50vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+    padding:10px; background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  }
+  .feed-composer-textarea, .thread-composer-row input[type="text"]{
+    font-family:inherit; font-size:1rem; padding:12px 14px; border-radius:12px;
+    border:2px solid var(--border); background:var(--surface); color:var(--ink);
+  }
+  .thread-composer-row{ display:flex; gap:8px; margin-top:14px; }
+  .thread-composer-row input[type="text"]{ flex:1; }
+  .avatar-circle{ border-radius:50%; flex:none; object-fit:cover; }
+  .avatar-fallback{
+    border-radius:50%; background:var(--border); color:var(--ink-soft); flex:none;
+    display:flex; align-items:center; justify-content:center; font-weight:700;
+  }
+
+  /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============
+     Jared: "make the fellowship part look like an actual social media
+     feed... a hamburger menu... profile pic next to the logo... Shorts...
+     notifications, explore, stories... search for people." Everything
+     below uses the SAME design tokens (--wine/--pine/--surface-2/--border
+     etc.) as the rest of the app -- no new hardcoded colors. */
+
+  .brand-row{ display:flex; align-items:center; gap:10px; min-width:0; flex:1 1 auto; }
+  /* Phone-width header fix [2026-09-09, v24] -- the avatar + bell + home +
+     theme + hamburger row (5 tap targets, added by the social redesign)
+     doesn't fit a narrow phone screen at full desktop size alongside the
+     brand -- give the whole cluster more room by shrinking icon buttons and
+     tightening gaps/padding, so the brand title rarely if ever needs the
+     ellipsis fallback above. */
+  @media (max-width:420px){
+    .topbar-inner{ padding:10px 12px; gap:8px; }
+    .icon-btn{ width:42px; height:42px; border-radius:12px; }
+    .icon-btn svg{ width:20px; height:20px; }
+    .topbar-icons{ gap:6px; }
+    .brand{ gap:8px; }
+    .brand svg{ width:28px; height:22px; }
+    .brand-name{ font-size:1.2rem; }
+    .header-avatar-btn .avatar-circle, .header-avatar-btn .avatar-fallback{ width:28px; height:28px; font-size:12px; }
+  }
+  .header-avatar-btn{
+    background:none; border:2px solid rgba(255,255,255,.5); border-radius:50%;
+    padding:0; cursor:pointer; line-height:0; flex:none;
+  }
+  .header-avatar-btn .avatar-circle, .header-avatar-btn .avatar-fallback{ width:34px; height:34px; font-size:14px; }
+
+  .notif-badge{
+    position:absolute; top:6px; right:6px; min-width:16px; height:16px; padding:0 3px;
+    border-radius:8px; background:var(--gold-tint); color:var(--wine-ink);
+    font-size:.62rem; font-weight:800; line-height:16px; text-align:center;
+  }
+  .notif-badge-inline{
+    display:inline-block; min-width:18px; padding:1px 5px; border-radius:9px;
+    background:var(--wine); color:var(--gold-tint); font-size:.68rem; font-weight:800; margin-left:4px;
+  }
+
+  /* ===== Notifications pop-down + Messages icon/dropdown [v36] =====
+     Jared: "notifs at the left and notifs at the top? a bit redundant,
+     just keep the one at the top... make it a pop down from there first"
+     and "[messages] its own icon just like in facebook, then the messages
+     pop at the bottom (in PC version)." .topbar-icon-wrap just gives each
+     topbar icon button a positioning anchor for its own dropdown (both
+     #notifDropdown and #msgDropdown reuse this same .topbar-dropdown
+     shell) -- see renderNotifDropdown()/renderMsgDropdown() in app.js. */
+  .topbar-icon-wrap{ position:relative; display:inline-flex; }
+  .topbar-dropdown{
+    /* Fix [2026-09-15]: Jared screenshotted this panel with the sender
+       name on every row barely visible against the background ("font
+       color not visible here"). #notifDropdown/#msgDropdown live in the
+       DOM as children of header.topbar (so .topbar-icon-wrap can anchor
+       them next to the bell/messages icon) -- but header.topbar itself
+       sets color:var(--gold-tint), tuned for its own wine-colored
+       background. `position:absolute` moves this panel out of the
+       topbar's visual flow but does NOT stop it (or its children, e.g.
+       the row name span, which sets no color of its own) inheriting that
+       gold-tint text color -- and in dark mode --gold-tint (#3A3018) is
+       almost the same dark brown as this panel's own --surface
+       background, so the name read as invisible. Only the preview `.hint`
+       text and the "SEE ALL"/"VIEW ALL" footer button happened to look
+       fine because those two already set their own explicit color.
+       Resetting color here to the normal body text tone fixes the header,
+       every row's name, and the empty-state text all at once. */
+    color:var(--ink);
+    position:absolute; top:calc(100% + 10px); right:-8px; z-index:55;
+    width:320px; max-width:calc(100vw - 24px); max-height:70vh; overflow-y:auto;
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    box-shadow:var(--shadow);
+  }
+  .topbar-dropdown-header{
+    padding:14px 16px 10px; font-weight:700; font-size:1.05rem;
+  }
+  .topbar-dropdown-list{ display:flex; flex-direction:column; }
+  .topbar-dropdown-row{
+    display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+    background:none; border:none; padding:10px 16px; cursor:pointer; color:inherit; font:inherit;
+  }
+  .topbar-dropdown-row:hover{ background:var(--surface-2); }
+  .topbar-dropdown-row-unread{ background:var(--surface-2); font-weight:700; }
+  .topbar-dropdown-row-text{
+    display:flex; flex-direction:column; min-width:0; flex:1;
+  }
+  .topbar-dropdown-row-text > span:first-child{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .topbar-dropdown-empty{ padding:18px 16px; color:var(--ink-soft); font-size:.9rem; }
+  .topbar-dropdown-viewall{
+    display:block; width:100%; text-align:center; background:none; border:none;
+    border-top:1px solid var(--border); padding:12px 16px; cursor:pointer;
+    color:var(--wine); font-weight:700; letter-spacing:.03em; font-size:.82rem;
+  }
+  .topbar-dropdown-viewall:hover{ background:var(--surface-2); }
+
+  /* ===== Floating chat dock [v36, desktop only] =====
+     Jared: "the messages pop at the bottom (in PC version, okay)."
+     Positioned/sized the same way as the existing .chat-fab/
+     .chat-floating-panel host-chat widget (own class names since both can
+     be on screen together) -- see index.html's #chatDock comment and
+     app.js's renderChatDock()/chatDockSuppressedHere(). Hidden below the
+     desktop breakpoint as defense-in-depth alongside the JS isDesktopWidth()
+     check in renderChatDock() (same "belt and suspenders" idea as the
+     sidebar-nav/bottom-tabs split elsewhere in this file). */
+  .chat-dock{
+    position:fixed; right:20px; bottom:calc(var(--now-live-bar-h, 72px) + 16px); z-index:45;
+    width:320px; max-width:calc(100vw - 40px); max-height:60vh;
+    display:flex; flex-direction:column;
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  /* Fix [2026-09-15], revised [2026-09-16]: on the session-host screen,
+     .chat-fab/.chat-floating-panel (the room's own in-session chat) already
+     sits bottom-right. This used to move the personal-messages dock to the
+     opposite corner (left) to avoid the two fighting over the same spot --
+     but Jared: "put it on the lower right corner where it can be minimized
+     anytime cause it's blocking a lot of things on the interface," since
+     the left side is exactly where the SONGS/SERMON/BIBLE/MEDIA picker
+     lives. It now stays put on the right always; body.hosting-page
+     (toggled in renderCurrentView(), true only on session-host) just lifts
+     it enough to clear the room-chat FAB below instead of relocating it,
+     and the new minimize control (below) is the real fix for "blocking a
+     lot of things" -- one tap collapses this down to its header bar. */
+  body.hosting-page .chat-dock{ bottom: calc(var(--now-live-bar-h, 72px) + 84px); }
+  @media (max-width:899px){ .chat-dock{ display:none !important; } }
+  .chat-dock.minimized{ max-height:none; }
+  .chat-dock-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px; font-weight:700; border-bottom:1px solid var(--border);
+    background:var(--wine); color:var(--gold-tint);
+  }
+  .chat-dock.minimized .chat-dock-header{ border-bottom:none; }
+  .chat-dock-header span:first-child{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .chat-dock-header-actions{ display:flex; align-items:center; gap:2px; flex:none; }
+  .chat-dock-minimize{
+    background:none; border:none; color:inherit; cursor:pointer; padding:6px;
+    display:flex; align-items:center; justify-content:center; opacity:.85;
+  }
+  .chat-dock-minimize:hover{ opacity:1; }
+  .chat-dock-close{
+    background:none; border:none; font-size:1.3rem; line-height:1; color:inherit; cursor:pointer; padding:2px 6px;
+  }
+  .chat-dock-body{
+    flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; min-height:160px;
+  }
+  .chat-dock-composer{
+    display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--border);
+  }
+  .chat-dock-composer input[type="text"]{
+    flex:1; font-family:inherit; font-size:.92rem; padding:8px 10px; border-radius:10px;
+    border:2px solid var(--border); background:var(--surface); color:var(--ink);
+  }
+
+  /* Hamburger drawer -- a right-side slide-in panel over a dim scrim. */
+  .hamburger-overlay{ position:fixed; inset:0; z-index:60; display:flex; justify-content:flex-end; }
+  .hamburger-scrim{
+    position:absolute; inset:0; background:rgba(0,0,0,.45); border:none; padding:0; cursor:pointer;
+  }
+  .hamburger-drawer{
+    position:relative; width:min(340px, 88vw); height:100%; background:var(--surface);
+    border-left:1px solid var(--border); box-shadow:-8px 0 24px rgba(0,0,0,.18);
+    overflow-y:auto; animation:hamburger-slide-in .22s ease;
+  }
+  @keyframes hamburger-slide-in{ from{ transform:translateX(24px); opacity:.4; } to{ transform:translateX(0); opacity:1; } }
+  .hamburger-header{
+    display:flex; align-items:center; gap:10px; padding:20px 16px;
+    border-bottom:1px solid var(--border); font-weight:700; color:var(--ink);
+  }
+  .hamburger-items{ display:flex; flex-direction:column; padding:8px; }
+  .hamburger-item{
+    text-align:left; background:none; border:none; border-radius:12px;
+    padding:14px 12px; font-weight:700; font-size:.92rem; letter-spacing:.02em;
+    color:var(--ink); cursor:pointer;
+  }
+  .hamburger-item:hover{ background:var(--surface-2); }
+  .hamburger-item-danger{ color:var(--wine); margin-top:6px; border-top:1px solid var(--border); border-radius:0; padding-top:16px; }
+
+  /* Desktop sidebar nav [2026-09-10] -- Jared: "look at Facebook's PC
+     interface and Mobile interface. They differ. what if you do it like
+     that?" Hidden below the desktop breakpoint; switched on and laid out
+     by the "Desktop navigation redesign" media-query block further UP
+     this file (right after the existing 1700px desktop-sizing tier).
+     Important: the "hide by default" rule below has to itself be inside a
+     max-width media query, not a plain unconditional `.sidebar-nav{
+     display:none }` -- an unconditional rule at this later point in the
+     file would win the cascade over that earlier block's min-width:900px
+     `display:flex` at equal specificity (later source position wins ties,
+     media-query nesting doesn't grant extra specificity), silently
+     hiding the sidebar on desktop too. Item styling below (unconditional)
+     applies at every width regardless -- only the container's own
+     display toggle is width-gated. */
+  @media (max-width: 899px){
+    .sidebar-nav{ display:none; }
+  }
+  .sidebar-scroll{ display:flex; flex-direction:column; gap:2px; padding:16px 12px; }
+  .sidebar-section{ display:flex; flex-direction:column; gap:2px; }
+  .sidebar-divider{ height:1px; background:var(--border); margin:10px 6px; }
+  .sidebar-item{
+    display:flex; align-items:center; gap:14px; text-align:left;
+    background:none; border:none; border-radius:12px;
+    padding:12px 14px; font-weight:700; font-size:.92rem; letter-spacing:.01em;
+    color:var(--ink); cursor:pointer;
+  }
+  .sidebar-item svg{ width:22px; height:22px; flex:none; }
+  .sidebar-item:hover{ background:var(--surface-2); }
+  .sidebar-item-active{ background:var(--wine-tint); color:var(--wine); }
+  .sidebar-item-danger{ color:var(--wine); }
+  .sidebar-profile-row{
+    display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+    background:none; border:none; border-radius:12px; padding:10px 10px;
+    font-weight:700; color:var(--ink); cursor:pointer;
+  }
+  .sidebar-profile-row:hover{ background:var(--surface-2); }
+  .sidebar-profile-row span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Fellowship sub-nav -- Feed / Shorts / Explore / Messages tab row. */
+  .fellowship-subnav{
+    display:flex; gap:4px; margin-bottom:18px; padding:4px;
+    background:var(--surface-2); border-radius:14px; border:1px solid var(--border);
+  }
+  .fellowship-subnav-tab{
+    flex:1; padding:10px 8px; border-radius:10px; border:none; background:none;
+    color:var(--ink-soft); font-weight:700; font-size:.78rem; letter-spacing:.04em; cursor:pointer;
+  }
+  .fellowship-subnav-tab.active{ background:var(--wine); color:var(--gold-tint); }
+
+  /* Stories -- the horizontal ring bar + the full-screen viewer. */
+  .story-bar{ display:flex; gap:14px; overflow-x:auto; padding:4px 2px 18px; }
+  .story-ring{
+    display:flex; flex-direction:column; align-items:center; gap:6px; flex:none;
+    width:72px; background:none; border:none; cursor:pointer; padding:0;
+  }
+  .story-ring-avatar{
+    display:flex; border-radius:50%; padding:3px;
+    background:linear-gradient(45deg, var(--wine), var(--gold-tint));
+    position:relative;
+  }
+  .story-ring-avatar .avatar-circle, .story-ring-avatar .avatar-fallback{ width:56px; height:56px; border:2px solid var(--surface); }
+  /* [2026-09-10] story-ring-thumb is the actual story media (see
+     storyRingThumb()), cropped into the same circle the avatar used to
+     fill -- object-fit:cover so a tall/wide photo or video still fills a
+     perfect circle instead of stretching or leaving gaps. */
+  .story-ring-avatar .story-ring-thumb{
+    width:56px; height:56px; border:2px solid var(--surface); border-radius:50%;
+    object-fit:cover; display:block; background:var(--surface-2);
+  }
+  .story-ring-avatar-add{ background:var(--border); }
+  .story-add-plus{
+    position:absolute; bottom:-2px; right:-2px; width:22px; height:22px; border-radius:50%;
+    background:var(--wine); color:var(--gold-tint); display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:1rem; border:2px solid var(--surface);
+  }
+  .story-ring-label{ font-size:.72rem; color:var(--ink-soft); max-width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .story-viewer-overlay{
+    position:fixed; inset:0; z-index:70; background:#000; display:flex; align-items:center; justify-content:center;
+  }
+  .story-viewer-overlay #storyViewerBody{ position:relative; width:min(480px, 100vw); height:100%; max-height:100dvh; }
+  .story-viewer-progress{ position:absolute; top:10px; left:10px; right:10px; display:flex; gap:4px; z-index:2; }
+  .story-viewer-progress-seg{ flex:1; height:3px; border-radius:2px; background:rgba(255,255,255,.3); }
+  .story-viewer-progress-seg.filled{ background:#fff; }
+  .story-viewer-header{
+    position:absolute; top:22px; left:10px; right:10px; z-index:2;
+    display:flex; align-items:center; gap:8px; color:#fff; font-weight:700;
+  }
+  .story-viewer-media{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  .story-viewer-media img, .story-viewer-media video{ max-width:100%; max-height:100%; }
+  .story-viewer-tap{ position:absolute; top:0; bottom:0; width:35%; background:none; border:none; z-index:1; }
+  .story-viewer-tap-prev{ left:0; }
+  .story-viewer-tap-next{ right:0; }
+
+  /* [2026-09-10] the story-viewer's per-story options menu -- replaces the
+     old DELETE text button that overflowed its fixed-size icon box (see
+     renderStoryViewer()'s comment). Dark/opaque to match the viewer's
+     always-black backdrop regardless of the app's light/dark theme. */
+  .story-menu-dropdown{
+    position:absolute; top:36px; right:0; z-index:3; min-width:150px;
+    background:#1a1a1a; border:1px solid rgba(255,255,255,.2); border-radius:10px;
+    padding:4px; box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  .story-menu-item{
+    display:block; width:100%; text-align:left; padding:9px 12px; border-radius:7px;
+    background:none; border:none; color:#ff8a8a; font-weight:700; font-size:.85rem; cursor:pointer;
+  }
+  .story-menu-item:hover{ background:rgba(255,255,255,.1); }
+
+  /* Post action bar -- like / comment / repost / save. */
+  .post-action-bar{ display:flex; align-items:center; gap:6px; margin-top:10px; }
+  .post-action-btn{
+    display:inline-flex; align-items:center; gap:4px; background:none; border:none;
+    padding:8px 10px; border-radius:10px; color:var(--ink-soft); font-weight:700; font-size:.85rem;
+    cursor:pointer;
+  }
+  .post-action-btn:hover{ background:var(--surface-2); }
+  .post-action-btn svg{ width:20px; height:20px; }
+  .post-action-btn.active{ color:var(--wine); }
+  .repost-quote{
+    margin-top:8px; padding:10px 12px; border:1px solid var(--border); border-radius:12px;
+    background:var(--surface-2);
+  }
+
+  .comment-thread{ margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .comment-row{ display:flex; gap:8px; align-items:flex-start; padding:6px 0; }
+  .comment-composer{ display:flex; gap:8px; margin-top:8px; align-items:flex-end; }
+  .comment-composer textarea{
+    flex:1; font-family:inherit; font-size:.92rem; padding:10px 12px; border-radius:12px;
+    border:2px solid var(--border); background:var(--surface); color:var(--ink); resize:vertical;
+  }
+
+  /* Shorts -- a tall self-contained vertical scroll-snap feed. */
+  .shorts-feed{
+    height:min(78vh, 720px); overflow-y:auto; scroll-snap-type:y mandatory;
+    border-radius:20px; border:1px solid var(--border); background:#000;
+  }
+  .short-card{
+    position:relative; height:100%; scroll-snap-align:start; scroll-snap-stop:always;
+    display:flex; align-items:center; justify-content:center; background:#000;
+  }
+  .short-card video{ max-width:100%; max-height:100%; }
+  .short-overlay{
+    position:absolute; left:0; right:0; bottom:0; padding:16px;
+    background:linear-gradient(to top, rgba(0,0,0,.75), transparent);
+    color:#fff;
+  }
+  .short-overlay-author{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .short-overlay .post-action-btn{ color:#fff; }
+  .short-overlay .comment-thread{ background:rgba(0,0,0,.55); border-radius:12px; padding:10px; border-top:none; max-height:220px; overflow-y:auto; }
+  .short-caption{ margin:0 0 8px; }
+
+  /* Explore / people search rows. */
+  .person-row{
+    display:flex; align-items:center; gap:12px; padding:12px 4px;
+    border-bottom:1px solid var(--border);
+  }
+  .person-row:last-child{ border-bottom:none; }
+
+  /* Notifications list. */
+  .notif-row{ display:flex; align-items:center; gap:12px; padding:14px 8px; border-bottom:1px solid var(--border); }
+  .notif-row:last-child{ border-bottom:none; }
+  .notif-row-unread{ background:var(--wine-tint); border-radius:12px; }
+
+  /* ============ SETTINGS [2026-09-10] ============
+     Jared: "settings will cover preferences, password, account switching/
+     log in/log out." Reuses .session-card/.field/.btn/.switch-account
+     throughout (see renderSettings() in app.js) -- only the theme picker and
+     the email/password mini-form below are genuinely new shapes. */
+  .settings-theme-row{ display:flex; gap:8px; }
+  .settings-theme-opt{
+    flex:1; padding:12px 8px; border-radius:12px; border:2px solid var(--border);
+    background:var(--surface); color:var(--ink-soft); font-weight:700; font-size:.82rem;
+    letter-spacing:.04em; cursor:pointer;
+  }
+  .settings-theme-opt-active{ border-color:var(--wine); color:var(--wine); background:var(--wine-tint); }
+
+  /* Notification preference toggles [2026-09-17] -- a real switch (not the
+     theme row's button-pair pattern above) since these are plain on/off
+     settings, not a pick-one-of-three -- see renderSettings()'s
+     "Notification preferences" sub-section and the enable-push banner. */
+  .pref-toggle-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; }
+  .pref-toggle-row + .pref-toggle-row{ border-top:1px solid var(--border); }
+  .pref-toggle-row p{ margin:0; font-size:.92rem; }
+  .pref-toggle{ position:relative; display:inline-block; width:44px; height:26px; flex:none; cursor:pointer; }
+  .pref-toggle input{ position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+  .pref-toggle-track{ position:absolute; inset:0; border-radius:999px; background:var(--border); transition:background .15s; pointer-events:none; }
+  .pref-toggle-track::before{ content:''; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .15s; }
+  .pref-toggle input:checked + .pref-toggle-track{ background:var(--wine); }
+  .pref-toggle input:checked + .pref-toggle-track::before{ transform:translateX(18px); }
+  .pref-toggle input:focus-visible + .pref-toggle-track{ outline:2px solid var(--wine); outline-offset:2px; }
+
+  /* Proactive enable-notifications banner [2026-09-17] -- see
+     renderLanding()'s notifBanner block. Deliberately a soft card, not a
+     modal -- easy to dismiss, never blocks anything underneath it. */
+  .notif-prompt-banner{
+    display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius:14px;
+    background:var(--wine-tint); border:1px solid var(--wine); margin-bottom:16px;
+  }
+  .notif-prompt-banner svg{ flex:none; width:22px; height:22px; margin-top:2px; color:var(--wine); }
+  .notif-prompt-banner-actions{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+
+  /* Email/password sign-in mini-form -- used both on the landing page's
+     "Make It Yours" card (signed out) and inside Settings -> Account
+     (adding a password alongside an existing Google sign-in). */
+  .email-auth-form{
+    margin-top:14px; padding-top:14px; border-top:1px solid var(--border);
+  }
+
+  /* ============ HOMEPAGE FELLOWSHIP PREVIEW [2026-09-10] ============
+     Jared: "having fellowship as the main attraction is better. like recent
+     posts, trending posts." A compact RECENT/TRENDING-toggled 3-post
+     preview on the redesigned landing hub -- reuses the real feed post
+     card/actions (renderFeedPostCard()/attachFeedActionHandlers()) so a
+     like/comment/save tapped here is the same live post as in the full
+     Fellowship tab, not a separate copy. */
+  .landing-fellowship-head{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;
+  }
+  .landing-fellowship-head h3{ margin:0; }
+  .landing-fellowship-preview .switch-account{ margin:0; padding:8px 0; }
+  .fellowship-preview-tabs{
+    display:flex; gap:4px; margin-bottom:14px; padding:4px;
+    background:var(--surface-2); border-radius:14px; border:1px solid var(--border);
+  }
+  .fellowship-preview-tab{
+    flex:1; padding:9px 8px; border-radius:10px; border:none; background:none;
+    color:var(--ink-soft); font-weight:700; font-size:.78rem; letter-spacing:.04em; cursor:pointer;
+  }
+  .fellowship-preview-tab-active{ background:var(--wine); color:var(--gold-tint); }
+
+  [hidden]{ display:none !important; }
+

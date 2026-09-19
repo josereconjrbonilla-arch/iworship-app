@@ -1,0 +1,427 @@
+# Holy Holy Holy
+key: Eb
+themes: praise
+
+Verse 1
+[Eb]Holy, holy, holy! [Ab]Lord God Al[Eb]mighty!
+[Eb]Early in the [Ab]morning our [Bb7]song shall rise to [Eb]Thee
+[Eb]Holy, holy, holy! [Cm]merciful and [Bb]mighty
+[Eb]God in [Ab]three Persons, [Bb7]blessed [Eb]Trinity
+
+Verse 2
+[Eb]Holy, holy, holy! [Ab]all the saints a[Eb]dore Thee
+[Eb]Casting down their [Ab]golden crowns a[Bb7]round the glassy [Eb]sea
+[Eb]Cherubim and [Cm]seraphim [Bb]falling down before Thee
+[Eb]Who was and [Ab]is and [Bb7]evermore shall [Eb]be
+
+Verse 3
+[Eb]Holy, holy, holy! [Ab]though the darkness [Eb]hide Thee
+[Eb]Though the eye of [Ab]sinful man Thy [Bb7]glory may not [Eb]see
+[Eb]Only Thou art [Cm]holy, there is [Bb]none beside Thee
+[Eb]Perfect in [Ab]pow'r, in [Bb7]love, and pu[Eb]rity
+
+Verse 4
+[Eb]Holy, holy, holy! [Ab]Lord God Al[Eb]mighty!
+[Eb]All Thy works shall [Ab]praise Thy name, in [Bb7]earth, and sky, and [Eb]sea
+[Eb]Holy, holy, holy! [Cm]merciful and [Bb]mighty
+[Eb]God in [Ab]three Persons, [Bb7]blessed [Eb]Trinity
+
+# Battle Hymn Of The Republic (Mine Eyes Have Seen The Glory)
+key: G
+themes: praise
+
+Verse 1
+[G]Mine eyes have seen the [C]glory of the [G]coming of the Lord
+[G]He is trampling [D]out the vintage where the [D7]grapes of wrath are [G]stored
+[G]He hath loosed the [C]fateful lightning of His [G]terrible swift sword
+[G]His truth is [D]marching [G]on
+
+Refrain
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [C]Glory! [G]Halle[D]lujah!
+[G]His truth is [D]marching [G]on
+
+Verse 2
+[G]I have seen Him in the [C]watch-fires of a [G]hundred circling camps
+[G]They have builded [D]Him an altar in the [D7]evening dews and [G]damps
+[G]I can read His [C]righteous sentence by the [G]dim and flaring lamps
+[G]His day is [D]marching [G]on
+
+Refrain
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [C]Glory! [G]Halle[D]lujah!
+[G]His truth is [D]marching [G]on
+
+Verse 3
+[G]He has sounded [C]forth the trumpet that shall [G]never call retreat
+[G]He is sifting [D]out the hearts of men be[D7]fore His judgment [G]seat
+[G]Oh, be swift, my [C]soul, to answer Him, be [G]jubilant, my feet
+[G]Our God is [D]marching [G]on
+
+Refrain
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [C]Glory! [G]Halle[D]lujah!
+[G]His truth is [D]marching [G]on
+
+Verse 4
+[G]In the beauty of the [C]lilies Christ was [G]born across the sea
+[G]With a glory [D]in His bosom that trans[D7]figures you and [G]me
+[G]As He died to [C]make men holy, let us [G]die to make men free
+[G]While God is [D]marching [G]on
+
+Refrain
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [D]Glory! Halle[G]lujah!
+[G]Glory! [C]Glory! [G]Halle[D]lujah!
+[G]His truth is [D]marching [G]on
+
+# O Come All Ye Faithful
+key: C
+themes: christmas
+
+Verse 1
+[C]O come, all ye [F]faithful, [C]joyful and triumphant
+[C]O come ye, [G]O come ye to [C]Bethlehem
+[F]Come and be[C]hold Him, [G]born the King of [C]angels
+
+Refrain
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[G]dore Him, [C]Christ the [G]Lord
+
+Verse 2
+[C]God of [F]God, [C]Light of Light
+[C]Lo, He ab[G]hors not the [C]virgin's womb
+[F]Very [C]God, be[G]gotten not [C]created
+
+Refrain
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[G]dore Him, [C]Christ the [G]Lord
+
+Verse 3
+[C]Sing, choirs of [F]angels, [C]sing in exultation
+[C]Sing, all ye [G]citizens of [C]heav'n above
+[F]Glory to [C]God, [G]all glory in the [C]highest
+
+Refrain
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[G]dore Him, [C]Christ the [G]Lord
+
+Verse 4
+[C]Yea, Lord, we [F]greet Thee, [C]born this happy morning
+[C]Jesus, to [G]Thee be all [C]glory giv'n
+[F]Word of the [C]Father, [G]now in flesh ap[C]pearing
+
+Refrain
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[C]dore Him
+[F]O come, let us a[G]dore Him, [C]Christ the [G]Lord
+
+# Nothing But The Blood
+key: F
+themes: grace
+
+Verse 1
+[F]What can wash away my [C]sin?
+[F]Nothing but the [C]blood of [F]Jesus
+[F]What can make me whole a[C]gain?
+[F]Nothing but the [C]blood of [F]Jesus
+
+Chorus
+[F]Oh, precious is the [Bb]flow
+[F]That makes me [C]white as [F]snow
+[Dm]No other fount I [Bb]know
+[F]Nothing but the [C]blood of [F]Jesus
+
+Verse 2
+[F]For my pardon, this I [C]see
+[F]Nothing but the [C]blood of [F]Jesus
+[F]For my cleansing, this my [C]plea
+[F]Nothing but the [C]blood of [F]Jesus
+
+Chorus
+[F]Oh, precious is the [Bb]flow
+[F]That makes me [C]white as [F]snow
+[Dm]No other fount I [Bb]know
+[F]Nothing but the [C]blood of [F]Jesus
+
+Verse 3
+[F]Nothing can for sin at[C]one
+[F]Nothing but the [C]blood of [F]Jesus
+[F]Naught of good that I have [C]done
+[F]Nothing but the [C]blood of [F]Jesus
+
+Chorus
+[F]Oh, precious is the [Bb]flow
+[F]That makes me [C]white as [F]snow
+[Dm]No other fount I [Bb]know
+[F]Nothing but the [C]blood of [F]Jesus
+
+Verse 4
+[F]This is all my hope and [C]peace
+[F]Nothing but the [C]blood of [F]Jesus
+[F]This is all my righteous[C]ness
+[F]Nothing but the [C]blood of [F]Jesus
+
+Chorus
+[F]Oh, precious is the [Bb]flow
+[F]That makes me [C]white as [F]snow
+[Dm]No other fount I [Bb]know
+[F]Nothing but the [C]blood of [F]Jesus
+
+# At The Cross
+key: A
+themes: grace
+
+Verse 1
+[A]Alas! and did my [D]Savior [A]bleed
+[A]And did my [E]Sovereign [A]die?
+[A]Would He de[D]vote that [A]sacred head
+[F#m]For such a [E]worm as [A]I?
+
+Chorus
+[A]At the cross, [D]at the [A]cross
+[A]Where I first [E]saw the [A]light
+[D]And the burden of my [A]heart rolled a[E]way
+[A]It was there by [D]faith I re[A]ceived my sight
+[F#m]And now I am [E]happy all the [A]day
+
+Verse 2
+[A]Was it for [D]crimes that I had [A]done
+[A]He groaned up[E]on the [A]tree?
+[A]Amazing [D]pity! [A]Grace unknown!
+[F#m]And love be[E]yond de[A]gree
+
+Chorus
+[A]At the cross, [D]at the [A]cross
+[A]Where I first [E]saw the [A]light
+[D]And the burden of my [A]heart rolled a[E]way
+[A]It was there by [D]faith I re[A]ceived my sight
+[F#m]And now I am [E]happy all the [A]day
+
+Verse 3
+[A]Well might the [D]sun in [A]darkness hide
+[A]And shut his [E]glories [A]in
+[A]When Christ, the [D]mighty [A]Maker died
+[F#m]For man the [E]creature's [A]sin
+
+Chorus
+[A]At the cross, [D]at the [A]cross
+[A]Where I first [E]saw the [A]light
+[D]And the burden of my [A]heart rolled a[E]way
+[A]It was there by [D]faith I re[A]ceived my sight
+[F#m]And now I am [E]happy all the [A]day
+
+Verse 4
+[A]Thus might I [D]hide my [A]blushing face
+[A]While His dear [E]cross ap[A]pears
+[A]Dissolve my [D]heart in [A]thankfulness
+[F#m]And melt my [E]eyes to [A]tears
+
+Chorus
+[A]At the cross, [D]at the [A]cross
+[A]Where I first [E]saw the [A]light
+[D]And the burden of my [A]heart rolled a[E]way
+[A]It was there by [D]faith I re[A]ceived my sight
+[F#m]And now I am [E]happy all the [A]day
+
+Verse 5
+[A]But drops of [D]grief can [A]ne'er repay
+[A]The debt of [E]love I [A]owe
+[A]Here, Lord, I [D]give my[A]self away
+[F#m]'Tis all that [E]I can [A]do
+
+Chorus
+[A]At the cross, [D]at the [A]cross
+[A]Where I first [E]saw the [A]light
+[D]And the burden of my [A]heart rolled a[E]way
+[A]It was there by [D]faith I re[A]ceived my sight
+[F#m]And now I am [E]happy all the [A]day
+
+# To The Work
+key: D
+
+Verse 1
+[D]To the work! to the work! [G]we are servants of [D]God
+[D]Let us follow the [A]path that our [A7]Master has [D]trod
+[D]With the balm of His [G]counsel our [D]strength to renew
+[D]Let us do with our [A]might what our [D]hands find to do
+
+Refrain
+[D]Toiling on, [G]toiling [D]on
+[D]Toiling on, [A]toiling [D]on
+[G]Let us hope, [D]let us watch
+[D]And labor [A]till the Master [D]comes
+
+Verse 2
+[D]To the work! to the work! [G]let the hungry be [D]fed
+[D]To the fountain of [A]life let the [A7]weary be [D]led
+[D]In the cross and its [G]banner our [D]glory shall be
+[D]While we herald the [A]tidings, "Sal[D]vation is free!"
+
+Refrain
+[D]Toiling on, [G]toiling [D]on
+[D]Toiling on, [A]toiling [D]on
+[G]Let us hope, [D]let us watch
+[D]And labor [A]till the Master [D]comes
+
+Verse 3
+[D]To the work! to the work! [G]there is labor for [D]all
+[D]For the kingdom of [A]darkness and [A7]error shall [D]fall
+[D]And the name of Je[G]hovah ex[D]alted shall be
+[D]In the loud-swelling [A]chorus, "Sal[D]vation is free!"
+
+Refrain
+[D]Toiling on, [G]toiling [D]on
+[D]Toiling on, [A]toiling [D]on
+[G]Let us hope, [D]let us watch
+[D]And labor [A]till the Master [D]comes
+
+Verse 4
+[D]To the work! to the work! [G]in the strength of the [D]Lord
+[D]And a robe and a [A]crown shall our [A7]labor re[D]ward
+[D]When the home of the [G]faithful our [D]dwelling shall be
+[D]And we shout with the [A]ransomed, "Sal[D]vation is free!"
+
+Refrain
+[D]Toiling on, [G]toiling [D]on
+[D]Toiling on, [A]toiling [D]on
+[G]Let us hope, [D]let us watch
+[D]And labor [A]till the Master [D]comes
+
+# Our Best
+key: C
+themes: thanksgiving
+
+Verse 1
+[C]Hear ye the Master's [F]call, "[C]Give Me thy best!"
+[C]For, be it [G]great or small, [C]that is His test
+[F]Do then the [C]best you can, [G]not for reward
+[C]Not for the [F]praise of [G]men, but [C]for the Lord
+
+Refrain
+[F]Every work for [C]Jesus will be [G]blest
+[C]But He asks from [F]everyone his [C]best
+[F]Our talents may be [C]few, these may be [G]small
+[C]But unto [F]Him is [G]due our best, our [C]all
+
+Verse 2
+[C]Wait not for men to [F]laud, [C]heed not their slight
+[C]Winning the [G]smile of God [C]brings its delight!
+[F]Aiding the [C]good and true [G]ne'er goes unblest
+[C]All that we [F]think or [G]do, be it [C]the best
+
+Refrain
+[F]Every work for [C]Jesus will be [G]blest
+[C]But He asks from [F]everyone his [C]best
+[F]Our talents may be [C]few, these may be [G]small
+[C]But unto [F]Him is [G]due our best, our [C]all
+
+Verse 3
+[C]Night soon comes on a[F]pace, [C]day hastens by
+[C]Workman and [G]work must face [C]testing on high
+[F]Oh, may we [C]in that day [G]find rest, sweet rest
+[C]Which God has [F]promised [G]those who do their [C]best
+
+Refrain
+[F]Every work for [C]Jesus will be [G]blest
+[C]But He asks from [F]everyone his [C]best
+[F]Our talents may be [C]few, these may be [G]small
+[C]But unto [F]Him is [G]due our best, our [C]all
+
+# Tis So Sweet To Trust In Jesus
+key: G
+themes: prayer
+
+Verse 1
+[G]'Tis so sweet to trust in [C]Jesus,
+[G]Just to take Him at His [D]Word,
+[G]Just to rest upon His [C]promise,
+[G]Just to know, "[D]Thus saith the [G]Lord."
+
+Chorus
+[G]Jesus, Jesus, [C]how I trust [G]Him!
+[G]How I've proved Him [D]o'er and [G]o'er!
+[G]Jesus, Jesus, [C]precious [G]Jesus!
+[D]O for grace to [G]trust Him more!
+
+Verse 2
+[G]O how sweet to trust in [C]Jesus,
+[G]Just to trust His [D]cleansing blood,
+[G]Just in simple [C]faith to plunge me
+[G]'Neath the healing, [D]cleansing [G]flood!
+
+Chorus
+[G]Jesus, Jesus, [C]how I trust [G]Him!
+[G]How I've proved Him [D]o'er and [G]o'er!
+[G]Jesus, Jesus, [C]precious [G]Jesus!
+[D]O for grace to [G]trust Him more!
+
+Verse 3
+[G]Yes, 'tis sweet to trust in [C]Jesus,
+[G]Just from sin and [D]self to cease,
+[G]Just from Jesus [C]simply taking
+[G]Life and rest, and [D]joy and [G]peace.
+
+Chorus
+[G]Jesus, Jesus, [C]how I trust [G]Him!
+[G]How I've proved Him [D]o'er and [G]o'er!
+[G]Jesus, Jesus, [C]precious [G]Jesus!
+[D]O for grace to [G]trust Him more!
+
+Verse 4
+[G]I'm so glad I learned to [C]trust Thee,
+[G]Precious Jesus, [D]Savior, Friend,
+[G]And I know that [C]Thou art with me,
+[G]Wilt be with me [D]to the [G]end.
+
+Chorus
+[G]Jesus, Jesus, [C]how I trust [G]Him!
+[G]How I've proved Him [D]o'er and [G]o'er!
+[G]Jesus, Jesus, [C]precious [G]Jesus!
+[D]O for grace to [G]trust Him more!
+
+# Constantly Abiding
+key: D
+themes: prayer
+
+Verse 1
+[D]There's a peace in my [G]heart that the [D]world never gave
+[D]A peace it [A]cannot take a[D]way
+[D]Tho' the trials of [G]life may sur[D]round like a cloud
+[D]I've a peace that has [A]come there to [D]stay
+
+Refrain
+[D]Constantly a[G]biding, [D]Jesus is mine
+[D]Constantly a[A]biding, [D]rapture divine
+[G]He never leaves me [D]lonely, whispers, [A]O so kind
+[D]"I will never [G]leave thee," [A]Jesus is [D]mine
+
+Verse 2
+[D]All the world seemed to [G]sing of a [D]Savior and King
+[D]When peace [A]sweetly came to my [D]heart
+[D]Troubles all fled a[G]way and my [D]night turned to day
+[D]Blessed Jesus, how [A]glorious Thou [D]art
+
+Refrain
+[D]Constantly a[G]biding, [D]Jesus is mine
+[D]Constantly a[A]biding, [D]rapture divine
+[G]He never leaves me [D]lonely, whispers, [A]O so kind
+[D]"I will never [G]leave thee," [A]Jesus is [D]mine
+
+Verse 3
+[D]This treasure I have [G]in a [D]temple of clay
+[D]While here [A]on His footstool I [D]roam
+[D]But He's coming to [G]take me some [D]glorious day
+[D]Over there to my [A]heavenly [D]home
+
+Refrain
+[D]Constantly a[G]biding, [D]Jesus is mine
+[D]Constantly a[A]biding, [D]rapture divine
+[G]He never leaves me [D]lonely, whispers, [A]O so kind
+[D]"I will never [G]leave thee," [A]Jesus is [D]mine

@@ -1,0 +1,60 @@
+rules_version = '2';
+
+// iWorship Cloud Storage rules -- Media/AVP [2026-09-06].
+//
+// Companion to firestore.rules' media/{mediaId} block: THAT collection holds
+// only a media item's metadata (title, type, download URL, storage path);
+// the actual image/video bytes live here, under one path per uploader:
+//
+//   media/{uid}/images/{fileId}   -- a single full-screen image, or one
+//                                    slide of a slideshow import
+//   media/{uid}/videos/{fileId}   -- a single uploaded video
+//
+// Read is wide open, same reasoning as every other public-readable
+// collection in this app (songs, rooms, sermons) -- a congregant's phone or
+// the projector/split-screen view needs to load whichever file a room is
+// currently presenting by URL, with no sign-in required, and there is no
+// listing/browsing of anyone else's files (only a known download URL, or a
+// signed-in owner's own uploads, are ever fetched). Write is restricted to
+// the path's own {uid} segment, matches uploadMediaFile()'s upload path in
+// firestore-data-layer.js exactly, and caps size + content-type per kind so
+// this can't be used to store arbitrary huge or wrong-typed files:
+//   - images: image/*, up to 20 MB (covers a phone photo or a Canva/Slides
+//     PNG/JPG export at real resolution)
+//   - videos: video/*, up to 300 MB (a few minutes of 1080p H.264 -- long
+//     enough for a worship video/testimony clip without inviting someone to
+//     park a full-length movie file here)
+//
+// IMPORTANT, disclosed operational note (see claude/architecture-and-
+// decisions.md and README.md): Cloud Storage for Firebase has required the
+// pay-as-you-go Blaze billing plan for every project since September 2024 --
+// there is no way to use Storage at all on the free Spark plan, the same
+// blocker that's already been true for Cloud Functions and Firestore TTL on
+// this project. No-cost usage is still available even on Blaze (a generous
+// free-tier allowance before anything is actually billed), but the media
+// upload feature this file supports will not work at all -- uploads will
+// fail with a 402/403 -- until Blaze billing is enabled on the Firebase
+// project (console -> Usage and billing -> Modify plan). This file is ready
+// the moment that happens; nothing else needs to change.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /media/{uid}/images/{fileId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid &&
+        request.resource.size <= 20 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+    match /media/{uid}/videos/{fileId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid &&
+        request.resource.size <= 300 * 1024 * 1024 &&
+        request.resource.contentType.matches('video/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+    // Everything else is denied by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

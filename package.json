@@ -1,0 +1,25 @@
+{
+  "name": "iworship",
+  "version": "0.1.0",
+  "description": "iWorship — a cloud-based Baptist hymnal, chord book, and live worship-session app.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "seed": "node scripts/seed-firestore.mjs",
+    "login": "firebase login",
+    "deploy": "vite build && firebase deploy --only hosting",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes"
+  },
+  "dependencies": {
+    "firebase": "^12.0.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-tools": "^13.0.0"
+  }
+}

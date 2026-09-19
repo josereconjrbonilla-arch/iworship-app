@@ -1,0 +1,617 @@
+[
+ {
+  "friend_title": "Abide With Me",
+  "friend_authors": [
+   "W. H. Monk"
+  ],
+  "audit": [
+   {
+    "no": "104",
+    "title": "Abide With Me",
+    "theme": "COMFORT",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Henry Francis Lyte 1847; tune \"Eventide\" W.H. Monk 1861",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "All Creatures of our God and King",
+  "friend_authors": [
+   "St. Francis of Assisi"
+  ],
+  "audit": [
+   {
+    "no": "82",
+    "title": "All Creatures Of Our God And King",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Francis of Assisi (13th c.), trans. William Draper published 1919",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "All Hail the Power of Jesus Name",
+  "friend_authors": [
+   "Edward Perronet"
+  ],
+  "audit": [
+   {
+    "no": "79",
+    "title": "All Hail The Power Of Jesus Name",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Edward Perronet 1779, tune \"Coronation\" Oliver Holden 1793",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Amazing Grace",
+  "friend_authors": [
+   "John Newton"
+  ],
+  "audit": [
+   {
+    "no": "7",
+    "title": "Amazing Grace",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "John Newton, 1779",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "And Can it Be",
+  "friend_authors": [
+   "Charles Wesley"
+  ],
+  "audit": [
+   {
+    "no": "133",
+    "title": "And Can It Be",
+    "theme": "GOSPEL",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Charles Wesley, 1738",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Away in a Manger",
+  "friend_authors": [
+   "Author Unknown",
+   "J. T. McFarland"
+  ],
+  "audit": [
+   {
+    "no": "100",
+    "title": "Away In A Manger",
+    "theme": "CHRISTMAS",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Anonymous verses 1885; v.3 John T. McFarland 1904",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Be Thou my Vision",
+  "friend_authors": [
+   "Mary E. Byrne",
+   "Eleanor H. Hull"
+  ],
+  "audit": [
+   {
+    "no": "85",
+    "title": "Be Thou My Vision",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Ancient Irish; trans. Mary Byrne 1905/Eleanor Hull 1912",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Because He Lives",
+  "friend_authors": [
+   "William Gaither"
+  ],
+  "audit": [
+   {
+    "no": "67",
+    "title": "Because He Lives",
+    "theme": "RESURRECTION",
+    "lang": "ENGLISH",
+    "status": "COPYRIGHTED — needs CCLI",
+    "author": "Bill & Gloria Gaither, 1971, Gaither Music Company",
+    "notes": "needs CCLI"
+   }
+  ]
+ },
+ {
+  "friend_title": "Blessed Assurance",
+  "friend_authors": [
+   "Fanny Crosby"
+  ],
+  "audit": [
+   {
+    "no": "61",
+    "title": "Blessed Assurance",
+    "theme": "PRAYER",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Fanny Crosby, 1873",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Blest Be the Tie",
+  "friend_authors": [
+   "John Fawcett"
+  ],
+  "audit": [
+   {
+    "no": "128",
+    "title": "Blest Be The Tie",
+    "theme": "FELLOWSHIP",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "John Fawcett, 1782",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Bringing In the Sheaves",
+  "friend_authors": [
+   "Knowles Shaw"
+  ],
+  "audit": [
+   {
+    "no": "74",
+    "title": "Bringing In The Sheaves",
+    "theme": "SOUL-WINNING",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Knowles Shaw 1874 / George Minor 1880",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Christ the Lord is Risen Today",
+  "friend_authors": [
+   "Charles Wesley"
+  ],
+  "audit": [
+   {
+    "no": "168",
+    "title": "Christ The Lord Is Risen Today",
+    "theme": "RESURRECTION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Charles Wesley, 1739",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Count Your Blessings",
+  "friend_authors": [
+   "Johnson Oatman"
+  ],
+  "audit": [
+   {
+    "no": "51",
+    "title": "Count Your Blessings",
+    "theme": "OFFERING",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Johnson Oatman Jr., 1897",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Crown Him With Many Crowns",
+  "friend_authors": [
+   "Matthew Bridges",
+   "Godfrey Thring"
+  ],
+  "audit": [
+   {
+    "no": "90",
+    "title": "Crown Him With Many Crowns",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Matthew Bridges 1851 / Godfrey Thring 1874; tune Elvey 1868",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Hark The Herald Angels Sing",
+  "friend_authors": [
+   "Charles Wesley"
+  ],
+  "audit": [
+   {
+    "no": "19",
+    "title": "Hark The Herald Angels Sing",
+    "theme": "CHRISTMAS",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Charles Wesley, 1739; Mendelssohn tune, 1840",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "He Leadeth Me",
+  "friend_authors": [
+   "William Bradbury"
+  ],
+  "audit": [
+   {
+    "no": "157",
+    "title": "He Leadeth Me",
+    "theme": "PRAYER",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Joseph Gilmore, 1862",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Jesus Is All The World To Me",
+  "friend_authors": [
+   "Fanny Crosby"
+  ],
+  "audit": [
+   {
+    "no": "92",
+    "title": "Jesus Is All The World To Me",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Will L. Thompson, 1904",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Jesus Saves",
+  "friend_authors": [
+   "Priscilla J. Owens"
+  ],
+  "audit": [
+   {
+    "no": "72",
+    "title": "Jesus Saves",
+    "theme": "SOUL-WINNING",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Priscilla J. Owens / William J. Kirkpatrick, 1882",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Joy To the World",
+  "friend_authors": [
+   "Isaac Watts"
+  ],
+  "audit": [
+   {
+    "no": "16",
+    "title": "Joy To The World",
+    "theme": "CHRISTMAS",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Isaac Watts, 1719; tune arr. Lowell Mason, 1848",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Let Jesus Come Into Your Heart",
+  "friend_authors": [
+   "Lelia N. Morris"
+  ],
+  "audit": [
+   {
+    "no": "146",
+    "title": "Let Jesus Come Into Your Heart",
+    "theme": "INVITATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Lelia N. Morris, 1898",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "O Come All Ye Faithful",
+  "friend_authors": [
+   "Frederick Oakeley"
+  ],
+  "audit": [
+   {
+    "no": "17",
+    "title": "O Come All Ye Faithful",
+    "theme": "CHRISTMAS",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "John Francis Wade, ~1743; trans. Frederick Oakeley, 1841",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "O Worship the King",
+  "friend_authors": [
+   "Robert Grant"
+  ],
+  "audit": [
+   {
+    "no": "81",
+    "title": "O Worship The King",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Robert Grant 1833, tune \"Hanover\" attr. William Croft",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "O the Deep Deep Love of Jesus",
+  "friend_authors": [
+   "Samuel Trevor Francis"
+  ],
+  "audit": [
+   {
+    "no": "114",
+    "title": "O The Deep Deep Love Of Jesus",
+    "theme": "CONTEMPORARY HYMNS",
+    "lang": "ENGLISH",
+    "status": "MIXED — verify version",
+    "author": "Base hymn (Samuel Trevor Francis 1890) is PD, but some congregations use a modern rearrangement with an added refrain (Sovereign Grace Music, mid-2000s) that is separately copyrighted",
+    "notes": "confirm which version/arrangement your church uses"
+   }
+  ]
+ },
+ {
+  "friend_title": "Onward Christian Soldiers",
+  "friend_authors": [
+   "Sabine Baring-Gould"
+  ],
+  "audit": [
+   {
+    "no": "48",
+    "title": "Onward Christian Soldiers",
+    "theme": "MINISTRY",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Sabine Baring-Gould, 1865; tune Arthur Sullivan, 1871",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Praise Him Praise Him",
+  "friend_authors": [
+   "Fanny Crosby"
+  ],
+  "audit": [
+   {
+    "no": "86",
+    "title": "Praise Him! Praise Him!",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Fanny Crosby / Chester G. Allen, 1869",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Praise To The Lord, The Almighty",
+  "friend_authors": [
+   "Tagalog Hymn"
+  ],
+  "audit": [
+   {
+    "no": "4",
+    "title": "Praise To The Lord, The Almighty",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Joachim Neander 1680; trans. Catherine Winkworth 1863",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Rescue the Perishing",
+  "friend_authors": [
+   "Fanny Crosby"
+  ],
+  "audit": [
+   {
+    "no": "73",
+    "title": "Rescue The Perishing",
+    "theme": "SOUL-WINNING",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Fanny Crosby / William H. Doane, 1869-70",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Rock of Ages",
+  "friend_authors": [
+   "Augustus Mantague Toplady"
+  ],
+  "audit": [
+   {
+    "no": "158",
+    "title": "Rock Of Ages",
+    "theme": "PRAYER",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Augustus Toplady, 1776",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Silent Night",
+  "friend_authors": [
+   "Joseph Mohr"
+  ],
+  "audit": [
+   {
+    "no": "18",
+    "title": "Silent Night",
+    "theme": "CHRISTMAS",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Mohr/Gruber, 1818; trans. John F. Young, 1859",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Since Jesus Came Into My Heart",
+  "friend_authors": [
+   "Charles A. Gabriel"
+  ],
+  "audit": [
+   {
+    "no": "29",
+    "title": "Since Jesus Came Into My Heart",
+    "theme": "GOSPEL",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Rufus H. McDaniel, 1914",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Take my Life and Let it Be",
+  "friend_authors": [
+   "Frances Ridley Havergal"
+  ],
+  "audit": [
+   {
+    "no": "152",
+    "title": "Take My Life And Let It Be",
+    "theme": "INVITATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Frances Havergal, 1874",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "To God be the Glory",
+  "friend_authors": [
+   "Fanny Crosby"
+  ],
+  "audit": [
+   {
+    "no": "1",
+    "title": "To God Be The Glory",
+    "theme": "ADORATION",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Fanny Crosby / W.H. Doane, 1875",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "What a Friend We Have in Jesus",
+  "friend_authors": [
+   "Joseph M. Scriven"
+  ],
+  "audit": [
+   {
+    "no": "63",
+    "title": "What A Friend We Have In Jesus",
+    "theme": "PRAYER",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Joseph Scriven 1855, tune Charles C. Converse 1868",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "What a Friend we Have in Jesus",
+  "friend_authors": [
+   "Joseph M. Scriven"
+  ],
+  "audit": [
+   {
+    "no": "63",
+    "title": "What A Friend We Have In Jesus",
+    "theme": "PRAYER",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Joseph Scriven 1855, tune Charles C. Converse 1868",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "When I survey the Wondrous Cross",
+  "friend_authors": [
+   "Isaac Watts"
+  ],
+  "audit": [
+   {
+    "no": "139",
+    "title": "When I Survey The Wondrous Cross",
+    "theme": "GOSPEL",
+    "lang": "ENGLISH",
+    "status": "PUBLIC DOMAIN",
+    "author": "Isaac Watts, 1707",
+    "notes": ""
+   }
+  ]
+ },
+ {
+  "friend_title": "Wherever He Leads I'll Go",
+  "friend_authors": [
+   "B.B. McKinney"
+  ],
+  "audit": [
+   {
+    "no": "150",
+    "title": "Wherever He Leads I’ll Go",
+    "theme": "INVITATION",
+    "lang": "ENGLISH",
+    "status": "COPYRIGHTED — needs CCLI",
+    "author": "B.B. McKinney, 1936, renewed 1964, Broadman Press -- protected through 2031",
+    "notes": "needs CCLI"
+   }
+  ]
+ }
+]

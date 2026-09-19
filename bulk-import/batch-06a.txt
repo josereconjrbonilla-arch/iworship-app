@@ -1,0 +1,326 @@
+# Amazing Grace
+key: G
+themes: praise
+
+Verse 1
+[G]Amazing grace, how [G7]sweet the [C]sound
+That [G]saved a [D]wretch like [D7]me
+I [G]once was [G7]lost, but [C]now am [G]found
+Was [Em]blind, but [D]now I [G]see
+
+Verse 2
+[G]'Twas grace that [G7]taught my [C]heart to [G]fear
+And [G]grace my [D]fears re[D7]lieved
+How [G]precious [G7]did that [C]grace ap[G]pear
+The [Em]hour I [D]first be[G]lieved
+
+Verse 3
+Through [G]many [G7]dangers, [C]toils and [G]snares
+I [G]have al[D]ready [D7]come
+'Tis [G]grace hath [G7]brought me [C]safe thus [G]far
+And [Em]grace will [D]lead me [G]home
+
+Verse 4
+When [G]we've been [G7]there ten [C]thousand [G]years
+Bright [G]shining [D]as the [D7] sun
+We've [G]no less [G7]days to [C]sing God's [G]praise
+Than [Em]when we [D]first be[G]gun
+
+# Wonderful Words Of Life
+key: F
+
+Verse 1
+[F]Sing them over a[Bb]gain to [F]me
+[C]Wonderful words of [F]life
+[F]Let me more of their [Bb]beauty [F]see
+[C]Wonderful words of [F]life
+[F]Words of life and [Bb]beauty
+Teach me [F]faith and [C]duty
+
+Chorus
+[F]Beautiful words, [Bb]wonderful [F]words
+[C]Wonderful words of [F]life
+[F]Beautiful words, [Bb]wonderful [F]words
+[C]Wonderful words of [F]life
+
+Verse 2
+[F]Christ, the blessed [Bb]One, gives to [F]all
+[C]Wonderful words of [F]life
+[F]Sinner, list to the [Bb]loving [F]call
+[C]Wonderful words of [F]life
+[F]All so freely [Bb]given
+Wooing [F]us to [C]heaven
+
+Chorus
+[F]Beautiful words, [Bb]wonderful [F]words
+[C]Wonderful words of [F]life
+[F]Beautiful words, [Bb]wonderful [F]words
+[C]Wonderful words of [F]life
+
+Verse 3
+[F]Sweetly echo the [Bb]gospel [F]call
+[C]Wonderful words of [F]life
+[F]Offer pardon and [Bb]peace to [F]all
+[C]Wonderful words of [F]life
+[F]Jesus, only [Bb]Savior
+Sanctify for[F]ever
+
+Chorus
+[F]Beautiful words, [Bb]wonderful [F]words
+[C]Wonderful words of [F]life
+[F]Beautiful words, [Bb]wonderful [F]words
+[C]Wonderful words of [F]life
+
+# Love Lifted Me
+key: D
+themes: grace
+
+Verse 1
+I was [D]sinking deep in [G]sin
+Far from the [D]peaceful [A]shore
+Very [D]deeply stained with[G]in
+Sinking to [A]rise no [D]more
+But the [D]Master of the [G]sea
+Heard my des[D]pairing [A]cry
+From the [D]waters lifted [G]me
+Now safe am [A]I
+
+Chorus
+Love lifted [D]me, love lifted [G]me
+When nothing [D]else could [A]help
+Love lifted [D]me
+Love lifted [G]me, love lifted [D]me
+When [G]nothing [A]else could [D]help
+Love lifted [A]me
+
+Verse 2
+All my [D]heart to Him I [G]give
+Ever to [D]Him I'll [A]cling
+In His [D]blessed presence [G]live
+Ever His [A]praises [D]sing
+Love so [D]mighty and so [G]true
+Merits my [D]soul's best [A]songs
+Faithful, [D]loving service [G]too
+To Him be[A]longs
+
+Chorus
+Love lifted [D]me, love lifted [G]me
+When nothing [D]else could [A]help
+Love lifted [D]me
+Love lifted [G]me, love lifted [D]me
+When [G]nothing [A]else could [D]help
+Love lifted [A]me
+
+Verse 3
+Souls in [D]danger, look a[G]bove
+Jesus [D]completely [A]saves
+He will [D]lift you by His [G]love
+Out of the [A]angry [D]waves
+He's the [D]Master of the [G]sea
+Billows His [D]will o[A]bey
+He your [D]Savior wants to [G]be
+Be saved to[A]day
+
+Chorus
+Love lifted [D]me, love lifted [G]me
+When nothing [D]else could [A]help
+Love lifted [D]me
+Love lifted [G]me, love lifted [D]me
+When [G]nothing [A]else could [D]help
+Love lifted [A]me
+
+# Higher Ground
+key: A
+themes: heaven
+
+Verse 1
+[A]I'm pressing on the [D]upward [A]way
+[E]New heights I'm [A]gaining [E]every day
+[A]Still praying as I [D]onward [A]bound
+"Lord, [E]plant my feet on [A]higher ground"
+
+Chorus
+[A]Lord, lift me [D]up and [A]let me stand
+By [E]faith, on [A]Heaven's [E]tableland
+A [A]higher plane than [D]I have [A]found
+Lord, [E]plant my feet on [A]higher ground
+
+Verse 2
+[A]My heart has no de[D]sire to [A]stay
+[E]Where doubts arise and [A]fears dis[E]may
+[A]Though some may dwell where [D]these a[A]bound
+My [E]prayer, my aim, is [A]higher ground
+
+Chorus
+[A]Lord, lift me [D]up and [A]let me stand
+By [E]faith, on [A]Heaven's [E]tableland
+A [A]higher plane than [D]I have [A]found
+Lord, [E]plant my feet on [A]higher ground
+
+Verse 3
+[A]I want to live a[D]bove the [A]world
+Though [E]Satan's darts at [A]me are [E]hurled
+For [A]faith has caught the [D]joyful [A]sound
+The [E]song of saints on [A]higher ground
+
+Chorus
+[A]Lord, lift me [D]up and [A]let me stand
+By [E]faith, on [A]Heaven's [E]tableland
+A [A]higher plane than [D]I have [A]found
+Lord, [E]plant my feet on [A]higher ground
+
+Verse 4
+[A]I want to scale the [D]utmost [A]height
+And [E]catch a gleam of [A]glory [E]bright
+But [A]still I'll pray till [D]heav'n I've [A]found
+"Lord, [E]lead me on to [A]higher ground"
+
+Chorus
+[A]Lord, lift me [D]up and [A]let me stand
+By [E]faith, on [A]Heaven's [E]tableland
+A [A]higher plane than [D]I have [A]found
+Lord, [E]plant my feet on [A]higher ground
+
+# Leaning On The Everlasting Arms
+key: C
+themes: prayer
+
+Verse 1
+What a [C]fellowship, what a [F]joy di[C]vine
+Leaning [G]on the everlasting [C]arms
+What a [C]blessedness, what a [F]peace is [C]mine
+Leaning [G]on the everlasting [C]arms
+
+Chorus
+Leaning, [C]leaning
+[F]Safe and se[C]cure from all a[G]larms
+Leaning, [C]leaning
+Leaning [G]on the everlasting [C]arms
+
+Verse 2
+Oh, how [C]sweet to walk in this [F]pilgrim [C]way
+Leaning [G]on the everlasting [C]arms
+Oh, how [C]bright the path grows [F]from day to [C]day
+Leaning [G]on the everlasting [C]arms
+
+Chorus
+Leaning, [C]leaning
+[F]Safe and se[C]cure from all a[G]larms
+Leaning, [C]leaning
+Leaning [G]on the everlasting [C]arms
+
+Verse 3
+What have [C]I to dread, what have [F]I to [C]fear
+Leaning [G]on the everlasting [C]arms?
+I have [C]blessed peace with my [F]Lord so [C]near
+Leaning [G]on the everlasting [C]arms
+
+Chorus
+Leaning, [C]leaning
+[F]Safe and se[C]cure from all a[G]larms
+Leaning, [C]leaning
+Leaning [G]on the everlasting [C]arms
+
+# I Know Whom I Have Believed
+key: G
+themes: grace
+
+Verse 1
+I [G]know not why God's [C]wondrous [G]grace
+To [G]me He hath made [D]known
+Nor [G]why, un[C]worthy, [G]Christ in love
+Re[Em]deemed me [D]for His [G]own
+
+Chorus
+But [G]I know Whom I have be[C]lieved
+And am per[G]suaded [D]that He is [G]able
+To [G]keep that [C]which I've com[G]mitted
+Unto [Em]Him a[D]gainst that [G]day
+
+Verse 2
+I [G]know not how this [C]saving [G]faith
+To [G]me He did im[D]part
+Nor [G]how be[C]lieving [G]in His Word
+Wrought [Em]peace with[D]in my [G]heart
+
+Chorus
+But [G]I know Whom I have be[C]lieved
+And am per[G]suaded [D]that He is [G]able
+To [G]keep that [C]which I've com[G]mitted
+Unto [Em]Him a[D]gainst that [G]day
+
+Verse 3
+I [G]know not how the [C]Spirit [G]moves
+Con[G]vincing men of [D]sin
+Re[G]vealing [C]Jesus [G]through the Word
+Cre[Em]ating [D]faith in [G]Him
+
+Chorus
+But [G]I know Whom I have be[C]lieved
+And am per[G]suaded [D]that He is [G]able
+To [G]keep that [C]which I've com[G]mitted
+Unto [Em]Him a[D]gainst that [G]day
+
+Verse 4
+I [G]know not what of [C]good or [G]ill
+May [G]be reserved for [D]me
+Of [G]weary [C]ways or [G]golden days
+Be[Em]fore His [D]face I [G]see
+
+Chorus
+But [G]I know Whom I have be[C]lieved
+And am per[G]suaded [D]that He is [G]able
+To [G]keep that [C]which I've com[G]mitted
+Unto [Em]Him a[D]gainst that [G]day
+
+# Send The Light
+key: Eb
+themes: soul-winning
+
+Verse 1
+[Eb]There's a call comes ringing [Ab]o'er the [Eb]restless wave
+Send the [Bb]light, send the [Eb]light
+[Eb]There are souls to rescue, [Ab]there are souls to [Eb]save
+Send the [Bb]light, send the [Eb]light
+
+Chorus
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine from shore to [Eb]shore
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine for ever[Eb]more
+
+Verse 2
+[Eb]We have heard the Mace[Ab]donian [Eb]call today
+Send the [Bb]light, send the [Eb]light
+[Eb]And a golden offering [Ab]at the cross we [Eb]lay
+Send the [Bb]light, send the [Eb]light
+
+Chorus
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine from shore to [Eb]shore
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine for ever[Eb]more
+
+Verse 3
+[Eb]Let us pray that grace may [Ab]ev'rywhere a[Eb]bound
+Send the [Bb]light, send the [Eb]light
+[Eb]And a Christlike spirit [Ab]ev'rywhere be [Eb]found
+Send the [Bb]light, send the [Eb]light
+
+Chorus
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine from shore to [Eb]shore
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine for ever[Eb]more
+
+Verse 4
+[Eb]Let us not grow weary [Ab]in the work of [Eb]love
+Send the [Bb]light, send the [Eb]light
+[Eb]Let us gather jewels [Ab]for a crown a[Eb]bove
+Send the [Bb]light, send the [Eb]light
+
+Chorus
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine from shore to [Eb]shore
+[Eb]Send the light, the [Ab]blessed gospel [Eb]light
+Let it [Bb]shine for ever[Eb]more

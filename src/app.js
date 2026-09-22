@@ -525,7 +525,11 @@ import { pushNotificationsConfigured } from './push-config.js';
 
   /* ============ AUTH / PROFILE ============ */
   let unsubProfile = null;
-  function stopProfileWatch(){ if(unsubProfile){ unsubProfile(); unsubProfile = null; } }
+  let profileLoadFallbackTimer = null;
+  function stopProfileWatch(){
+    if(unsubProfile){ unsubProfile(); unsubProfile = null; }
+    if(profileLoadFallbackTimer){ clearTimeout(profileLoadFallbackTimer); profileLoadFallbackTimer = null; }
+  }
   // [Bug found 2026-09-10, fixed v29] see ensureDirectoryEntry()'s own
   // comment in firestore-data-layer.js for the full story -- this just
   // tracks which uid has already been self-healed THIS SESSION, so the
@@ -801,7 +805,35 @@ import { pushNotificationsConfigured } from './push-config.js';
     stopDirectoryWatch();
     stopSocialWatches();
     if(user){
-      unsubProfile = watchProfile(user.uid, function(profile){
+      unsubProfile = watchProfile(user.uid, function(profile, meta){
+        // [Bug found 2026-09-22] See watchProfile()'s own comment in
+        // firestore-data-layer.js -- a snapshot that's BOTH "doesn't exist"
+        // AND still unconfirmed by the server (fromCache) is ambiguous: it
+        // might be a genuinely new user, or it might be an existing one
+        // whose local cache just hasn't caught up yet (e.g. right after a
+        // relogin, or right after clearing site data, like Jared hit while
+        // troubleshooting the notifications bug). Don't let THAT snapshot
+        // set profileLoaded/needsProfileSetup -- wait for the next one,
+        // which Firestore fires again the moment the real server response
+        // lands, either confirming the profile (exists) or confirming it
+        // genuinely doesn't (exists:false, fromCache:false). The fallback
+        // timer below is just a safety net so a truly offline brand-new
+        // user (no server round trip ever completing) isn't stuck on a
+        // permanently-loading landing page instead of eventually seeing
+        // "Almost There".
+        if(meta && meta.fromCache && !meta.exists && !state.profileLoaded){
+          if(!profileLoadFallbackTimer){
+            profileLoadFallbackTimer = setTimeout(function(){
+              profileLoadFallbackTimer = null;
+              if(state.profileLoaded) return; // the real snapshot won the race after all
+              state.profile = profile;
+              state.profileLoaded = true;
+              render();
+            }, 6000);
+          }
+          return;
+        }
+        if(profileLoadFallbackTimer){ clearTimeout(profileLoadFallbackTimer); profileLoadFallbackTimer = null; }
         state.profile = profile;
         state.profileLoaded = true;
         syncChurchWatch(profile);

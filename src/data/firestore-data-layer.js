@@ -166,7 +166,18 @@ function defaultProfile() {
 }
 export function watchProfile(uid, callback) {
   return onSnapshot(doc(db, 'users', uid), (snap) => {
-    callback({ ...defaultProfile(), ...(snap.exists() ? snap.data() : {}) });
+    // meta.fromCache [Bug found 2026-09-22] -- onSnapshot's FIRST callback
+    // can come straight from Firestore's local cache before the real
+    // server response ever arrives, and right after a cold/cleared cache
+    // (a fresh sign-in, or right after DevTools "Clear site data") that
+    // cache has nothing for this doc yet -- so `snap.exists()` reads false
+    // for a split second even for a person with a real, long-existing
+    // profile, before a SECOND callback fires moments later with the
+    // server-confirmed truth. app.js's needsProfileSetup gate depends on
+    // telling a confirmed "no profile" apart from this tentative one -- see
+    // its own comment for why -- so pass along whether THIS snapshot is
+    // actually server-confirmed rather than deciding that here.
+    callback({ ...defaultProfile(), ...(snap.exists() ? snap.data() : {}) }, { fromCache: snap.metadata.fromCache, exists: snap.exists() });
   });
 }
 // [Bug found 2026-09-10, fixed v29] Two real accounts (Jared's own second

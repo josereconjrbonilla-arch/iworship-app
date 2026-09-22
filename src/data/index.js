@@ -47,7 +47,7 @@ export const {
   watchAuth, signInWithGoogle, signOutUser,
   signUpWithEmail, signInWithEmail, linkPasswordToAccount, hasPasswordLogin, sendPasswordReset,
   pushSupported, enablePushNotifications, currentNotificationPermission, disablePushNotifications, watchForegroundPush,
-  watchProfile, saveProfile, ensureDirectoryEntry,
+  watchProfile, fetchProfileFromServer, saveProfile, ensureDirectoryEntry,
   createRoom, watchRoom, updateRoom, endRoom, watchPublicRooms, watchHostRooms, watchCoHostRooms, checkRoomPassword,
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   watchChurch, watchAllChurches, newChurchId, saveChurch, checkIsAdmin,

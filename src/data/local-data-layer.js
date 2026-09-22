@@ -202,6 +202,13 @@ export function watchProfile(uid, callback) {
   fire();
   return onBroadcast('profile:' + uid, fire);
 }
+// Matches firestore-data-layer.js's real fetchProfileFromServer() -- demo
+// mode's localStorage read is already synchronous and authoritative (no
+// cache-vs-server distinction exists here), so this is just watchProfile()'s
+// own one-shot read wrapped in a resolved promise to keep the same shape.
+export async function fetchProfileFromServer(uid) {
+  return { ...defaultProfile(), ...readJSON(profileKey(uid), {}) };
+}
 // No-op here to match the real Firestore layer's interface (see that
 // file's ensureDirectoryEntry() for the actual bug/fix it exists for) --
 // demo mode's watchDirectory() below always recomputes live straight from

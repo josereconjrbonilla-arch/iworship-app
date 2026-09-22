@@ -7,7 +7,7 @@ import {
   watchAuth, signInWithGoogle, signOutUser,
   signUpWithEmail, signInWithEmail, linkPasswordToAccount, hasPasswordLogin, sendPasswordReset,
   pushSupported, enablePushNotifications, currentNotificationPermission, disablePushNotifications, watchForegroundPush,
-  watchProfile, saveProfile, ensureDirectoryEntry,
+  watchProfile, fetchProfileFromServer, saveProfile, ensureDirectoryEntry,
   createRoom, watchRoom, updateRoom, endRoom, watchPublicRooms, watchHostRooms, watchCoHostRooms, checkRoomPassword,
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   checkIsAdmin, watchChurch, watchAllChurches, newChurchId, saveChurch,
@@ -837,12 +837,41 @@ import { pushNotificationsConfigured } from './push-config.js';
         // permanently-loading landing page instead of eventually seeing
         // "Almost There".
         if(meta && meta.fromCache && !meta.exists && !state.profileLoaded){
-          console.debug('[iworship-debug] ambiguous cache-miss snapshot -- waiting for server confirmation (or 15s fallback)');
+          console.debug('[iworship-debug] ambiguous cache-miss snapshot -- firing a direct server fetch instead of just waiting on this listener (15s ultimate fallback too)');
+          // [Bug found 2026-09-23] Jared's own repro (same steps, same
+          // account) sometimes resolved fine and sometimes still showed
+          // "Almost There" -- that inconsistency is what pointed at the
+          // LIVE LISTENER's cache-to-server transition being flaky here,
+          // not the rules or the account. Rather than only ever wait on
+          // that same listener to sort itself out, fire an independent,
+          // one-shot fetchProfileFromServer() the moment this ambiguous
+          // state is hit -- a plain request with its own retry/backoff,
+          // not a persistent stream, so it isn't affected by whatever's
+          // making the listener itself lag. Whichever settles first (this
+          // direct fetch, or a later onSnapshot event) wins, via the
+          // !state.profileLoaded guard both paths check.
           if(!profileLoadFallbackTimer){
+            fetchProfileFromServer(user.uid).then(function(serverProfile){
+              // Guard against a slow fetch resolving after the person has
+              // already signed out or switched accounts -- state.user would
+              // no longer be THIS uid, and applying a stale result then
+              // would corrupt whichever account is current instead.
+              if(state.profileLoaded || !state.user || state.user.uid !== user.uid) return;
+              console.debug('[iworship-debug] direct server fetch resolved first with', serverProfile && serverProfile.displayName);
+              if(profileLoadFallbackTimer){ clearTimeout(profileLoadFallbackTimer); profileLoadFallbackTimer = null; }
+              state.profile = serverProfile;
+              state.profileLoaded = true;
+              syncChurchWatch(serverProfile);
+              render();
+            }).catch(function(e){
+              console.error('[iworship-debug] direct server fetch FAILED', e && e.code, e && e.message, e);
+              // Leave it to the listener/timer -- a failed one-shot isn't
+              // reason enough on its own to declare "no profile".
+            });
             profileLoadFallbackTimer = setTimeout(function(){
               profileLoadFallbackTimer = null;
-              if(state.profileLoaded) return; // the real snapshot won the race after all
-              console.debug('[iworship-debug] fallback timer FIRED -- server never confirmed in time, forcing profileLoaded with', profile);
+              if(state.profileLoaded) return; // one of the two real paths won the race after all
+              console.debug('[iworship-debug] 15s ultimate fallback FIRED -- neither the listener nor the direct fetch confirmed in time, forcing profileLoaded with', profile);
               state.profile = profile;
               state.profileLoaded = true;
               render();

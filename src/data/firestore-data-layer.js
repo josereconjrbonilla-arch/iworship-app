@@ -12,7 +12,7 @@ import { initializeApp } from 'firebase/app';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, getDoc, getDocs,
+  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, getDoc, getDocs, getDocFromServer,
   arrayUnion, arrayRemove, increment
 } from 'firebase/firestore';
 import {
@@ -189,6 +189,24 @@ export function watchProfile(uid, callback) {
     // leaving it a total mystery.
     console.error('[iworship-debug] watchProfile onSnapshot ERROR', err && err.code, err && err.message, err);
   });
+}
+// [Bug found 2026-09-23] One-shot, cache-bypassing companion to
+// watchProfile() above, for exactly the situation its own comment
+// describes: right after a cold/cleared local cache, the live onSnapshot
+// listener's transition from its tentative cache-miss snapshot to a real
+// server-confirmed one has, in practice, sometimes taken longer than any
+// reasonable timeout, or not visibly happened at all within it -- flaky in
+// a way that pointed at the LISTEN stream itself rather than anything
+// about the account or the rules (same account, same steps, worked one
+// time and not the next). getDocFromServer() goes over a completely
+// different path -- a single request with the SDK's own retry/backoff,
+// not a persistent stream -- so app.js fires this the moment it hits that
+// ambiguous state, as a second, independent way to find out the truth
+// instead of only ever waiting on the one listener that's already acting
+// up.
+export async function fetchProfileFromServer(uid) {
+  const snap = await getDocFromServer(doc(db, 'users', uid));
+  return { ...defaultProfile(), ...(snap.exists() ? snap.data() : {}) };
 }
 // [Bug found 2026-09-10, fixed v29] Two real accounts (Jared's own second
 // test account and his friend's) reported being unable to find EACH OTHER

@@ -9,3 +9,4 @@ service-account.json
 iworship-deploy-v*.zip
 iworship-full-source-v*.zip
 dist.zip
+*firebase-adminsdk*.json

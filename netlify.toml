@@ -1,5 +1,13 @@
 # Netlify build config.
 #
+# [2026-09-22] Added the actual [build] block below so Netlify can build
+# this itself once the site is linked to GitHub for continuous deployment
+# (previously this was always drag-and-drop of a pre-built dist/ folder, so
+# there was never a reason for Netlify to know the build command).
+[build]
+  command = "npm run build"
+  publish = "dist"
+#
 # [2026-09-10] Jared's Netlify deploy started failing at the "secrets
 # scanning" stage, not the actual Vite build -- Netlify's scanner flags any
 # string in the build output that LOOKS like a secret (an "AIzaSy..."

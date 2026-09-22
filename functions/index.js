@@ -18,9 +18,12 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onRequest } = require('firebase-functions/v2/https');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { setGlobalOptions } = require('firebase-functions/v2/options');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, FieldPath } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+
+setGlobalOptions({ region: 'asia-southeast1' });
 
 initializeApp();
 const db = getFirestore();

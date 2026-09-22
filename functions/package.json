@@ -2,7 +2,7 @@
   "name": "iworship-functions",
   "description": "Cloud Functions scaffold for iWorship's monetization backend -- see README.md in this folder before touching anything here.",
   "private": true,
-  "engines": { "node": "20" },
+  "engines": { "node": "22" },
   "main": "index.js",
   "scripts": {
     "deploy": "firebase deploy --only functions"

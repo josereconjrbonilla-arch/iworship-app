@@ -806,6 +806,21 @@ import { pushNotificationsConfigured } from './push-config.js';
     stopSocialWatches();
     if(user){
       unsubProfile = watchProfile(user.uid, function(profile, meta){
+        // TEMP DIAGNOSTIC [2026-09-23] -- Jared: still seeing "Almost There"
+        // after a Clear-site-data + relogin even with the fromCache guard
+        // below in place. Logging every snapshot this callback actually
+        // receives (and which branch it takes) so the next repro gives us
+        // real data instead of another guess -- open DevTools -> Console,
+        // filter for "iworship-debug", reproduce (Clear site data, close
+        // tab, reopen, sign in), and send a screenshot of what prints.
+        // Safe to remove once this is root-caused for good.
+        console.debug('[iworship-debug] watchProfile snapshot', {
+          at: new Date().toISOString(),
+          fromCache: meta && meta.fromCache,
+          exists: meta && meta.exists,
+          displayName: profile && profile.displayName,
+          profileLoadedAlready: state.profileLoaded
+        });
         // [Bug found 2026-09-22] See watchProfile()'s own comment in
         // firestore-data-layer.js -- a snapshot that's BOTH "doesn't exist"
         // AND still unconfirmed by the server (fromCache) is ambiguous: it
@@ -822,10 +837,12 @@ import { pushNotificationsConfigured } from './push-config.js';
         // permanently-loading landing page instead of eventually seeing
         // "Almost There".
         if(meta && meta.fromCache && !meta.exists && !state.profileLoaded){
+          console.debug('[iworship-debug] ambiguous cache-miss snapshot -- waiting for server confirmation (or 6s fallback)');
           if(!profileLoadFallbackTimer){
             profileLoadFallbackTimer = setTimeout(function(){
               profileLoadFallbackTimer = null;
               if(state.profileLoaded) return; // the real snapshot won the race after all
+              console.debug('[iworship-debug] 6s fallback timer FIRED -- server never confirmed in time, forcing profileLoaded with', profile);
               state.profile = profile;
               state.profileLoaded = true;
               render();
@@ -834,6 +851,7 @@ import { pushNotificationsConfigured } from './push-config.js';
           return;
         }
         if(profileLoadFallbackTimer){ clearTimeout(profileLoadFallbackTimer); profileLoadFallbackTimer = null; }
+        console.debug('[iworship-debug] trusting this snapshot -- setting profileLoaded=true, displayName=', profile && profile.displayName);
         state.profile = profile;
         state.profileLoaded = true;
         syncChurchWatch(profile);

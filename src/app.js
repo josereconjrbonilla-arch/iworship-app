@@ -118,6 +118,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     activeTheme:null,
     user: null,              // populated live by watchAuth() -- {uid, displayName, email, isDemo} or null
     profile: null,           // populated live by watchProfile() once signed in -- {displayName, churchName, mode, scale, theme, favorites[]}
+    profileLoaded: false,    // [2026-09-22] true only once watchProfile()'s listener has actually fired at least once for the CURRENT sign-in -- see that subscription's own comment and needsProfileSetup below for why this exists as its own flag rather than inferring "loaded" from state.profile being non-null.
     isEditor: false,         // populated by checkIsEditor() once signed in -- worship-team allowlist, gates the Musicians chat tab
     isAdmin: false,          // populated by checkIsAdmin() once signed in -- app Admin (Jared + friend), bypasses every monetization gate
     church: null,            // populated live by watchChurch(profile.churchId) once signed in with a church -- powers the Public/Church Library toggle
@@ -785,6 +786,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     state.user = user;
     state.isEditor = false;
     state.isAdmin = false;
+    state.profileLoaded = false;
     stopProfileWatch();
     stopChurchWatch();
     stopAdminChurchesWatch();
@@ -801,6 +803,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(user){
       unsubProfile = watchProfile(user.uid, function(profile){
         state.profile = profile;
+        state.profileLoaded = true;
         syncChurchWatch(profile);
         if(directorySelfHealedForUid !== user.uid){
           directorySelfHealedForUid = user.uid;
@@ -1660,6 +1663,30 @@ import { pushNotificationsConfigured } from './push-config.js';
     // time.
     const lyricSheetBefore = document.querySelector('.lyric-sheet');
     const lyricSheetScroll = lyricSheetBefore ? lyricSheetBefore.scrollTop : 0;
+    // #threadScrollBody (DM / group chat full-page thread views) [2026-09-22]
+    // -- same root cause and same fix as the .lyric-sheet block just above.
+    // startDmMessagesWatch()/startGroupChatThreadWatch() already patch
+    // #threadScrollBody in place and re-scroll to bottom when a new message
+    // arrives (see their own comments) -- but sendDmMessage()/
+    // sendGroupChatMessage() ALSO write to the parent dmThreads/{id} or
+    // groupChats/{id} doc (lastMessageText/lastMessageAt/updatedAt, for the
+    // inbox list + unread badge), and watchMyDmThreads()/watchMyGroupChats()
+    // call this SAME render() unconditionally on every snapshot of that
+    // doc -- including the echo of your own just-sent message -- regardless
+    // of which view is on screen. That full render() tears down and rebuilds
+    // #threadScrollBody from scratch (a fresh element defaults to
+    // scrollTop 0), landing moments after the message-watcher's own
+    // patch-and-scroll and silently undoing it: Jared, "messages jumps back
+    // to top every time a message is sent" / "DMs and group chats"
+    // [2026-09-22]. Capturing/restoring scrollTop generically around every
+    // render() fixes the whole class regardless of which watcher triggered
+    // it, exactly like the lyric-sheet fix above. Harmless elsewhere:
+    // #threadScrollBody only exists while a DM or group thread is open.
+    const threadBodyBefore = document.getElementById('threadScrollBody');
+    const threadBodyScroll = threadBodyBefore ? threadBodyBefore.scrollTop : 0;
+    const threadBodyWasAtBottom = threadBodyBefore
+      ? (threadBodyBefore.scrollHeight - threadBodyBefore.scrollTop - threadBodyBefore.clientHeight) < 24
+      : false;
     renderCurrentView();
     if(restoreFocus){
       const el = document.getElementById(restoreFocus.id);
@@ -1674,6 +1701,17 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(lyricSheetScroll){
       const lyricSheetAfter = document.querySelector('.lyric-sheet');
       if(lyricSheetAfter) lyricSheetAfter.scrollTop = lyricSheetScroll;
+    }
+    if(threadBodyBefore){
+      const threadBodyAfter = document.getElementById('threadScrollBody');
+      if(threadBodyAfter){
+        // If the reader was already at (or near) the bottom, keep them
+        // pinned to the new bottom -- the content height may have changed
+        // (a new message just landed) so the OLD scrollTop number would now
+        // sit short of it. Otherwise (they'd scrolled up to read history)
+        // restore their exact position rather than yanking them anywhere.
+        threadBodyAfter.scrollTop = threadBodyWasAtBottom ? threadBodyAfter.scrollHeight : threadBodyScroll;
+      }
     }
   }
   function renderCurrentView(){
@@ -1825,7 +1863,27 @@ import { pushNotificationsConfigured } from './push-config.js';
     ensureLandingSocialWatchesStarted();
     const verse = todaysVerse();
     const signedIn = !!state.user;
-    const needsProfileSetup = signedIn && (!state.profile || !state.profile.displayName);
+    // [Bug found 2026-09-22] Jared: "when relogging back in, it asked for my
+    // name and church name again... after inputting both, it detected that
+    // I was the admin, but this time it used the new name that I used in my
+    // account." Root cause: watchProfile()'s onSnapshot is async -- on a
+    // fresh sign-in (a real relogin, an account switch, or just a cold
+    // Firestore cache after the iworship-ph migration) there's a real gap,
+    // sometimes a full network round trip, before it fires even once.
+    // needsProfileSetup used to fall back to treating "no profile loaded
+    // YET" exactly the same as "confirmed no profile exists" (both just
+    // read as `!state.profile`) -- and checkIsAdmin()/checkIsEditor() above
+    // are two SEPARATE one-off getDoc() calls racing that same listener,
+    // each calling render() the instant they resolve. If either won that
+    // race, this "Almost There" form rendered for an already-fully-set-up
+    // returning user, its YOUR NAME field pre-filled from the *Google*
+    // account's displayName (see below) -- and one tap of SAVE & CONTINUE
+    // (saveProfile() is a merge write) silently overwrote the person's real
+    // in-app display name with it. state.profileLoaded (set true only once
+    // watchProfile's listener has actually fired for THIS sign-in -- see
+    // its own comment above) closes that gap: this form can now only appear
+    // once Firestore has actually confirmed there's no profile.
+    const needsProfileSetup = signedIn && state.profileLoaded && (!state.profile || !state.profile.displayName);
     const name = state.profile ? state.profile.displayName : null;
     const churchName = state.profile ? state.profile.churchName : null;
     const favCount = (state.profile && state.profile.favorites) ? state.profile.favorites.length : 0;
@@ -2099,6 +2157,22 @@ import { pushNotificationsConfigured } from './push-config.js';
     const pref = themePreference();
     const linked = signedIn && hasPasswordLogin();
     const notifPermission = currentNotificationPermission();
+    // Push "off" state [2026-09-22] -- Jared: "can't turn off notifs at
+    // will as well, button is not working." The browser's own
+    // Notification.permission is a one-way ratchet: once granted, there is
+    // no JS API to un-grant it (only the user, from their browser's own
+    // site-settings UI, can do that) -- so `notifPermission` alone can never
+    // go back to anything but 'granted' after the first time. TURN OFF FOR
+    // THIS DEVICE below only deletes this device's saved FCM token (see
+    // disablePushNotifications() in the data layer), which is the right,
+    // real effect (this device stops receiving pushes) but before this fix
+    // nothing in this render() branched on it -- notifPermission was still
+    // 'granted' a moment later, so the exact same "on" branch/button
+    // re-rendered and looked like the click had done nothing at all. This
+    // flag is this app's own record of the user's last choice on THIS
+    // device/browser, independent of the immutable permission flag, so the
+    // UI can actually show an "off" state and a way back "on" from it.
+    const pushDisabledHere = signedIn && safeGet('iworship:pushDisabledOnThisDevice:'+state.user.uid, '') === '1';
 
     function themeOption(value, label){
       return '<button type="button" class="settings-theme-opt'+(pref===value?' settings-theme-opt-active':'')+'" data-theme-pref="'+value+'">'+label+'</button>';
@@ -2148,12 +2222,16 @@ import { pushNotificationsConfigured } from './push-config.js';
             '<p class="hint">Push notifications aren&rsquo;t set up for this app yet &mdash; the in-app notification bell still works as before.</p>' :
             notifPermission === 'denied' ?
               '<p class="hint">Notifications are blocked for iWorship in this browser. To turn them back on, open your browser&rsquo;s site settings for this page and allow Notifications, then come back here.</p>' :
-              notifPermission === 'granted' ?
+              notifPermission === 'granted' && !pushDisabledHere ?
                 (
                   '<p>&#10003; Push notifications are on for this device.</p>' +
                   '<p class="hint">On a phone (Android): open Settings &rarr; Apps &rarr; iWorship &rarr; Battery and choose Unrestricted, so a push can still wake the app even when it&rsquo;s fully closed and the phone is trying to save battery. On a computer (Windows/Mac): make sure your browser itself is allowed to show notifications in your OS notification settings, and that Focus/Do Not Disturb isn&rsquo;t set to silence it.</p>' +
                   '<button type="button" class="btn btn-ghost" id="settingsDisablePushBtn">TURN OFF FOR THIS DEVICE</button>' +
                   renderNotifPrefsSection()
+                ) : notifPermission === 'granted' && pushDisabledHere ? (
+                  '<p>Push notifications are turned off for this device.</p>' +
+                  '<p class="hint">Your browser still allows notifications for iWorship, but you turned them off here &mdash; turn them back on anytime, no new permission prompt needed.</p>' +
+                  '<button type="button" class="btn btn-primary" id="settingsEnablePushBtn">TURN ON FOR THIS DEVICE</button>'
                 ) : (
                   '<p>Get notified &mdash; even when iWorship is closed &mdash; when someone messages you, likes, comments, follows, or reposts; when a worship session goes live from someone you follow or your own church; and with a daily Bible verse. You&rsquo;ll be asked to allow notifications (and, on a phone, background activity) so a push can reach you even with the app fully closed.</p>' +
                   '<button type="button" class="btn btn-primary" id="settingsEnablePushBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5Z"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>ENABLE PUSH NOTIFICATIONS</button>'
@@ -2195,13 +2273,25 @@ import { pushNotificationsConfigured } from './push-config.js';
           result === 'denied' ? 'Permission wasn&rsquo;t granted &mdash; check your browser&rsquo;s notification settings for this site.' :
           result === 'unsupported' ? 'Push isn&rsquo;t supported in this browser.' :
           'Push notifications aren&rsquo;t set up for this app yet.';
+        // Re-enabling (whether this is a first grant, or turning back on
+        // after a prior TURN OFF FOR THIS DEVICE below) always clears this
+        // device's own "off" flag, so the settings screen's branch above
+        // reflects it immediately -- see that flag's own comment.
+        if(result === 'granted') safeRemove('iworship:pushDisabledOnThisDevice:'+state.user.uid);
       }catch(e){ state.settingsPushStatus = (e && e.message) ? e.message : 'That didn&rsquo;t work &mdash; try again.'; }
       render();
     });
     const disablePushBtn = document.getElementById('settingsDisablePushBtn');
     if(disablePushBtn) disablePushBtn.addEventListener('click', async function(){
       disablePushBtn.disabled = true;
-      try{ await disablePushNotifications(state.user.uid); state.settingsPushStatus = 'Turned off for this device.'; }
+      try{
+        await disablePushNotifications(state.user.uid);
+        // See the pushDisabledHere comment above renderSettings() -- this is
+        // the only place that actually flips the UI's own "off" state, since
+        // Notification.permission itself never leaves 'granted' once set.
+        safeSet('iworship:pushDisabledOnThisDevice:'+state.user.uid, '1');
+        state.settingsPushStatus = 'Turned off for this device.';
+      }
       catch(e){ state.settingsPushStatus = 'Couldn&rsquo;t turn that off &mdash; try again.'; }
       render();
     });

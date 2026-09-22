@@ -178,6 +178,16 @@ export function watchProfile(uid, callback) {
     // its own comment for why -- so pass along whether THIS snapshot is
     // actually server-confirmed rather than deciding that here.
     callback({ ...defaultProfile(), ...(snap.exists() ? snap.data() : {}) }, { fromCache: snap.metadata.fromCache, exists: snap.exists() });
+  }, (err) => {
+    // [Bug found 2026-09-23] This listener had NO error handler at all --
+    // if Firestore ever actually rejected the read (rules denial, or a
+    // genuine backend/connectivity failure) it would fail completely
+    // silently: no console error, nothing, just a listener that never
+    // calls back again. Jared's diagnostic log showed exactly that shape
+    // (one cache-only snapshot, then nothing, forever) -- this at least
+    // surfaces whatever Firestore itself says the problem is instead of
+    // leaving it a total mystery.
+    console.error('[iworship-debug] watchProfile onSnapshot ERROR', err && err.code, err && err.message, err);
   });
 }
 // [Bug found 2026-09-10, fixed v29] Two real accounts (Jared's own second

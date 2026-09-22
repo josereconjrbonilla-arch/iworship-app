@@ -837,16 +837,16 @@ import { pushNotificationsConfigured } from './push-config.js';
         // permanently-loading landing page instead of eventually seeing
         // "Almost There".
         if(meta && meta.fromCache && !meta.exists && !state.profileLoaded){
-          console.debug('[iworship-debug] ambiguous cache-miss snapshot -- waiting for server confirmation (or 6s fallback)');
+          console.debug('[iworship-debug] ambiguous cache-miss snapshot -- waiting for server confirmation (or 15s fallback)');
           if(!profileLoadFallbackTimer){
             profileLoadFallbackTimer = setTimeout(function(){
               profileLoadFallbackTimer = null;
               if(state.profileLoaded) return; // the real snapshot won the race after all
-              console.debug('[iworship-debug] 6s fallback timer FIRED -- server never confirmed in time, forcing profileLoaded with', profile);
+              console.debug('[iworship-debug] fallback timer FIRED -- server never confirmed in time, forcing profileLoaded with', profile);
               state.profile = profile;
               state.profileLoaded = true;
               render();
-            }, 6000);
+            }, 15000);
           }
           return;
         }

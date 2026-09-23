@@ -204,8 +204,28 @@ export function watchProfile(uid, callback) {
 // ambiguous state, as a second, independent way to find out the truth
 // instead of only ever waiting on the one listener that's already acting
 // up.
-export async function fetchProfileFromServer(uid) {
+//
+// [Bug found 2026-09-23, round 2] Jared's own repro (uid logged and
+// confirmed correct, matching a document the Firebase console shows
+// intact with a real displayName, checked moments apart) still got back
+// snap.exists() === false from a SINGLE getDocFromServer() call, right
+// after a Clear-site-data + relogin. Not a rules denial (that throws --
+// this resolved normally) and not the wrong project (firebase-config.js
+// checked, correctly iworship-ph). That only leaves the read itself being
+// unreliable in the first moment or two after IndexedDB persistence gets
+// re-initialized from nothing -- so, same fix shape as the listener's own
+// flakiness: don't trust a single "not found" here either. Retry a couple
+// of times, a beat apart, before believing it.
+export async function fetchProfileFromServer(uid, attempt) {
+  attempt = attempt || 1;
   const snap = await getDocFromServer(doc(db, 'users', uid));
+  console.debug('[iworship-debug] fetchProfileFromServer attempt ' + attempt, {
+    uid, exists: snap.exists()
+  });
+  if (!snap.exists() && attempt < 4) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return fetchProfileFromServer(uid, attempt + 1);
+  }
   return { ...defaultProfile(), ...(snap.exists() ? snap.data() : {}) };
 }
 // [Bug found 2026-09-10, fixed v29] Two real accounts (Jared's own second

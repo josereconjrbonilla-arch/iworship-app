@@ -816,6 +816,7 @@ import { pushNotificationsConfigured } from './push-config.js';
         // Safe to remove once this is root-caused for good.
         console.debug('[iworship-debug] watchProfile snapshot', {
           at: new Date().toISOString(),
+          uid: user.uid,
           fromCache: meta && meta.fromCache,
           exists: meta && meta.exists,
           displayName: profile && profile.displayName,
@@ -857,7 +858,10 @@ import { pushNotificationsConfigured } from './push-config.js';
               // no longer be THIS uid, and applying a stale result then
               // would corrupt whichever account is current instead.
               if(state.profileLoaded || !state.user || state.user.uid !== user.uid) return;
-              console.debug('[iworship-debug] direct server fetch resolved first with', serverProfile && serverProfile.displayName);
+              console.debug('[iworship-debug] direct server fetch resolved first with', {
+                uid: user.uid,
+                serverProfile: serverProfile
+              });
               if(profileLoadFallbackTimer){ clearTimeout(profileLoadFallbackTimer); profileLoadFallbackTimer = null; }
               state.profile = serverProfile;
               state.profileLoaded = true;
@@ -880,7 +884,13 @@ import { pushNotificationsConfigured } from './push-config.js';
           return;
         }
         if(profileLoadFallbackTimer){ clearTimeout(profileLoadFallbackTimer); profileLoadFallbackTimer = null; }
-        console.debug('[iworship-debug] trusting this snapshot -- setting profileLoaded=true, displayName=', profile && profile.displayName);
+        console.debug('[iworship-debug] trusting this snapshot -- setting profileLoaded=true', {
+          uid: user.uid,
+          alreadyLoaded: state.profileLoaded,
+          fromCache: meta && meta.fromCache,
+          exists: meta && meta.exists,
+          displayName: profile && profile.displayName
+        });
         state.profile = profile;
         state.profileLoaded = true;
         syncChurchWatch(profile);

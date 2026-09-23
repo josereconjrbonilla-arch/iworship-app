@@ -10,7 +10,7 @@
 // real sign-in and first hosted session as the actual first test of this file.
 import { initializeApp } from 'firebase/app';
 import {
-  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, getDoc, getDocs, getDocFromServer,
   arrayUnion, arrayRemove, increment
@@ -47,8 +47,19 @@ const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 // tab/window of the app share that same on-device cache instead of fighting
 // over it. This only affects reads while offline; writes made offline are
 // queued by the SDK the same way and flush automatically once back online.
+// [DIAGNOSTIC 2026-09-23] Temporarily forced to memoryLocalCache() to test
+// whether the profile-setup-on-relogin bug is caused by a re-initialization
+// race in persistentLocalCache()/IndexedDB right after a cold/cleared cache
+// (see fetchProfileFromServer()'s comment below for the full theory, and
+// architecture-and-decisions.md's migration section for how this was
+// isolated). Jared's repro is 100% reliable via DevTools > Application >
+// "Clear site data", then relogin -- if that same repro stops reproducing
+// the bug with this change, the theory is confirmed and we decide the real
+// fix from there. Revert to the persistentLocalCache block below once this
+// test has an answer either way:
+//   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 const db = isFirebaseConfigured ? initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  localCache: memoryLocalCache()
 }) : null;
 const auth = isFirebaseConfigured ? getAuth(app) : null;
 // Media/AVP [2026-09-06] -- see storage.rules and the "Media" section below.

@@ -10,7 +10,7 @@
 // real sign-in and first hosted session as the actual first test of this file.
 import { initializeApp } from 'firebase/app';
 import {
-  initializeFirestore, persistentLocalCache, persistentSingleTabManager,
+  initializeFirestore, memoryLocalCache,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, getDoc, getDocs, getDocFromServer,
   arrayUnion, arrayRemove, increment
@@ -40,37 +40,35 @@ import { sha256Hex } from './hash.js';
 // isFirebaseConfigured is already true -- so app/db/auth/storage being null
 // in a demo-mode build is never actually dereferenced.
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
-// Offline persistence: once a device has synced songs/chords/setlists, they
-// stay readable (and usable) with zero connection — sanctuary wifi drops,
-// a phone in airplane mode, whatever — and quietly sync back up the moment
-// the connection returns. Writes made offline are queued by the SDK the
-// same way and flush automatically once back online.
+// [Bug found + fixed 2026-09-23] This used to use persistentLocalCache()
+// (IndexedDB-backed, so profile/song/setlist data survived a full app
+// close/reopen with zero connection). Root cause, confirmed by direct A/B
+// test: right after DevTools "Clear site data" wipes IndexedDB, ANY
+// IndexedDB-backed persistence -- tried both persistentMultipleTabManager
+// AND persistentSingleTabManager, same result both times -- has some
+// re-initialization window where even getDocFromServer() (documented to
+// bypass local cache and hit the network directly) comes back with a false
+// "document doesn't exist" for a document confirmed to be sitting right
+// there in the Firebase console. Forcing memoryLocalCache() (no IndexedDB
+// at all) is the only configuration that has actually held up against the
+// same repro so far -- see architecture-and-decisions.md's migration
+// section for the full elimination trail (account, document, rules, and
+// project were all independently ruled out before landing here).
 //
-// [Bug found + fixed 2026-09-23] This used to use persistentMultipleTabManager,
-// which lets more than one tab/window on the same device share one on-disk
-// cache. That's a nice-to-have this app doesn't actually need (one person,
-// one device, one tab, during a service) -- and it turned out to be the
-// actual cause of the profile-setup-on-relogin bug that took most of this
-// session to isolate. Root cause, confirmed by direct A/B test: right after
-// DevTools "Clear site data" wipes IndexedDB, persistentMultipleTabManager
-// has to run a multi-tab primary-lease election over IndexedDB before the
-// cache is usable -- and in that window, even getDocFromServer() (which is
-// documented to bypass local cache and hit the network directly) came back
-// with a false "document doesn't exist" for a document confirmed to be
-// sitting right there in the Firebase console. Forcing memoryLocalCache()
-// (no IndexedDB at all) made the bug disappear on the exact same repro,
-// which pinned the cause on IndexedDB/tab-lease initialization rather than
-// the account, the document, or the rules (all of which were independently
-// ruled out first -- see architecture-and-decisions.md's migration section).
-//
-// The fix: persistentSingleTabManager -- still a real on-disk cache, still
-// full offline support, just without the multi-tab lease handshake that was
-// racing on cold start. Tradeoff: if someone ever opens the app in a SECOND
-// tab at the same time, that second tab quietly falls back to memory-only
-// for its own lifetime (a normal, documented SDK fallback, not an error) --
-// a non-issue for how this app is actually used.
+// Tradeoff being accepted for now: data no longer survives a full app
+// close/reopen with zero connection (a genuinely offline cold start still
+// needs network on relaunch). It DOES still survive a live connection drop
+// mid-session -- anything already loaded while the tab was open stays
+// readable/usable, and queued writes still flush once the connection
+// returns -- since that only needs the in-memory cache, not IndexedDB. For
+// how this app is actually used (a phone or laptop running one continuous
+// session during a live service), a mid-service wifi drop is the far more
+// likely failure mode than someone force-quitting and reopening in airplane
+// mode, so this is a reasonable trade for now. Revisit if real persistent
+// offline support turns out to matter enough to justify a deeper look at
+// why IndexedDB itself won't warm up reliably here.
 const db = isFirebaseConfigured ? initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() })
+  localCache: memoryLocalCache()
 }) : null;
 const auth = isFirebaseConfigured ? getAuth(app) : null;
 // Media/AVP [2026-09-06] -- see storage.rules and the "Media" section below.

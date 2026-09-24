@@ -15,6 +15,8 @@ import {
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,
+  createProgram, updateProgram, deleteProgram, watchMyPrograms, watchProgram,
+  shareProgram, unshareProgram, watchProgramsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
   shareMedia, unshareMedia, watchMediaSharedWithMe,
   uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow,
@@ -157,12 +159,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     sharedSermons: [],       // populated live by watchSermonsSharedWithMe() alongside mySermons -- sermons someone else built and shared with this uid
     directory: [],           // populated live by watchDirectory() while the Sermons screen's share panel is open -- powers "search by name/church" (see startDirectoryWatch())
     viewSermon: null,        // populated live by ensureViewSermonWatch() -- whichever ONE sermon the active room is currently presenting, for host/congregant/projector alike
+    hostProgram: null,       // populated live by ensureHostProgramWatch() -- whichever ONE program the active room is running from (room.programId), host-only
     myMedia: [],             // Media/AVP [2026-09-06] -- populated live by watchMyMedia() while on the Media Library screen, and by the host's MEDIA picker
     sharedMedia: [],         // populated live by watchMediaSharedWithMe() alongside myMedia -- media someone else uploaded and shared with this uid
     myMediaFolders: [],      // Media Folders [2026-09-06] -- populated live by watchMyMediaFolders() while on the Media Library screen only (the in-session picker stays folder-unaware)
     viewMedia: null,         // populated live by ensureViewMediaWatch() -- whichever ONE media item the active room is currently presenting, for host/congregant/projector alike
     sharedSermonLinkId: null,   // set once, from a ?sermon=<id> deep link on page load -- see the deep-link block near the top of this file
     sharedSermonLinkData: null, // populated live by startSharedSermonLinkWatch() while state.view === 'shared-sermon-link'
+
+    // Program Builder [2026-09-24] -- see data/interface.md's "PROGRAM BUILDER"
+    // section. Exact mirror of the sermons fields just above.
+    myPrograms: [],          // populated live by watchMyPrograms() while on the programs/program-edit views, and by the host's Program tab
+    sharedPrograms: [],      // populated live by watchProgramsSharedWithMe() alongside myPrograms -- programs someone else built and shared with this uid
+    sharedProgramLinkId: null,   // set once, from a ?program=<id> deep link on page load
+    sharedProgramLinkData: null, // populated live by startSharedProgramLinkWatch() while state.view === 'shared-program-link'
 
     // Fellowship [2026-09-08] -- see interface.md's "FELLOWSHIP" section and
     // claude/fellowship-plan.md for the full design. Cross-church, no data
@@ -359,13 +369,35 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // internet latency for that setup can be minimized (it already is, via
   // the isolated low-overhead projector connection) but never fully
   // eliminated.
+  //
+  // Media is the ONE content type this veil deliberately stays up LONGER
+  // for [2026-09-24, Jared: "the delay is more obvious on media"]. Song/
+  // sermon/verse text needs no network fetch at all once the room pointer
+  // itself arrives -- the lyrics are already sitting in state.library/
+  // state.viewSermon in memory -- so clearing the veil the instant
+  // applyRoomSnapshot() runs was always correct for those. An image or
+  // video is different: its <img>/<video> src is a REAL file the browser
+  // has to fetch, completely independent of how fast the room doc's
+  // pointer synced, and clearing the veil the moment the pointer arrived
+  // (the original version of this fix) revealed a still-blank/loading
+  // image underneath it -- exactly the "more obvious" gap Jared reported.
+  // renderSessionProjector() now decides, per render, whether to clear
+  // right away (clearStagePendingIfNoAssetToLoad() below) or keep the veil
+  // up and wire a one-time load/loadeddata/error listener onto the actual
+  // media element, clearing only once THAT fires (see its own comment).
+  // applyRoomSnapshot() itself no longer clears this at all -- only
+  // renderSessionProjector()'s own logic and this timer do.
   let stagePending = false;
   let stagePendingTimer = null;
   function showStagePending(){
     stagePending = true;
     if(state.view === 'session-projector') render();
     clearTimeout(stagePendingTimer);
-    stagePendingTimer = setTimeout(function(){ stagePending = false; if(state.view === 'session-projector') render(); }, 4000);
+    // 8s, not 4 -- long enough to cover a real (if slow-connection) image/
+    // video fetch without leaving the veil up indefinitely if the expected
+    // follow-up update never shows up at all (a failed write, a closed
+    // Controls tab).
+    stagePendingTimer = setTimeout(function(){ stagePending = false; if(state.view === 'session-projector') render(); }, 8000);
   }
   function clearStagePending(){
     if(!stagePending) return;
@@ -374,11 +406,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stagePendingTimer = null;
   }
   function applyRoomSnapshot(code, room, broadcast){
-    clearStagePending(); // the real update just arrived -- see showStagePending()'s comment
     state.roomLoading = false;
     state.room = room;
     ensureViewSermonWatch(room);
     ensureViewMediaWatch(room);
+    ensureHostProgramWatch(room);
     if(!room && state.activeRoomCode === code){
       // Room is gone -- host ended it, or it never existed on this backend.
       stopRoomWatch();
@@ -480,6 +512,38 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(!wantId) return;
     unsubViewMedia = watchMedia(wantId, function(media){
       state.viewMedia = media;
+      render();
+    });
+  }
+
+  // Program Builder [2026-09-24] -- exact mirror of ensureViewSermonWatch()/
+  // ensureViewMediaWatch() above, but keyed off room.programId (which
+  // program, if any, this room is RUNNING FROM) rather than
+  // currentContentType/currentSermonId -- a program is a host-only run-of-
+  // service layered on top of whatever's actually live, never itself the
+  // thing presented to the congregation, so only the Program tab on
+  // session-host (renderProgramPanel()) ever reads state.hostProgram.
+  // Harmless to keep this subscription alive on every room/every view the
+  // same way sermon/media's are (a viewer/projector session just never
+  // renders anything from it) -- simpler than threading view-aware
+  // start/stop through every place session-host can be left without
+  // ending the session (Sermons, Media Library, etc. -- see HOST_VIEWS).
+  let unsubHostProgram = null;
+  let hostProgramWatchedId = null;
+  function stopHostProgramWatch(){
+    if(unsubHostProgram){ unsubHostProgram(); unsubHostProgram = null; }
+    hostProgramWatchedId = null;
+    state.hostProgram = null;
+  }
+  function ensureHostProgramWatch(room){
+    const wantId = (room && room.programId) ? room.programId : null;
+    if(wantId === hostProgramWatchedId) return;
+    hostProgramWatchedId = wantId;
+    if(unsubHostProgram){ unsubHostProgram(); unsubHostProgram = null; }
+    state.hostProgram = null;
+    if(!wantId) return;
+    unsubHostProgram = watchProgram(wantId, function(program){
+      state.hostProgram = program;
       render();
     });
   }
@@ -606,6 +670,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     unsubPublicRooms = watchPublicRooms(function(rooms){
       state.publicRooms = rooms;
       if(state.view === 'session-join') renderSessionJoin();
+      // Active Sessions on the landing page [2026-09-24] -- see
+      // renderLandingActiveSessionsSection() below -- reuses this exact
+      // same watch/list rather than a second query.
+      if(state.view === 'landing') render();
     });
   }
 
@@ -636,6 +704,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     unsubHostRooms = watchHostRooms(state.user.uid, function(rooms){
       hostRoomsList = rooms;
       if(state.view === 'my-sessions') render();
+      // Active Sessions on the landing page [2026-09-24] -- a room doc only
+      // ever exists while it's actually live (endRoom() deletes it outright
+      // -- see firestore-data-layer.js), so every entry in hostRoomsList IS
+      // a currently-active session, not a history log -- safe to reuse
+      // as-is for "which sessions are currently active."
+      if(state.view === 'landing') render();
     });
   }
 
@@ -654,6 +728,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     unsubCoHostRooms = watchCoHostRooms(state.user.uid, function(rooms){
       coHostRoomsList = rooms;
       if(state.view === 'my-sessions') render();
+      if(state.view === 'landing') render();
     });
   }
   function toMillis(ts){
@@ -791,6 +866,30 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
   }
 
+  // Program Builder [2026-09-24] -- exact mirror of startMySermonsWatch()/
+  // startSharedSermonsWatch() just above, powering the Programs screen AND
+  // the host's live Program tab (state.myPrograms/state.sharedPrograms).
+  let unsubMyPrograms = null;
+  function stopMyProgramsWatch(){ if(unsubMyPrograms){ unsubMyPrograms(); unsubMyPrograms = null; } }
+  function startMyProgramsWatch(){
+    stopMyProgramsWatch();
+    if(!state.user) return;
+    unsubMyPrograms = watchMyPrograms(state.user.uid, function(programs){
+      state.myPrograms = programs;
+      if(state.view === 'programs' || state.view === 'program-edit' || state.view === 'session-host') render();
+    });
+  }
+  let unsubSharedPrograms = null;
+  function stopSharedProgramsWatch(){ if(unsubSharedPrograms){ unsubSharedPrograms(); unsubSharedPrograms = null; } }
+  function startSharedProgramsWatch(){
+    stopSharedProgramsWatch();
+    if(!state.user) return;
+    unsubSharedPrograms = watchProgramsSharedWithMe(state.user.uid, function(programs){
+      state.sharedPrograms = programs;
+      if(state.view === 'programs' || state.view === 'program-edit' || state.view === 'session-host') render();
+    });
+  }
+
   // Media/AVP [2026-09-06] -- exact mirror of startMySermonsWatch()/
   // startSharedSermonsWatch() just above, powering the Media Library screen
   // AND the host's "pick media to present" list (state.myMedia/state.sharedMedia).
@@ -856,7 +955,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // [2026-09-09, social redesign] shorts/explore/notifications joined
       // the same allowlist -- author names/photos and follower counts on
       // those screens all come from the same directory entries.
-      if(['sermons','fellowship','profile-view','profile-edit','messages','dm-thread','group-chat-thread','admin','shorts','explore','notifications','landing'].includes(state.view)) render();
+      if(['sermons','programs','program-edit','fellowship','profile-view','profile-edit','messages','dm-thread','group-chat-thread','admin','shorts','explore','notifications','landing'].includes(state.view)) render();
     });
   }
 
@@ -873,7 +972,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // Function declarations are hoisted so inHostMode()/inFellowshipMode()/
   // renderBottomTabs() themselves are fine staying where they read best;
   // only the arrays they close over need to exist this early.
-  const HOST_VIEWS = ['host-hub','session-setup','session-host','session-join','session-projector','my-sessions','sermons','sermon-edit','media-library'];
+  const HOST_VIEWS = ['host-hub','session-setup','session-host','session-join','session-projector','my-sessions','sermons','sermon-edit','media-library','programs','program-edit'];
   const MORE_VIEWS = ['settings','admin','song-request-queue'];
   const FELLOWSHIP_VIEWS = ['fellowship','profile-edit','profile-view','messages','dm-thread','group-chat-thread','shorts','explore','notifications'];
 
@@ -919,7 +1018,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     'bible': null, 'devotionals': null, 'plans': null, 'list': null,
     'settings': null, 'host-hub': null,
     'detail': 'songId',
-    'sermons': null, 'fellowship': null, 'shorts': null, 'explore': null,
+    'sermons': null, 'programs': null, 'fellowship': null, 'shorts': null, 'explore': null,
     'notifications': null, 'messages': null, 'my-sessions': null, 'profile-edit': null,
     'dm-thread': 'activeDmThreadId', 'group-chat-thread': 'activeGroupChatId',
     'profile-view': 'viewProfileUid'
@@ -1118,6 +1217,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       if((state.isHost || state.isCoHost) && state.activeRoomCode){
         startMySermonsWatch(); startSharedSermonsWatch();
         startMyMediaWatch(); startSharedMediaWatch();
+        startMyProgramsWatch(); startSharedProgramsWatch();
         if(state.isHost) startDirectoryWatch(); // only the owner's session-host resume needs the "Manage Hosts" account search
       }
       // Notification deep links needing a signed-in user ("?dm=<uid>" from
@@ -2548,6 +2648,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='sermons') return renderSermons();
     if(state.view==='sermon-edit') return renderSermonEdit();
     if(state.view==='shared-sermon-link') return renderSharedSermonLink();
+    if(state.view==='programs') return renderPrograms();
+    if(state.view==='program-edit') return renderProgramEdit();
+    if(state.view==='shared-program-link') return renderSharedProgramLink();
     if(state.view==='media-library') return renderMediaLibrary();
     if(state.view==='fellowship') return renderFellowshipFeed();
     if(state.view==='profile-edit') return renderProfileEdit();
@@ -2584,6 +2687,60 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       : state.feedPosts.filter(function(p){ return !isBlockedByMe(p.authorUid); });
     return source.slice(0, 3);
   }
+  // Active Sessions on the landing page [2026-09-24] -- Jared: "add a
+  // feature where we can see which sessions are currently active especially
+  // for hosts in the landing page." Reuses three lists that already existed
+  // for other screens rather than a new query: hostRoomsList/coHostRoomsList
+  // (My Sessions' own data -- and, per the comment on watchHostRooms() in
+  // firestore-data-layer.js, every entry in either list IS a currently-live
+  // room, since endRoom() deletes the doc outright rather than just marking
+  // it ended) and state.publicRooms (the same list Join a Session already
+  // shows, minus whatever this account already owns/co-hosts, so a host
+  // doesn't see their own room listed twice in two different sections of
+  // the same card). Renders nothing at all for a signed-out or non-host
+  // visitor when there's genuinely no public room live either -- this is
+  // meant to be a quick "what's happening right now" glance, not a
+  // permanent fixture that's empty 95% of the time. A host-capable account
+  // that isn't currently hosting anything, with no public room live either,
+  // still gets a small card -- "especially for hosts" -- so checking
+  // whether anything's live is a glance at Home, not a trip into Host Hub.
+  function renderLandingActiveSessionsSection(signedIn){
+    const mine = [];
+    (hostRoomsList||[]).forEach(function(r){ mine.push({ room:r, role:'owner' }); });
+    (coHostRoomsList||[]).forEach(function(r){ mine.push({ room:r, role:'cohost' }); });
+    const myCodes = mine.map(function(m){ return m.room.code; });
+    const publicOthers = (state.publicRooms||[]).filter(function(r){ return !myCodes.includes(r.code); });
+
+    if(!mine.length && !publicOthers.length && !canHost()) return '';
+
+    const mineHtml = mine.length ? mine.map(function(m){
+      const r = m.room;
+      const isLive = state.activeRoomCode === r.code && (m.role==='owner' ? state.isHost : state.isCoHost);
+      return '<div class="room-list-card">' +
+        '<div class="room-list-meta">' +
+          '<p class="room-name">'+escapeHtml(r.name)+' <span class="live-badge" style="margin-left:8px;vertical-align:middle;"><span class="live-dot"></span>LIVE</span></p>' +
+          '<p class="room-sub">Code '+r.code+(r.churchName ? ' &middot; '+escapeHtml(r.churchName) : '')+(m.role==='cohost' ? ' &middot; you&rsquo;re a co-host' : '')+'</p>' +
+        '</div>' +
+        '<button class="btn btn-primary" data-active-resume="'+r.code+'" data-active-role="'+m.role+'">'+(isLive ? 'CONTINUE' : (m.role==='owner' ? 'RESUME HOSTING' : 'OPEN'))+'</button>' +
+      '</div>';
+    }).join('') : '';
+
+    const publicHtml = publicOthers.length ? publicOthers.map(function(r){
+      return '<div class="room-list-card"><div class="room-list-meta"><p class="room-name">'+escapeHtml(r.name)+'</p>' +
+        '<p class="room-sub">'+escapeHtml(r.hostName)+(r.churchName?' &middot; '+escapeHtml(r.churchName):'')+'</p></div>' +
+        '<button class="btn btn-primary" data-active-join="'+r.code+'">JOIN</button></div>';
+    }).join('') : '';
+
+    return '<div class="session-card">' +
+      '<h3>Active Sessions</h3>' +
+      (mine.length ? ('<p class="hint" style="margin:0 0 10px;">Sessions you&rsquo;re currently hosting or co-hosting:</p>' + mineHtml) : '') +
+      (publicOthers.length ? (
+        '<p class="hint" style="margin:'+(mine.length?'18px':'0')+' 0 10px;">Public rooms live right now:</p>' + publicHtml
+      ) : '') +
+      (!mine.length && !publicOthers.length ? '<p class="hint" style="margin:0;">No sessions are live right now.</p>' : '') +
+    '</div>';
+  }
+
   function renderLandingFellowshipSection(signedIn){
     if(!signedIn){
       return '<div class="session-card">' +
@@ -2637,6 +2794,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
   function renderLanding(){
     ensureLandingSocialWatchesStarted();
+    ensureLandingActiveSessionsWatchStarted();
     const verse = todaysVerse();
     const signedIn = !!state.user;
     // [Bug found 2026-09-22] Jared: "when relogging back in, it asked for my
@@ -2720,6 +2878,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
       (favCount ? ('<div class="quick-links"><button class="btn btn-ghost" id="goFavBtn"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">'+icon('heart')+'</svg>VIEW YOUR '+favCount+' FAVORITE'+(favCount===1?'':'S')+'</button></div>') : '') +
 
+      // Active Sessions [2026-09-24] -- see renderLandingActiveSessionsSection()'s
+      // own comment for the full reasoning; renders '' (nothing at all) most
+      // of the time for a non-host visitor when nothing's actually live.
+      renderLandingActiveSessionsSection(signedIn) +
+
       // Homepage redesign [2026-09-10] -- Jared: "having fellowship as the
       // main attraction is better." Fellowship's preview leads; Hymnal and
       // Host both already have their own persistent bottom tab, so this
@@ -2759,6 +2922,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
     const landingOpenFellowshipBtn = document.getElementById('landingOpenFellowshipBtn');
     if(landingOpenFellowshipBtn) landingOpenFellowshipBtn.addEventListener('click', function(){ openFellowshipFeed(); });
+    // Active Sessions [2026-09-24] -- resume/open reuse the exact same
+    // resumeAsHost()/joinAsCoHost() My Sessions already uses; JOIN reuses
+    // attemptJoin(), same as the Public Rooms list on the Join screen.
+    document.querySelectorAll('[data-active-resume]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const code = btn.getAttribute('data-active-resume');
+        if(btn.getAttribute('data-active-role') === 'cohost') joinAsCoHost(code);
+        else resumeAsHost(code);
+      });
+    });
+    document.querySelectorAll('[data-active-join]').forEach(function(btn){
+      btn.addEventListener('click', function(){ attemptJoin(btn.getAttribute('data-active-join'), ''); });
+    });
     document.querySelectorAll('[data-landing-feed-tab]').forEach(function(btn){
       btn.addEventListener('click', function(){ state.landingFeedTab = btn.getAttribute('data-landing-feed-tab'); render(); });
     });
@@ -2891,6 +3067,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p style="text-align:center;margin-top:14px;"><button class="switch-account" id="mySessionsBtn">MANAGE MY SESSIONS</button>' +
           (canHost() ? ' &middot; <button class="switch-account" id="sermonsBtn">SERMONS</button>' : '') +
           (canHost() ? ' &middot; <button class="switch-account" id="mediaLibraryBtn">MEDIA LIBRARY</button>' : '') +
+          (canHost() ? ' &middot; <button class="switch-account" id="programsBtn">PROGRAMS</button>' : '') +
         '</p>' +
       '</div>';
 
@@ -2911,6 +3088,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
     const mediaLibraryBtn = document.getElementById('mediaLibraryBtn');
     if(mediaLibraryBtn) mediaLibraryBtn.addEventListener('click', function(){ openMediaLibrary('host-hub'); });
+    const programsBtn = document.getElementById('programsBtn');
+    if(programsBtn) programsBtn.addEventListener('click', function(){
+      state.view='programs'; render(); window.scrollTo(0,0); startMyProgramsWatch(); startSharedProgramsWatch(); startDirectoryWatch();
+    });
   }
 
   // Notification preferences [2026-09-17] -- Jared: "new sessions from
@@ -5686,6 +5867,121 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   let mediaPreviewOpenId = null;
   let mediaPreviewSlideIndex = 0;
 
+  // =========================================================================
+  // Program Builder [2026-09-24] -- Jared: "what if we had another feature
+  // where the host can arrange the sequence of everything that will be
+  // presented? Along with notes and remarks for context, like a service
+  // program builder. Make it accessible for other members that the host
+  // will share it with." See data/firestore-data-layer.js's matching
+  // comment for the full data-model design, and data/interface.md's
+  // "PROGRAM BUILDER" section for the writeup. Editor-state variables live
+  // here (same cluster as Sermons'/Media's own, above) for the same TDZ
+  // reason those are -- the actual renderPrograms()/renderProgramEdit()
+  // screen bodies live further down, right after renderSermonEdit().
+  let programEditId = null;
+  let programEditTitle = '';
+  let programEditItems = []; // [{id, type, label, refId, pocUid, pocName, notes, durationMinutes, done}]
+  let programEditReturnView = 'programs'; // 'programs' | 'session-host' -- where BACK and a successful Save both return to
+  let programDeleteConfirmId = null;
+  // Sharing -- exact mirror of sermonShareOpenId/sermonShareQuery.
+  let programShareOpenId = null;
+  let programShareQuery = '';
+  // POC assignment [2026-09-24] -- Jared's Q3 answer: "Add all the possible
+  // info like who's the POC of that part of the program." One item's POC
+  // search panel open at a time, same one-at-a-time convention as
+  // programShareOpenId/mediaMoveOpenId above -- searches state.directory
+  // exactly like renderSermonShareResults()/renderHostManageResults(), so
+  // assigning a POC an actual account (enabling GIVE CONTROL later, live)
+  // uses the one search pattern this app already trains hosts on
+  // everywhere else. A POC typed as plain text (no account) is equally
+  // valid -- pocUid just stays null and GIVE CONTROL simply doesn't show.
+  let programPocOpenItemId = null;
+  let programPocQuery = '';
+
+  function newProgramItemId(){ return 'item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8); }
+  function newProgramItem(type){
+    return { id: newProgramItemId(), type: type || 'other', label: '', refId: null, pocUid: null, pocName: '', notes: '', durationMinutes: null, done: false };
+  }
+  function programItemTypeLabel(type){
+    return type==='song' ? 'Song' : type==='sermon' ? 'Sermon' : type==='verse' ? 'Bible Reading' : type==='media' ? 'Media' : 'Other';
+  }
+  // What a program item actually shows as its title -- the linked
+  // song/sermon/media's OWN current title when linked (so a later rename
+  // there is reflected automatically), falling back to the item's own
+  // typed `label` if unlinked, not yet picked, or the thing it linked to
+  // was since deleted out from under it.
+  function programItemDisplayLabel(item){
+    if(item.type === 'song'){ const s = state.library.find(function(x){ return x.id===item.refId; }); if(s) return s.title; }
+    if(item.type === 'sermon'){ const s = findSermonById(item.refId); if(s) return s.title || 'Untitled sermon'; }
+    if(item.type === 'media'){ const m = findMediaById(item.refId); if(m) return m.title || 'Untitled media'; }
+    return item.label || (item.refId ? '(removed)' : '');
+  }
+
+  function openProgramEditor(program, returnView){
+    programEditId = program ? program.id : null;
+    programEditTitle = program ? (program.title||'') : '';
+    programEditItems = (program && program.items) ? program.items.map(function(it){ return Object.assign({}, it); }) : [];
+    programEditReturnView = returnView || 'programs';
+    programPocOpenItemId = null; programPocQuery = '';
+    state.view = 'program-edit';
+    render(); window.scrollTo(0,0);
+  }
+
+  function programShareLink(id){
+    return window.location.origin + window.location.pathname + '?program=' + encodeURIComponent(id);
+  }
+
+  // Exact mirror of renderSermonShareResults()/renderSermonSharePanel() --
+  // see those for the full reasoning.
+  function renderProgramShareResults(p, query){
+    const raw = query.trim();
+    if(!raw) return '';
+    const q = raw.toLowerCase();
+    const shared = p.sharedWithUids || [];
+    const matches = state.directory.filter(function(u){
+      if(u.uid === p.createdByUid || shared.includes(u.uid)) return false;
+      return u.uid === raw || (u.displayName||'').toLowerCase().includes(q) || (u.churchName||'').toLowerCase().includes(q);
+    }).slice(0,8);
+    if(!matches.length) return '<p class="hint">No matching accounts &mdash; try their exact Account ID, or send them the link below instead.</p>';
+    return '<ul class="setlist-items">' + matches.map(function(u){
+      return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(u.displayName||'(no name set)')+
+        (u.churchName ? ' <span class="hint">&middot; '+escapeHtml(u.churchName)+'</span>' : '') + '</span>' +
+        '<span class="setlist-controls"><button type="button" class="icon-btn-sm" data-share-program="'+p.id+'" data-share-uid="'+escapeAttr(u.uid)+'" aria-label="Share with this account" style="width:auto;padding:0 8px;">SHARE</button></span></li>';
+    }).join('') + '</ul>';
+  }
+  function renderProgramSharePanel(p){
+    const shared = p.sharedWithUids || [];
+    return '<p class="control-label uc" style="margin-bottom:10px;">Share &ldquo;'+escapeHtml(p.title||'this program')+'&rdquo;</p>' +
+      '<p class="hint" style="margin:0 0 10px;">Anyone you share with can open this program, present straight from it, and tick off completed parts during the service.</p>' +
+      (shared.length ? ('<ul class="setlist-items">' + shared.map(function(uid){
+          const person = state.directory.find(function(d){ return d.uid===uid; });
+          return '<li class="setlist-item"><span class="setlist-title">'+(person ? (escapeHtml(person.displayName||'(no name set)')+(person.churchName?' <span class="hint">&middot; '+escapeHtml(person.churchName)+'</span>':'')) : ('<code>'+escapeHtml(uid)+'</code>'))+'</span>' +
+            '<span class="setlist-controls"><button type="button" class="icon-btn-sm" data-unshare-program="'+p.id+'" data-unshare-uid="'+escapeAttr(uid)+'" aria-label="Remove access" style="width:auto;padding:0 8px;">&times;</button></span></li>';
+        }).join('') + '</ul>') : '<p class="hint">Not shared with anyone yet.</p>') +
+      '<div class="field" style="margin-top:10px;"><label for="programShareSearch-'+p.id+'">FIND BY ACCOUNT ID, NAME, OR CHURCH</label>' +
+        '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+        '<input type="text" id="programShareSearch-'+p.id+'" data-program-share-search="'+p.id+'" placeholder="Search&hellip;" value="'+escapeAttr(programShareQuery)+'" autocomplete="off"></div>' +
+      '</div>' +
+      '<div data-program-share-results="'+p.id+'">' + renderProgramShareResults(p, programShareQuery) + '</div>' +
+      '<p class="hint" style="margin:16px 0 8px;">Or send this link &mdash; anyone signed in who opens it can add this program to their own list themselves:</p>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">' +
+        '<code style="word-break:break-all;font-size:.8rem;">'+escapeHtml(programShareLink(p.id))+'</code>' +
+        '<button type="button" class="switch-account" data-copy-program-share-link="'+p.id+'">COPY LINK</button>' +
+      '</div>';
+  }
+  function bindProgramShareButtons(){
+    document.querySelectorAll('[data-share-program]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const programId = btn.getAttribute('data-share-program');
+        const uid = btn.getAttribute('data-share-uid');
+        btn.disabled = true;
+        try{ await shareProgram(programId, uid); showToast('Shared.'); }
+        catch(e){ showToast('Couldn&rsquo;t share &mdash; try again.'); }
+        render();
+      });
+    });
+  }
+
   function openMediaLibrary(returnView){
     mediaLibraryReturnView = returnView || 'landing';
     mediaShareOpenId = null; mediaShareQuery = ''; mediaDeleteConfirmId = null;
@@ -6540,6 +6836,424 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     renderSermonSlidesList();
   }
 
+  // =========================================================================
+  // Program Builder screens -- see this feature's editor-state comment
+  // (near openProgramEditor(), above) for the full design writeup. Library
+  // list (renderPrograms) and shared-link landing (renderSharedProgramLink)
+  // are near-line-for-line copies of renderSermons()/renderSharedSermonLink()
+  // just above; renderProgramEdit() is its own thing (an ordered item list
+  // with simple up/down reordering, not sermon-edit's drag/resize canvas).
+  function renderPrograms(){
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="programsBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Programs</p>' +
+        '<p class="landing-sub">Build the full order of service ahead of time &mdash; songs, sermon, scripture, media, anything else &mdash; with notes and a point of contact for each part, then run the whole service straight from it live.</p>' +
+      '</div>' +
+      '<button class="btn btn-primary btn-lg btn-block" id="newProgramBtn" style="margin-bottom:22px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>NEW PROGRAM</button>' +
+      (state.myPrograms.length ? state.myPrograms.map(function(p){
+        const n = (p.items||[]).length;
+        const confirming = programDeleteConfirmId === p.id;
+        const sharing = programShareOpenId === p.id;
+        const shareCount = (p.sharedWithUids||[]).length;
+        return '<div class="room-list-card">' +
+          '<button type="button" data-edit-program="'+p.id+'" style="background:none;border:none;padding:0;text-align:left;cursor:pointer;font:inherit;color:inherit;flex:1;min-width:200px;">' +
+            '<div class="room-list-meta"><p class="room-name">'+escapeHtml(p.title||'Untitled program')+'</p>' +
+              '<p class="room-sub">'+n+' item'+(n===1?'':'s')+(shareCount?(' &middot; shared with '+shareCount):'')+'</p></div>' +
+          '</button>' +
+          (confirming ?
+            ('<div class="confirm-row"><span>Delete this program?</span>' +
+              '<button class="btn btn-primary" data-confirm-delete-program="'+p.id+'">YES, DELETE</button>' +
+              '<button class="btn btn-ghost" data-cancel-delete-program="'+p.id+'">CANCEL</button></div>')
+            : ('<span class="setlist-controls">' +
+                '<button class="btn btn-ghost" data-toggle-share-program="'+p.id+'">'+(sharing?'CLOSE':'SHARE')+'</button>' +
+                '<button class="btn btn-ghost" data-ask-delete-program="'+p.id+'">DELETE</button>' +
+              '</span>')) +
+          (sharing ? ('<div style="flex-basis:100%;width:100%;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">' + renderProgramSharePanel(p) + '</div>') : '') +
+        '</div>';
+      }).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><p>No programs yet &mdash; build one and it&rsquo;ll be ready to run next time you host.</p></div>') +
+      (state.sharedPrograms.length ?
+        ('<div class="section-heading" style="margin-top:26px;"><h2 class="uc">Shared With You</h2></div>' +
+          state.sharedPrograms.map(function(p){
+            const n = (p.items||[]).length;
+            return '<div class="room-list-card">' +
+              '<button type="button" data-edit-program="'+p.id+'" style="background:none;border:none;padding:0;text-align:left;cursor:pointer;font:inherit;color:inherit;flex:1;min-width:200px;">' +
+                '<div class="room-list-meta"><p class="room-name">'+escapeHtml(p.title||'Untitled program')+'</p>' +
+                  '<p class="room-sub">'+n+' item'+(n===1?'':'s')+' &middot; shared by '+escapeHtml(p.createdByName||'someone')+'</p></div>' +
+              '</button>' +
+              '<button class="btn btn-ghost" data-remove-shared-program="'+p.id+'">REMOVE</button>' +
+            '</div>';
+          }).join(''))
+        : '');
+
+    document.getElementById('programsBackBtn').addEventListener('click', function(){ stopMyProgramsWatch(); stopSharedProgramsWatch(); stopDirectoryWatch(); state.view='host-hub'; render(); window.scrollTo(0,0); });
+    document.getElementById('newProgramBtn').addEventListener('click', function(){ openProgramEditor(null, 'programs'); });
+    document.querySelectorAll('[data-edit-program]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const p = state.myPrograms.concat(state.sharedPrograms).find(function(x){ return x.id===btn.getAttribute('data-edit-program'); });
+        if(p) openProgramEditor(p, 'programs');
+      });
+    });
+    document.querySelectorAll('[data-ask-delete-program]').forEach(function(btn){
+      btn.addEventListener('click', function(){ programDeleteConfirmId = btn.getAttribute('data-ask-delete-program'); programShareOpenId = null; render(); });
+    });
+    document.querySelectorAll('[data-cancel-delete-program]').forEach(function(btn){
+      btn.addEventListener('click', function(){ programDeleteConfirmId = null; render(); });
+    });
+    document.querySelectorAll('[data-confirm-delete-program]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const id = btn.getAttribute('data-confirm-delete-program');
+        btn.disabled = true;
+        try{ await deleteProgram(id); showToast('Program deleted.'); }
+        catch(e){ showToast('Couldn&rsquo;t delete that program &mdash; try again.'); }
+        programDeleteConfirmId = null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-toggle-share-program]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-toggle-share-program');
+        programShareOpenId = (programShareOpenId === id) ? null : id;
+        programShareQuery = '';
+        programDeleteConfirmId = null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-program-share-search]').forEach(function(input){
+      input.addEventListener('input', function(){
+        programShareQuery = input.value;
+        const programId = input.getAttribute('data-program-share-search');
+        const p = state.myPrograms.find(function(x){ return x.id === programId; });
+        const holder = document.querySelector('[data-program-share-results="'+programId+'"]');
+        if(holder && p){ holder.innerHTML = renderProgramShareResults(p, programShareQuery); bindProgramShareButtons(); }
+      });
+    });
+    document.querySelectorAll('[data-unshare-program]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const programId = btn.getAttribute('data-unshare-program');
+        const uid = btn.getAttribute('data-unshare-uid');
+        btn.disabled = true;
+        try{ await unshareProgram(programId, uid); showToast('Removed.'); }
+        catch(e){ showToast('Couldn&rsquo;t remove &mdash; try again.'); }
+        render();
+      });
+    });
+    document.querySelectorAll('[data-remove-shared-program]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const programId = btn.getAttribute('data-remove-shared-program');
+        btn.disabled = true;
+        try{ await unshareProgram(programId, state.user.uid); showToast('Removed from your list.'); }
+        catch(e){ showToast('Couldn&rsquo;t remove &mdash; try again.'); }
+        render();
+      });
+    });
+    document.querySelectorAll('[data-copy-program-share-link]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const link = programShareLink(btn.getAttribute('data-copy-program-share-link'));
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(link).then(function(){ showToast('Share link copied.'); }).catch(function(){ showToast(link); });
+        } else { showToast(link); }
+      });
+    });
+    bindProgramShareButtons();
+  }
+
+  // The screen a ?program=<id> link (see programShareLink()/"COPY LINK"
+  // above) actually opens to -- exact mirror of renderSharedSermonLink().
+  // state.sharedProgramLinkData is populated by the watchProgram()
+  // subscription started where programLinkId is first read, in the
+  // startup-routing block near the bottom of this file.
+  function renderSharedProgramLink(){
+    const program = state.sharedProgramLinkData;
+    const n = program ? (program.items||[]).length : 0;
+    const isOwner = !!(program && state.user && program.createdByUid === state.user.uid);
+    const alreadyShared = !!(program && state.user && (program.sharedWithUids||[]).includes(state.user.uid));
+
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="sharedProgramBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Shared Program</p>' +
+        '<p class="landing-sub">Someone sent you a link to a service program built in iWorship.</p>' +
+      '</div>' +
+      (program ?
+        ('<div class="session-card">' +
+          '<p class="control-label uc" style="margin-bottom:6px;">'+escapeHtml(program.title||'Untitled program')+'</p>' +
+          '<p class="hint">'+n+' item'+(n===1?'':'s')+(program.createdByName?(' &middot; built by '+escapeHtml(program.createdByName)):'')+'</p>' +
+          (!state.user ?
+            '<p class="hint" style="margin-top:16px;">Sign in from the home screen, then reopen this link to add it to your own programs.</p>'
+          : isOwner ?
+            '<p class="hint" style="margin-top:16px;">This is one of your own programs &mdash; it&rsquo;s already in your list.</p>'
+          : alreadyShared ?
+            '<p class="hint" style="margin-top:16px;">Already in your Programs list.</p>'
+          :
+            '<button class="btn btn-primary btn-lg btn-block" id="addSharedProgramBtn" style="margin-top:16px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>ADD TO MY PROGRAMS</button>'
+          ) +
+          (state.user ? '<button type="button" class="switch-account" id="goToProgramsFromLinkBtn" style="margin-top:14px;">GO TO PROGRAMS</button>' : '') +
+        '</div>')
+        : '<p style="text-align:center;color:var(--ink-soft);padding:60px 20px;">Loading&hellip; (or this program no longer exists)</p>');
+
+    document.getElementById('sharedProgramBackBtn').addEventListener('click', function(){ state.view='landing'; render(); window.scrollTo(0,0); });
+    const addBtn = document.getElementById('addSharedProgramBtn');
+    if(addBtn) addBtn.addEventListener('click', async function(){
+      addBtn.disabled = true;
+      try{
+        await shareProgram(program.id, state.user.uid);
+        showToast('Added to your programs.');
+        state.view = 'programs'; render(); window.scrollTo(0,0);
+        startMyProgramsWatch(); startSharedProgramsWatch(); startDirectoryWatch();
+      }catch(e){
+        showToast('Couldn&rsquo;t add that program &mdash; try again.');
+        addBtn.disabled = false;
+      }
+    });
+    const goBtn = document.getElementById('goToProgramsFromLinkBtn');
+    if(goBtn) goBtn.addEventListener('click', function(){
+      state.view = 'programs'; render(); window.scrollTo(0,0);
+      startMyProgramsWatch(); startSharedProgramsWatch(); startDirectoryWatch();
+    });
+  }
+
+  // The Program editor -- a plain ordered list of items (no drag/resize
+  // canvas like sermon-edit's, just up/down/remove same as the setlist
+  // builder). Every item field lives directly on programEditItems, edited
+  // in place; SAVE PROGRAM writes the whole array at once, same as
+  // saveSermonFlow() does for sermonEditSlides.
+  function renderProgramItemLinkField(item){
+    if(item.type === 'song'){
+      const options = state.library.slice().sort(function(a,b){ return (a.title||'').localeCompare(b.title||''); });
+      return '<div class="field"><label>SONG</label><select data-item-link="'+item.id+'">' +
+        '<option value="">&mdash; pick a song &mdash;</option>' +
+        options.map(function(s){ return '<option value="'+escapeAttr(s.id)+'"'+(item.refId===s.id?' selected':'')+'>'+escapeHtml(s.title)+'</option>'; }).join('') +
+        '</select></div>';
+    }
+    if(item.type === 'sermon'){
+      const options = state.mySermons.concat(state.sharedSermons);
+      return '<div class="field"><label>SERMON</label><select data-item-link="'+item.id+'">' +
+        '<option value="">&mdash; pick a sermon &mdash;</option>' +
+        options.map(function(s){ return '<option value="'+escapeAttr(s.id)+'"'+(item.refId===s.id?' selected':'')+'>'+escapeHtml(s.title||'Untitled sermon')+'</option>'; }).join('') +
+        '</select></div>';
+    }
+    if(item.type === 'media'){
+      const options = state.myMedia.concat(state.sharedMedia);
+      return '<div class="field"><label>MEDIA</label><select data-item-link="'+item.id+'">' +
+        '<option value="">&mdash; pick media &mdash;</option>' +
+        options.map(function(m){ return '<option value="'+escapeAttr(m.id)+'"'+(item.refId===m.id?' selected':'')+'>'+escapeHtml(m.title||'Untitled media')+'</option>'; }).join('') +
+        '</select></div>';
+    }
+    // 'verse'/'other' -- no linked doc, just a plain typed label (e.g.
+    // "Scripture Reading -- John 3:16" or "Offering").
+    return '<div class="field"><label for="itemLabel-'+item.id+'">LABEL</label><input type="text" id="itemLabel-'+item.id+'" data-item-label="'+item.id+'" placeholder="e.g. Scripture Reading, Offering, Altar Call" value="'+escapeAttr(item.label)+'"></div>';
+  }
+  function renderProgramItemRow(item, i, total){
+    const pocSearching = programPocOpenItemId === item.id;
+    const pocLabel = item.pocUid ? (function(){ const p = directoryEntry(item.pocUid); return p ? (p.displayName||'(no name set)') : item.pocName; })() : item.pocName;
+    return '<div class="room-list-card" style="flex-direction:column;align-items:stretch;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<span class="setlist-num">'+(i+1)+'</span>' +
+        '<select data-item-type="'+item.id+'" style="flex:0 0 auto;">' +
+          ['song','sermon','verse','media','other'].map(function(t){ return '<option value="'+t+'"'+(item.type===t?' selected':'')+'>'+programItemTypeLabel(t)+'</option>'; }).join('') +
+        '</select>' +
+        '<label class="pref-toggle" style="margin-left:auto;" title="Mark this part done"><input type="checkbox" data-item-done="'+item.id+'"'+(item.done?' checked':'')+'>' +
+          '<span class="pref-toggle-track"></span></label><span class="hint" style="margin-right:auto;">DONE</span>' +
+        '<button type="button" class="icon-btn-sm" data-item-up="'+i+'" '+(i===0?'disabled':'')+' aria-label="Move up">&uarr;</button>' +
+        '<button type="button" class="icon-btn-sm" data-item-down="'+i+'" '+(i===total-1?'disabled':'')+' aria-label="Move down">&darr;</button>' +
+        '<button type="button" class="icon-btn-sm" data-item-remove="'+i+'" aria-label="Remove">&times;</button>' +
+      '</div>' +
+      renderProgramItemLinkField(item) +
+      '<div class="field-row">' +
+        '<div class="field"><label for="itemNotes-'+item.id+'">NOTES (OPTIONAL)</label><textarea id="itemNotes-'+item.id+'" data-item-notes="'+item.id+'" rows="2" placeholder="Cues, reminders, anything the team needs to know">'+escapeHtml(item.notes||'')+'</textarea></div>' +
+        '<div class="field" style="max-width:160px;"><label for="itemDuration-'+item.id+'">MINUTES (OPTIONAL)</label><input type="number" min="0" id="itemDuration-'+item.id+'" data-item-duration="'+item.id+'" value="'+(item.durationMinutes!=null?item.durationMinutes:'')+'"></div>' +
+      '</div>' +
+      '<div class="field"><label>POINT OF CONTACT (OPTIONAL)</label>' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">' +
+          '<input type="text" data-item-poc-name="'+item.id+'" placeholder="e.g. Sis. Maria (worship team)" value="'+escapeAttr(pocLabel||'')+'" style="flex:1;min-width:180px;">' +
+          '<button type="button" class="btn btn-ghost" data-toggle-item-poc="'+item.id+'">'+(pocSearching?'CLOSE':(item.pocUid?'CHANGE':'LINK ACCOUNT'))+'</button>' +
+        '</div>' +
+        (item.pocUid ? '<p class="hint" style="margin-top:4px;">Linked to an iWorship account &mdash; GIVE CONTROL will be available for this part when running the program live.</p>' : '') +
+        (pocSearching ? ('<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">' +
+          '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+          '<input type="text" data-item-poc-search="'+item.id+'" placeholder="Search by name, church, or Account ID&hellip;" value="'+escapeAttr(programPocQuery)+'" autocomplete="off"></div>' +
+          '<div data-item-poc-results="'+item.id+'">' + renderProgramPocResults(item, programPocQuery) + '</div>' +
+        '</div>') : '') +
+      '</div>' +
+    '</div>';
+  }
+  function renderProgramPocResults(item, query){
+    const raw = query.trim();
+    if(!raw) return '';
+    const q = raw.toLowerCase();
+    const matches = state.directory.filter(function(u){
+      return u.uid === raw || (u.displayName||'').toLowerCase().includes(q) || (u.churchName||'').toLowerCase().includes(q);
+    }).slice(0,8);
+    if(!matches.length) return '<p class="hint">No matching accounts &mdash; you can still just type their name in the field above.</p>';
+    return '<ul class="setlist-items">' + matches.map(function(u){
+      return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(u.displayName||'(no name set)')+
+        (u.churchName ? ' <span class="hint">&middot; '+escapeHtml(u.churchName)+'</span>' : '') + '</span>' +
+        '<span class="setlist-controls"><button type="button" class="icon-btn-sm" data-pick-item-poc="'+item.id+'" data-poc-uid="'+escapeAttr(u.uid)+'" data-poc-name="'+escapeAttr(u.displayName||'')+'" aria-label="Use this account" style="width:auto;padding:0 8px;">USE</button></span></li>';
+    }).join('') + '</ul>';
+  }
+  function renderProgramItemsList(){
+    const holder = document.getElementById('programItemsList');
+    if(!holder) return;
+    holder.innerHTML = programEditItems.length ? programEditItems.map(function(it, i){ return renderProgramItemRow(it, i, programEditItems.length); }).join('') :
+      '<p class="hint" style="text-align:center;padding:20px 0;">No items yet &mdash; add the first part of the service below.</p>';
+    attachProgramItemHandlers();
+  }
+  function attachProgramItemHandlers(){
+    document.querySelectorAll('[data-item-type]').forEach(function(sel){
+      sel.addEventListener('change', function(){
+        const id = sel.getAttribute('data-item-type');
+        const item = programEditItems.find(function(x){ return x.id===id; });
+        if(!item) return;
+        item.type = sel.value;
+        item.refId = null; // switching type invalidates whatever was linked
+        renderProgramItemsList();
+      });
+    });
+    document.querySelectorAll('[data-item-link]').forEach(function(sel){
+      sel.addEventListener('change', function(){
+        const id = sel.getAttribute('data-item-link');
+        const item = programEditItems.find(function(x){ return x.id===id; });
+        if(!item) return;
+        item.refId = sel.value || null;
+        item.label = programItemDisplayLabel(item); // snapshot the title at pick time (still overridden live by programItemDisplayLabel() while the link exists)
+        renderProgramItemsList();
+      });
+    });
+    document.querySelectorAll('[data-item-label]').forEach(function(input){
+      input.addEventListener('input', function(){
+        const item = programEditItems.find(function(x){ return x.id===input.getAttribute('data-item-label'); });
+        if(item) item.label = input.value;
+      });
+    });
+    document.querySelectorAll('[data-item-notes]').forEach(function(ta){
+      ta.addEventListener('input', function(){
+        const item = programEditItems.find(function(x){ return x.id===ta.getAttribute('data-item-notes'); });
+        if(item) item.notes = ta.value;
+      });
+    });
+    document.querySelectorAll('[data-item-duration]').forEach(function(input){
+      input.addEventListener('input', function(){
+        const item = programEditItems.find(function(x){ return x.id===input.getAttribute('data-item-duration'); });
+        if(item) item.durationMinutes = input.value === '' ? null : Math.max(0, parseInt(input.value, 10) || 0);
+      });
+    });
+    document.querySelectorAll('[data-item-done]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        const item = programEditItems.find(function(x){ return x.id===cb.getAttribute('data-item-done'); });
+        if(item) item.done = cb.checked;
+      });
+    });
+    document.querySelectorAll('[data-item-poc-name]').forEach(function(input){
+      input.addEventListener('input', function(){
+        const item = programEditItems.find(function(x){ return x.id===input.getAttribute('data-item-poc-name'); });
+        if(!item) return;
+        item.pocName = input.value;
+        item.pocUid = null; // typing over it manually un-links whatever account was picked
+      });
+    });
+    document.querySelectorAll('[data-toggle-item-poc]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-toggle-item-poc');
+        programPocOpenItemId = (programPocOpenItemId === id) ? null : id;
+        programPocQuery = '';
+        renderProgramItemsList();
+      });
+    });
+    document.querySelectorAll('[data-item-poc-search]').forEach(function(input){
+      input.addEventListener('input', function(){
+        programPocQuery = input.value;
+        const itemId = input.getAttribute('data-item-poc-search');
+        const item = programEditItems.find(function(x){ return x.id === itemId; });
+        const holder = document.querySelector('[data-item-poc-results="'+itemId+'"]');
+        if(holder && item) holder.innerHTML = renderProgramPocResults(item, programPocQuery);
+        bindProgramPocPickButtons();
+      });
+    });
+    bindProgramPocPickButtons();
+    document.querySelectorAll('[data-item-up]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const i = +btn.getAttribute('data-item-up');
+        if(i>0){ const tmp = programEditItems[i-1]; programEditItems[i-1] = programEditItems[i]; programEditItems[i] = tmp; renderProgramItemsList(); }
+      });
+    });
+    document.querySelectorAll('[data-item-down]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const i = +btn.getAttribute('data-item-down');
+        if(i<programEditItems.length-1){ const tmp = programEditItems[i+1]; programEditItems[i+1] = programEditItems[i]; programEditItems[i] = tmp; renderProgramItemsList(); }
+      });
+    });
+    document.querySelectorAll('[data-item-remove]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        programEditItems.splice(+btn.getAttribute('data-item-remove'), 1);
+        renderProgramItemsList();
+      });
+    });
+  }
+  function bindProgramPocPickButtons(){
+    document.querySelectorAll('[data-pick-item-poc]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const item = programEditItems.find(function(x){ return x.id===btn.getAttribute('data-pick-item-poc'); });
+        if(!item) return;
+        item.pocUid = btn.getAttribute('data-poc-uid');
+        item.pocName = btn.getAttribute('data-poc-name') || '';
+        programPocOpenItemId = null; programPocQuery = '';
+        renderProgramItemsList();
+      });
+    });
+  }
+  async function saveProgramFlow(){
+    const title = (document.getElementById('programTitleInput').value || '').trim();
+    if(!title){ showToast('Give the program a name first.'); return; }
+    const btn = document.getElementById('saveProgramBtn');
+    btn.disabled = true;
+    try{
+      const payload = { title: title, items: programEditItems };
+      if(programEditId){
+        await updateProgram(programEditId, payload);
+      } else {
+        payload.createdByUid = state.user.uid;
+        payload.createdByName = (state.profile && state.profile.displayName) || state.user.displayName || '';
+        await createProgram(payload);
+      }
+      showToast('Program saved.');
+      state.view = programEditReturnView;
+      render(); window.scrollTo(0,0);
+    }catch(e){
+      showToast('Couldn&rsquo;t save that program &mdash; try again.');
+      btn.disabled = false;
+    }
+  }
+  function renderProgramEdit(){
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="programEditBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<h1 style="font-size:1.8rem;margin-bottom:6px;">'+(programEditId?'Edit Program':'New Program')+'</h1>' +
+      '<p class="hint" style="margin-bottom:22px;">Lay out the order of service &mdash; add every song, the sermon, scripture, media, or anything else, in the order it happens. Any song you add here also joins this session&rsquo;s setlist once you attach this program to a live service.</p>' +
+      '<div class="field"><label for="programTitleInput">PROGRAM NAME</label><input type="text" id="programTitleInput" placeholder="e.g. Sunday Worship &mdash; Sept 28" value="'+escapeAttr(programEditTitle)+'"></div>' +
+      '<div class="section-heading"><h2 class="uc">Order of Service</h2><span class="count-note">'+programEditItems.length+' item'+(programEditItems.length===1?'':'s')+'</span></div>' +
+      '<div id="programItemsList"></div>' +
+      '<div class="add-section-row" style="flex-wrap:wrap;gap:8px;">' +
+        ['song','sermon','verse','media','other'].map(function(t){
+          return '<button type="button" class="btn btn-ghost" data-add-item="'+t+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>ADD '+programItemTypeLabel(t).toUpperCase()+'</button>';
+        }).join('') +
+      '</div>' +
+      '<button class="btn btn-primary btn-lg btn-block" id="saveProgramBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg>SAVE PROGRAM</button>' +
+      '<p class="hint" style="text-align:center;margin-top:10px;">'+(usingDemoMode ? 'Demo mode: this saves to your device/browser only.' : 'Only you can edit this program, unless you share it.')+'</p>';
+
+    document.getElementById('programEditBackBtn').addEventListener('click', function(){
+      state.view = programEditReturnView; render(); window.scrollTo(0,0);
+    });
+    document.getElementById('programTitleInput').addEventListener('input', function(e){ programEditTitle = e.target.value; });
+    document.querySelectorAll('[data-add-item]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        programEditItems.push(newProgramItem(btn.getAttribute('data-add-item')));
+        renderProgramItemsList();
+      });
+    });
+    document.getElementById('saveProgramBtn').addEventListener('click', saveProgramFlow);
+    renderProgramItemsList();
+  }
+
   // The currently-selected block's live data object, or null -- a small
   // shared lookup so every properties-panel handler doesn't repeat the same
   // two-level array indexing.
@@ -7094,6 +7808,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       safeSessionRemove('cv:isCoHost');
       startMySermonsWatch(); startSharedSermonsWatch(); // so the host's "pick a sermon to present" list (own + shared) is ready as soon as they land on session-host
       startMyMediaWatch(); startSharedMediaWatch(); // same, for the MEDIA tab's picker
+      startMyProgramsWatch(); startSharedProgramsWatch(); // same, for the PROGRAM tab's attach-a-program list
       startDirectoryWatch(); // powers the owner-only "Manage Hosts" panel's account search -- see renderHostManagePanel()
       // Save the (possibly edited) name/church back to the profile too, so they're
       // prefilled next time -- but only if they changed something meaningful.
@@ -7402,6 +8117,189 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         });
       });
     }
+  }
+
+  // =========================================================================
+  // Program Builder -- live Program tab [2026-09-24]. See this feature's
+  // other comments (near openProgramEditor(), and
+  // firestore-data-layer.js's createProgram()) for the full design. This
+  // is the PROGRAM segment's panel (see pickerRow/uiIsProgram above):
+  // attach a program to the live room, then run the whole order of service
+  // from it -- tap PRESENT to stage a song/sermon/media item exactly the
+  // way SONGS/SERMON/MEDIA's own pickers do (chooseSong()/presentSermon()/
+  // presentMedia() -- still gated behind GO LIVE, same as always), tick off
+  // completed parts, and hand control to a part's POC when one's linked.
+  function programAttachCandidates(){
+    return state.myPrograms.concat(state.sharedPrograms);
+  }
+  // One-way song sync into the room's OWN setlist [2026-09-24] -- Jared's
+  // Q3 answer: "keep the setlist, this is a separate program builder, but
+  // whatever songs are in [t]here will also reflect in the setlist." Additive
+  // only (never removes an existing setlist entry the host added by hand,
+  // never reorders it) -- the setlist stays what actually drives song
+  // playback/queueing, the program is a higher-level run-of-show layered on
+  // top of it. Runs at ATTACH time, and again on demand via the SYNC SONGS
+  // TO SETLIST button (not on every silent program edit -- rewriting the
+  // live setlist out from under a host mid-service without them asking for
+  // it would be a surprise, not a convenience).
+  function programSongIdsMergedIntoSetlist(program, room){
+    const existing = (room && room.setlist) || [];
+    const programSongIds = (program.items||[]).filter(function(it){ return it.type==='song' && it.refId; }).map(function(it){ return it.refId; });
+    const merged = existing.slice();
+    programSongIds.forEach(function(id){ if(!merged.includes(id)) merged.push(id); });
+    return merged;
+  }
+  function attachProgramToRoom(program){
+    if(!canControlRoom(state.room)){ showToast('You don&rsquo;t have control of this session right now.'); return; }
+    const newSetlist = programSongIdsMergedIntoSetlist(program, state.room);
+    updateRoom(state.activeRoomCode, { programId: program.id, programCurrentItemId: null, setlist: newSetlist })
+      .then(function(){ showToast('Program attached.'); })
+      .catch(function(){ showToast('Could not attach that program. Try again.'); });
+  }
+  function detachProgramFromRoom(){
+    if(!canControlRoom(state.room)){ showToast('You don&rsquo;t have control of this session right now.'); return; }
+    updateRoom(state.activeRoomCode, { programId: null, programCurrentItemId: null })
+      .catch(function(){ showToast('Could not detach the program. Try again.'); });
+  }
+  function syncProgramSongsToSetlist(){
+    const program = state.hostProgram;
+    if(!program || !canControlRoom(state.room)) return;
+    updateRoom(state.activeRoomCode, { setlist: programSongIdsMergedIntoSetlist(program, state.room) })
+      .then(function(){ showToast('Setlist updated from the program.'); })
+      .catch(function(){ showToast('Could not update the setlist. Try again.'); });
+  }
+  // Ticking off a completed part [2026-09-24, Jared: "make sure in the
+  // document, hosts have the option to tick off or check out the completed
+  // parts"] writes straight to the PROGRAM doc (not the room) -- it's a
+  // property of the program itself, visible in the editor too, not a
+  // per-service-only flag. Gated by firestore.rules' programs/{programId}
+  // update rule's third disjunct: the creator can touch anything, and
+  // anyone the program is SHARED with may touch items/updatedAt only
+  // (never title/sharedWithUids) -- which is exactly what this sends, so a
+  // shared collaborator running the service can tick things off too,
+  // without gaining the ability to rename the program or change who it's
+  // shared with.
+  function toggleProgramItemDoneLive(itemId){
+    const program = state.hostProgram;
+    if(!program) return;
+    const items = (program.items||[]).map(function(it){ return it.id===itemId ? Object.assign({}, it, { done: !it.done }) : it; });
+    updateProgram(program.id, { items: items }).catch(function(){ showToast('Could not update the program. Try again.'); });
+  }
+  // Stages the item's linked song/sermon/media exactly the way tapping it
+  // in the SONGS/SERMON/MEDIA picker would (still just a PREVIEW -- GO LIVE
+  // is still the one thing that actually publishes it, same as everywhere
+  // else in this screen), switches the segmented control back to that
+  // content type so the preview bar/GO LIVE button make sense, and stamps
+  // room.programCurrentItemId so the Program tab's own "current item"
+  // highlight follows along -- a small, immediate, harmless write
+  // independent of GO LIVE timing (it's just a pointer into the run-of-
+  // show, never itself shown to the congregation).
+  function presentProgramItem(itemId){
+    const program = state.hostProgram;
+    if(!program || !canControlRoom(state.room)) return;
+    const item = (program.items||[]).find(function(x){ return x.id===itemId; });
+    if(!item || !item.refId) return;
+    if(item.type === 'song') chooseSong(item.refId);
+    else if(item.type === 'sermon') presentSermon(item.refId);
+    else if(item.type === 'media') presentMedia(item.refId);
+    else return;
+    hostContentTab = item.type;
+    updateRoom(state.activeRoomCode, { programCurrentItemId: item.id }).catch(function(){});
+  }
+  // GIVE CONTROL for a program item's POC [2026-09-24] -- Jared's Q4
+  // answer: "control can be transferred." Reuses the exact same
+  // coHostUids/controllerUid mechanism renderHostManagePanel() already
+  // uses (see its own big comment, above) -- owner-only (firestore.rules'
+  // rooms/{code} update rule only lets hostUid touch either field), and
+  // adds the POC as a co-host in the same write if they aren't one already,
+  // since a controller has to be listed in coHostUids to ever land on
+  // session-host at all (see watchCoHostRooms()/"My Sessions").
+  function giveControlToProgramPoc(uid){
+    const room = state.room;
+    if(!room || !isRoomOwner(room)) return;
+    const patch = { controllerUid: uid };
+    if(!(room.coHostUids||[]).includes(uid)) patch.coHostUids = (room.coHostUids||[]).concat([uid]);
+    updateRoom(state.activeRoomCode, patch)
+      .then(function(){ showToast('Control handed off.'); })
+      .catch(function(){ showToast('Could not update the session. Try again.'); });
+  }
+  function renderProgramPanel(room, iAmOwner, iHaveControl){
+    if(!room.programId){
+      const candidates = programAttachCandidates();
+      return '<div class="session-card" style="margin-top:16px;">' +
+        '<h3 style="margin:0 0 8px;">Program</h3>' +
+        '<p class="hint" style="margin:0 0 14px;">Attach a program you built ahead of time to run the whole order of service from here &mdash; tap any part to present it, tick off what&rsquo;s done, and hand control to a point of contact.</p>' +
+        (candidates.length ?
+          ('<ul class="setlist-items">' + candidates.map(function(p){
+            const n = (p.items||[]).length;
+            return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(p.title||'Untitled program')+'</span><span class="hint">'+n+' item'+(n===1?'':'s')+'</span>' +
+              (iHaveControl ? ('<span class="setlist-controls"><button type="button" class="btn btn-ghost" data-attach-program="'+p.id+'">ATTACH</button></span>') : '') +
+            '</li>';
+          }).join('') + '</ul>')
+          : '<p class="hint">No programs yet.</p>') +
+        '<button type="button" class="switch-account" id="goBuildProgramBtn" style="margin-top:14px;">BUILD A NEW PROGRAM</button>' +
+      '</div>';
+    }
+    const program = state.hostProgram;
+    if(!program){
+      return '<div class="session-card" style="margin-top:16px;"><p class="hint">Loading the attached program&hellip;</p></div>';
+    }
+    const items = program.items || [];
+    return '<div class="session-card" style="margin-top:16px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<h3 style="margin:0;">'+escapeHtml(program.title||'Program')+'</h3>' +
+        '<span class="setlist-controls">' +
+          '<button type="button" class="btn btn-ghost" id="editAttachedProgramBtn">EDIT</button>' +
+          (iHaveControl ? '<button type="button" class="btn btn-ghost" id="syncProgramSetlistBtn">SYNC SONGS TO SETLIST</button>' : '') +
+          (iHaveControl ? '<button type="button" class="btn btn-ghost" id="detachProgramBtn">DETACH</button>' : '') +
+        '</span>' +
+      '</div>' +
+      (items.length ? ('<ul class="setlist-items" style="margin-top:12px;">' + items.map(function(it, i){
+        const isCurrent = room.programCurrentItemId === it.id;
+        const label = programItemDisplayLabel(it) || ('('+programItemTypeLabel(it.type)+')');
+        const pocLabel = it.pocUid ? (function(){ const p = directoryEntry(it.pocUid); return p ? (p.displayName||'(no name set)') : it.pocName; })() : it.pocName;
+        const canPresent = iHaveControl && (it.type==='song'||it.type==='sermon'||it.type==='media') && it.refId;
+        return '<li class="setlist-item'+(isCurrent?' setlist-current':'')+'" style="align-items:flex-start;flex-wrap:wrap;">' +
+          '<label class="pref-toggle" title="Mark done" style="margin-top:2px;flex:0 0 auto;"><input type="checkbox" data-program-item-done="'+it.id+'"'+(it.done?' checked':'')+'>' +
+            '<span class="pref-toggle-track"></span></label>' +
+          '<span class="setlist-title" style="flex:1;min-width:160px;'+(it.done?'text-decoration:line-through;color:var(--ink-soft);':'')+'">' +
+            (isCurrent ? '<span class="live-dot" style="margin-right:6px;"></span>' : '') +
+            '<strong>'+(i+1)+'.</strong> '+escapeHtml(label)+' <span class="hint">&middot; '+programItemTypeLabel(it.type)+'</span>' +
+            (it.notes ? ('<br><span class="hint">'+escapeHtml(it.notes)+'</span>') : '') +
+            (pocLabel ? ('<br><span class="hint">POC: '+escapeHtml(pocLabel)+'</span>') : '') +
+          '</span>' +
+          '<span class="setlist-controls">' +
+            (canPresent ? '<button type="button" class="btn btn-ghost" data-present-program-item="'+it.id+'">PRESENT</button>' : '') +
+            (iAmOwner && it.pocUid ? '<button type="button" class="btn btn-ghost" data-give-control-poc="'+escapeAttr(it.pocUid)+'">GIVE CONTROL</button>' : '') +
+          '</span>' +
+        '</li>';
+      }).join('') + '</ul>') : '<p class="hint" style="margin-top:12px;">This program has no items yet.</p>') +
+    '</div>';
+  }
+  function attachProgramPanelHandlers(room, iAmOwner, iHaveControl){
+    document.querySelectorAll('[data-attach-program]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const p = programAttachCandidates().find(function(x){ return x.id===btn.getAttribute('data-attach-program'); });
+        if(p) attachProgramToRoom(p);
+      });
+    });
+    const goBuildBtn = document.getElementById('goBuildProgramBtn');
+    if(goBuildBtn) goBuildBtn.addEventListener('click', function(){ openProgramEditor(null, 'session-host'); });
+    const editBtn = document.getElementById('editAttachedProgramBtn');
+    if(editBtn) editBtn.addEventListener('click', function(){ if(state.hostProgram) openProgramEditor(state.hostProgram, 'session-host'); });
+    const syncBtn = document.getElementById('syncProgramSetlistBtn');
+    if(syncBtn) syncBtn.addEventListener('click', syncProgramSongsToSetlist);
+    const detachBtn = document.getElementById('detachProgramBtn');
+    if(detachBtn) detachBtn.addEventListener('click', detachProgramFromRoom);
+    document.querySelectorAll('[data-program-item-done]').forEach(function(cb){
+      cb.addEventListener('change', function(){ toggleProgramItemDoneLive(cb.getAttribute('data-program-item-done')); });
+    });
+    document.querySelectorAll('[data-present-program-item]').forEach(function(btn){
+      btn.addEventListener('click', function(){ presentProgramItem(btn.getAttribute('data-present-program-item')); render(); });
+    });
+    document.querySelectorAll('[data-give-control-poc]').forEach(function(btn){
+      btn.addEventListener('click', function(){ giveControlToProgramPoc(btn.getAttribute('data-give-control-poc')); });
+    });
   }
 
   // [2026-09-10] Jared: "add a title slide for all the songs." Rather than
@@ -9100,6 +9998,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const uiIsSermon = hostContentTab === 'sermon';
     const uiIsVerse = hostContentTab === 'verse';
     const uiIsMedia = hostContentTab === 'media';
+    // Program Builder [2026-09-24] -- a 5th tab alongside SONGS/SERMON/
+    // BIBLE/MEDIA. Unlike those four, PROGRAM is never itself something
+    // "live" (there's no content.type==='program') -- it's a run-of-show
+    // layered on top of whichever of the other four is actually presented,
+    // so it only ever affects uiIsProgram (which panel shows here), never
+    // isSermon/isVerse/isMedia's own live-content branching.
+    const uiIsProgram = hostContentTab === 'program';
     // Co-hosting [2026-09-05] -- see isRoomOwner()/canControlRoom() above.
     // iAmOwner gates roster management (add/remove co-hosts, reassign
     // control) and ending the session outright; iHaveControl gates actually
@@ -9122,7 +10027,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // Live bar (see renderPreviewBar() above) always shows it.
     const pickerRow =
       '<div class="content-segmented">' +
-        '<button class="segment-btn'+(!uiIsSermon && !uiIsVerse && !uiIsMedia?' active':'')+'" id="pickSongBtn">' +
+        '<button class="segment-btn'+(!uiIsSermon && !uiIsVerse && !uiIsMedia && !uiIsProgram?' active':'')+'" id="pickSongBtn">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>SONGS</span><kbd class="kbd-hint">1</kbd>' +
         '</button>' +
         '<button class="segment-btn'+(uiIsSermon?' active':'')+'" id="pickSermonBtn">' +
@@ -9133,6 +10038,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '</button>' +
         '<button class="segment-btn'+(uiIsMedia?' active':'')+'" id="pickMediaBtn">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>MEDIA</span><kbd class="kbd-hint">4</kbd>' +
+        '</button>' +
+        '<button class="segment-btn'+(uiIsProgram?' active':'')+'" id="pickProgramBtn">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>PROGRAM</span><kbd class="kbd-hint">5</kbd>' +
         '</button>' +
       '</div>';
 
@@ -9155,7 +10063,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       (hostSermonPickerOpen ? renderSermonPicker() : '') +
       (hostVersePickerOpen ? renderVersePicker() : '') +
       (hostMediaPickerOpen ? renderMediaPicker() : '') +
-      (!uiIsSermon && !uiIsVerse && !uiIsMedia ? renderSetlistSection(room) : '') +
+      (uiIsProgram ? renderProgramPanel(room, iAmOwner, iHaveControl) : '') +
+      (!uiIsSermon && !uiIsVerse && !uiIsMedia && !uiIsProgram ? renderSetlistSection(room) : '') +
 
       (!iAmOwner ? '' : (hostConfirmEnd ?
         ('<div class="confirm-row"><span>End this session for everyone?</span>' +
@@ -9357,6 +10266,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       hostSetlistEditorOpen = false;
       render();
     });
+    // Program Builder [2026-09-24]: unlike the other three tabs, there's no
+    // separate "picker open" boolean to toggle -- renderProgramPanel() below
+    // always shows fully (either the attach-a-program picker, or the
+    // attached program's live item list) whenever this tab is selected, so
+    // tapping it just needs to switch hostContentTab, same as SONGS.
+    document.getElementById('pickProgramBtn').addEventListener('click', function(){
+      hostPickerOpen = false; hostSermonPickerOpen = false; hostVersePickerOpen = false; hostVerseMultiSelect = []; hostVerseSelectMode = false; hostMediaPickerOpen = false; hostMediaUploadOpen = false;
+      hostContentTab = 'program';
+      hostSetlistEditorOpen = false;
+      render();
+    });
     // Search boxes [2026-09-16] -- these two also (re-)wire every
     // [data-present-sermon]/[data-present-media] button, same as
     // attachHostPickerHandlers() does for [data-pick-id] above.
@@ -9431,6 +10351,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(chatCloseBtn) chatCloseBtn.addEventListener('click', function(){ hostChatOpen = false; render(); });
     attachHostPickerHandlers();
     attachSetlistSectionHandlers(room);
+    attachProgramPanelHandlers(room, iAmOwner, iHaveControl);
     attachHostManageHandlers();
     attachChatHandlers(code);
 
@@ -9655,6 +10576,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stopChatWatch();
     stopViewSermonWatch();
     stopViewMediaWatch();
+    stopHostProgramWatch();
     stopDirectoryWatch();
     state.activeRoomCode = null; state.isHost = false; state.isCoHost = false; state.room = null;
     safeSessionRemove('cv:activeRoomCode'); safeSessionRemove('cv:isHost'); safeSessionRemove('cv:isCoHost');
@@ -9803,6 +10725,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     safeSessionRemove('cv:isCoHost');
     startMySermonsWatch(); startSharedSermonsWatch();
     startMyMediaWatch(); startSharedMediaWatch();
+    startMyProgramsWatch(); startSharedProgramsWatch();
     startDirectoryWatch();
     state.view = 'session-host';
     watchActiveRoom(code);
@@ -9835,6 +10758,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     safeSessionSet('cv:isCoHost', '1');
     startMySermonsWatch(); startSharedSermonsWatch();
     startMyMediaWatch(); startSharedMediaWatch();
+    startMyProgramsWatch(); startSharedProgramsWatch();
     state.view = 'session-host';
     watchActiveRoom(code);
     watchChat(code, 'everyone');
@@ -10000,13 +10924,23 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // TOP of the still-current slide (never replaces it) so if the
     // expected follow-up update is slow or never comes, the audience is
     // still looking at real content, just dimmed, rather than a blank
-    // loading screen.
+    // loading screen. Media (image/video/slideshow) is the one case that
+    // keeps the veil up past this point -- see mediaNeedsLoad's own
+    // comment on showStagePending() for why, and the load-listener block
+    // near the bottom of this function for how it actually clears.
+    const mediaNeedsLoad = projectorContent.type === 'media' && !!projectorContent.media && (
+      projectorContent.media.type === 'image' ||
+      projectorContent.media.type === 'video' ||
+      (projectorContent.media.type === 'slideshow' && !!projectorContent.slides[projectorContent.slideIndex])
+    );
+    if(stagePending && !mediaNeedsLoad) clearStagePending(); // text (or an embed/nothing-chosen media) needs no fetch -- reveal right away, same as always
+    const showVeil = stagePending;
     main.innerHTML =
       '<div class="stage-view">' +
         '<button type="button" class="stage-fullscreen-btn" id="stageFullscreenBtn" aria-label="'+(isFull?'Exit full screen':'Enter full screen, hide the header')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon(isFull?'compress':'expand')+'</svg></button>' +
         '<button type="button" class="stage-exit-btn" id="stageExitBtn" aria-label="Exit projector view">&times;</button>' +
         renderStageSlide(projectorContent, 'projector') +
-        (stagePending ? '<div class="stage-pending-veil" aria-hidden="true"><span class="stage-pending-spinner"></span></div>' : '') +
+        (showVeil ? '<div class="stage-pending-veil" aria-hidden="true"><span class="stage-pending-spinner"></span></div>' : '') +
       '</div>';
     const exitBtn = document.getElementById('stageExitBtn');
     if(exitBtn) exitBtn.addEventListener('click', function(){
@@ -10019,6 +10953,35 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(fsBtn) fsBtn.addEventListener('click', toggleStagePresentationMode);
     fitStageLines();
     syncStageMediaVideo(projectorContent, room); // Media/AVP [2026-09-06] -- see its own comment
+    // Media load-gated veil clear [2026-09-24] -- Jared: "the delay is more
+    // obvious on media." showVeil/mediaNeedsLoad above already decided to
+    // keep the veil up for an image/video/slideshow-slide instead of
+    // clearing it the instant the room pointer arrived (text needs no
+    // fetch, media genuinely does) -- this is the other half: actually
+    // waiting for that fetch. `.stage-media-img`/`.stage-media-video` is
+    // exactly the element renderStageSlide()'s 'media' branch just wrote,
+    // so this always targets the new (not-yet-loaded) asset, never a
+    // leftover old one. If it's already complete/ready (the same URL was
+    // shown recently enough that the browser served it from its own cache
+    // near-instantly) this clears right away rather than waiting on an
+    // event that may already have fired before this listener could attach.
+    // `error` clears the veil too, same as a real load -- a broken/missing
+    // file shouldn't leave the audience staring at a spinner forever; the
+    // 8s safety timer in showStagePending() is the last-resort backstop if
+    // even that never fires.
+    if(showVeil && mediaNeedsLoad){
+      const mediaEl = document.querySelector('.stage-media-img, .stage-media-video');
+      if(mediaEl){
+        const revealMedia = function(){ clearStagePending(); if(state.view === 'session-projector') render(); };
+        if((mediaEl.tagName === 'IMG' && mediaEl.complete) || (mediaEl.tagName === 'VIDEO' && mediaEl.readyState >= 2)){
+          revealMedia();
+        } else {
+          mediaEl.addEventListener('load', revealMedia, { once:true });
+          mediaEl.addEventListener('loadeddata', revealMedia, { once:true });
+          mediaEl.addEventListener('error', revealMedia, { once:true });
+        }
+      }
+    }
   }
 
   // Presentation mode [2026-09-04] -- Jared: "add an option for the share
@@ -10494,7 +11457,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const tag = t && t.tagName;
     if(tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
     const idByKey = {
-      '1':'pickSongBtn', '2':'pickSermonBtn', '3':'pickVerseBtn', '4':'pickMediaBtn',
+      '1':'pickSongBtn', '2':'pickSermonBtn', '3':'pickVerseBtn', '4':'pickMediaBtn', '5':'pickProgramBtn',
       'p':'openStageBtn', 's':'toggleSplitBtn', 'c':'chatFabBtn', 'h':'manageHostsBtn',
       'l':'copyChartLinkBtn',
       // Stage overrides [2026-09-24]: 'b'lack, lo'g'o, 'd'efault bg -- 'l'
@@ -10974,6 +11937,33 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     landingSocialWatchesStarted = true;
     startFeedPostsWatch();
     startDirectoryWatch();
+  }
+
+  // Active Sessions on the landing page [2026-09-24] -- Jared: "add a
+  // feature where we can see which sessions are currently active especially
+  // for hosts in the landing page." A separate flag/starter from
+  // ensureLandingSocialWatchesStarted() just above -- that one is gated on
+  // state.user (Fellowship needs a signed-in profile), but the public-rooms
+  // half of this needs to work for a signed-out visitor too, same as
+  // renderSessionJoin()'s own Public Rooms list (rooms/{code} is
+  // wide-open-read regardless of auth). See renderLandingActiveSessionsSection()
+  // below for how these three lists get rendered.
+  function ensureLandingActiveSessionsWatchStarted(){
+    // Deliberately checks the actual live subscription handles
+    // (unsubPublicRooms/unsubHostRooms/unsubCoHostRooms) rather than a
+    // separate "ever started" flag -- resumeAsHost()/joinAsCoHost() each
+    // call stopHostRoomsWatch()/stopCoHostRoomsWatch() themselves the
+    // instant a host actually enters session-host (that list has no reason
+    // to keep updating while its own room is the one being run), and a
+    // one-shot flag would have left this landing section permanently stuck
+    // showing nothing new afterward, even once the host returns to landing
+    // with a since-ended session. Checking the handle itself means leaving
+    // session-host and coming back to landing always resumes watching.
+    if(!unsubPublicRooms) startPublicRoomsWatch();
+    if(state.user){
+      if(!unsubHostRooms) startHostRoomsWatch();
+      if(!unsubCoHostRooms) startCoHostRoomsWatch();
+    }
   }
 
   // ---- a single profile's posts (profile-view screen) -------------------
@@ -13012,6 +14002,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // ?stage=) but stageCode still wins over both if somehow both are ever
   // present.
   const sermonLinkId = new URLSearchParams(window.location.search).get('sermon');
+  // Shared-program ("?program=<id>") deep link [2026-09-24] -- exact mirror
+  // of the shared-sermon deep link just above, see its own comment.
+  const programLinkId = new URLSearchParams(window.location.search).get('program');
   // Session-live push deep link ("?join=<code>") [2026-09-17] -- the OS
   // notification behind a session_live push (see functions/index.js's
   // onNewSessionNotify and src/sw.js's notificationclick handler) opens
@@ -13059,6 +14052,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     watchSermon(sermonLinkId, function(sermon){
       state.sharedSermonLinkData = sermon;
       if(state.view === 'shared-sermon-link') render();
+    });
+  } else if(programLinkId){
+    state.sharedProgramLinkId = programLinkId;
+    state.view = 'shared-program-link';
+    watchProgram(programLinkId, function(program){
+      state.sharedProgramLinkData = program;
+      if(state.view === 'shared-program-link') render();
     });
   } else if(joinCode){
     goToJoinScreenWithCode(joinCode.trim().toUpperCase());

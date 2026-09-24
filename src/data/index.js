@@ -55,6 +55,8 @@ export const {
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,
+  createProgram, updateProgram, deleteProgram, watchMyPrograms, watchProgram,
+  shareProgram, unshareProgram, watchProgramsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
   shareMedia, unshareMedia, watchMediaSharedWithMe,
   uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow,

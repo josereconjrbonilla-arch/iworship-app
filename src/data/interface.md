@@ -383,12 +383,45 @@ same near-instant relay. The Projector tab's relay handler shows a brief translu
 instant that ping lands, via `showStagePending()`, and clears it the moment the real update arrives
 via `applyRoomSnapshot()` (either through this same relay, or through this tab's own
 `watchProjectorRoom()` catching up over the network) -- see both functions' own comments in `app.js`
-for the full reasoning. `stagePendingTimer` is a 4s safety net that clears the veil on its own if the
+for the full reasoning. `stagePendingTimer` is a safety net that clears the veil on its own if the
 expected follow-up update never shows up (a failed write, a closed Controls tab), so it can't get
 stuck. This only helps the same-device setup the relay above already covers -- two genuinely
 separate machines (a real second computer driving the projector output) have no shared browser to
 relay through, so real network latency there is unavoidable, just already minimized by the isolated
 low-overhead projector connection. No `firestore.rules` or data-layer change.
+
+**Media load-gated veil** [2026-09-24] -- Jared, after the veil above shipped: "the delay is more
+obvious on media." Root cause: song/sermon/verse text needs no network fetch once the room pointer
+arrives (already sitting in memory), but an image/video is a real file the browser has to fetch --
+completely independent of how fast the pointer itself synced. The original version cleared the veil
+the instant `applyRoomSnapshot()` ran, which for media revealed a still-blank/loading `<img>`/`<video>`
+underneath it -- the exact gap Jared meant. Fix: `applyRoomSnapshot()` no longer clears the veil at
+all -- that decision moved into `renderSessionProjector()` itself, per render. For plain text (or an
+`embed` iframe, or media nothing's been chosen for yet -- nothing to fetch either way) it still clears
+immediately, same as before (`mediaNeedsLoad` is false). For an actual image/video/slideshow slide, the
+veil stays up, the new (loading) element renders underneath it, and a one-time `load`/`loadeddata`/
+`error` listener on that exact element (`.stage-media-img`/`.stage-media-video` -- always the fresh one
+`renderStageSlide()` just wrote) clears it and re-reveals the slide the moment that fetch actually
+finishes -- instantly for anything the browser already has cached, honestly however long it takes for
+something genuinely new. `showStagePending()`'s safety timer was extended from 4s to 8s to cover a
+slower real fetch without leaving the veil up indefinitely if the expected update never lands at all.
+No `firestore.rules` or data-layer change.
+
+**Active Sessions on the landing page** [2026-09-24] -- Jared: "add a feature where we can see
+which sessions are currently active especially for hosts in the landing page." No new query or
+collection -- `renderLandingActiveSessionsSection()` in `app.js` reuses `hostRoomsList`/
+`coHostRoomsList` (My Sessions' own lists -- see `watchHostRooms()`'s comment above: a room doc
+only ever exists while it's genuinely live, since `endRoom()` deletes it outright rather than
+marking it ended, so every entry in either list already IS a currently-active session) plus
+`state.publicRooms` (the same list Join a Session already shows), minus whatever this account
+already owns/co-hosts so a host's own room never appears twice on one card. Renders nothing at all
+for a non-host visitor when nothing's actually live, so the landing page isn't permanently showing
+an empty card; a `canHost()` account still gets a small "No sessions are live right now" card even
+then, since being able to check at a glance is the point for a host specifically. RESUME HOSTING/
+OPEN/JOIN all reuse the exact same `resumeAsHost()`/`joinAsCoHost()`/`attemptJoin()` these actions
+already went through from My Sessions / Join a Session -- no new join or resume path. No
+`firestore.rules` or data-layer change -- `rooms/{code}` was already wide-open-read and already
+queryable by `hostUid`/`coHostUids`.
 
 ## Sermons [2026-09-04]
 
@@ -859,3 +892,76 @@ list on a post/short (the count is public, the list of likers currently isn't su
 comment replies/threading (comments are a single flat list per post/short, not nested); Stories
 seen-by/viewer-list; a truly full-bleed, whole-page-hijacking Shorts experience (shipped instead as
 a tall self-contained scroll region — see "Shorts" above).
+
+## Program Builder [2026-09-24]
+
+Jared's ask: "what if we had another feature where the host can arrange the sequence of everything
+that will be presented? Along with notes and remarks for context, like a service program builder.
+Make it accessible for other members that the host will share it with" -- followed shortly after by
+"hosts have the option to tick off or check out the completed parts." A **program** is a host-built
+order-of-service: an ordered list of items (song/sermon/verse/media/other), each with a resolved
+label, an optional point-of-contact, free-text notes, an estimated duration, and a `done` checkbox
+a host or any shared collaborator can tick off live as the service actually runs.
+
+**Data model.** `Program` shape: `{ id, title, createdByUid, createdByName, sharedWithUids: string[],
+items: [{ id, type: 'song'|'sermon'|'verse'|'media'|'other', label, refId, pocUid, pocName, notes,
+durationMinutes, done }], createdAt, updatedAt }`. `refId` points at the linked `song`/`sermon`/
+`media` doc for those three types (its CURRENT title is what actually displays --
+`programItemDisplayLabel()` in `app.js` looks the linked item up live rather than trusting a
+possibly-stale stored `label` -- so renaming a song elsewhere updates every program that references
+it); `verse`/`other` items have no linked doc, just the free-text `label` itself. Lives in its own
+top-level `programs/{programId}` collection (both `firestore-data-layer.js` and
+`local-data-layer.js` implement the identical function set: `createProgram`, `updateProgram`,
+`deleteProgram`, `watchMyPrograms`, `watchProgram`, `shareProgram`, `unshareProgram`,
+`watchProgramsSharedWithMe`) -- as close a copy of Sermons' own data layer and `firestore.rules`
+shape as the extra collaborative-checkbox requirement allows: wide-open read (no "browse all
+programs" query anywhere, only ever a single-doc read by id, exactly like a sermon or a media
+item), creator-only create, the same `sharedWithUids` self-service SHARING carve-out a share link
+uses to add/remove the visiting uid. The one place Programs' `firestore.rules` update rule
+diverges from Sermons/Media's two-disjunct shape is a THIRD disjunct: anyone currently listed in
+`sharedWithUids` may also patch `items`+`updatedAt` (nothing else), which is what lets
+`toggleProgramItemDoneLive()` actually work for a shared collaborator, not just the program's
+creator -- see the rule's own comment in `firestore.rules` for the exact reasoning and its accepted
+tradeoffs.
+
+**Editor screen** (`renderPrograms()`/`renderProgramEdit()` in `app.js`, reached from a new
+`PROGRAMS` button on the Host Hub, `canHost()`-gated): a library list mirroring Sermons' own
+(create/open/share/delete), and a per-program item editor mirroring Sermons' slide editor --
+add/reorder/remove items, pick each item's type (which swaps in either a linked-content `<select>`
+of songs/sermons/media, or a free-text label input for verse/other), notes, an estimated duration,
+and a POC field with the same directory-search-and-pick pattern shareSermon()'s panel already uses.
+Sharing works exactly like a sermon: a `?program=<id>` link (`renderSharedProgramLink()`, the
+`shared-program-link` view) that a signed-in recipient opens to add themselves to `sharedWithUids`
+on the spot, same self-service carve-out.
+
+**Room integration.** No new room-doc shape needed -- `room.programId` (which program is currently
+attached) and `room.programCurrentItemId` (the current item's own `id`, deliberately not an array
+index, so it survives the host reordering or editing items mid-service) are just two more fields on
+the existing wide-open `rooms/{code}` update rule, the same way `currentSermonId`/`currentMediaId`
+needed no rules change either. The Host Session screen gets a fifth content tab, `PROGRAM`
+(alongside `SONGS`/`SERMON`/`BIBLE`/`MEDIA`, keyboard shortcut `5`), rendered by
+`renderProgramPanel()`: with no program attached yet, an attach-picker over `state.myPrograms`
+concat `state.sharedPrograms`; once attached, the live item list with, per item, a `done` checkbox
+(`toggleProgramItemDoneLive()` -- merge-patches just that one item's `done` flag via `updateProgram()`,
+which is exactly the field-narrow write the new `firestore.rules` disjunct exists for), a PRESENT
+button (`presentProgramItem()` -- calls straight into the existing `chooseSong()`/`presentSermon()`/
+`presentMedia()` staging functions per item type, so it's staged into `hostPreview` and still gated
+behind the existing GO LIVE button like every other content type; also switches the visible content
+tab to match and records `programCurrentItemId`), and, for an item with a POC assigned, a GIVE
+CONTROL button (`giveControlToProgramPoc()` -- owner-only, reuses the existing `coHostUids`/
+`controllerUid` co-hosting mechanism, auto-adding the POC as a co-host in the same write if they
+aren't one already).
+
+**One-way song sync.** Attaching a program to a room (`attachProgramToRoom()`) additively merges
+every song `refId` among its items into `room.setlist` -- appends anything not already there,
+never removes or reorders an existing entry -- so the setlist a host already knows how to run stays
+the single source of truth for actually picking a song to present; the program is an outer sequence
+wrapped around it, not a replacement for it. This merge does NOT re-run on every silent program
+edit (adding/removing a song item later needs a deliberate SYNC SONGS TO SETLIST button --
+`syncProgramSongsToSetlist()`), so a host mid-service never gets their current setlist silently
+reshuffled underneath them by an edit happening elsewhere. Detaching (`detachProgramFromRoom()`)
+clears `programId`/`programCurrentItemId` but never touches `setlist` -- the synced songs stay.
+
+No `firestore.rules` change was needed for any of the room-integration or setlist-sync fields
+above -- they're just more fields on `rooms/{code}`'s already wide-open per-field update rule,
+the same story as every other room-doc addition documented throughout this file.

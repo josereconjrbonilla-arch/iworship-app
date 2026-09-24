@@ -502,6 +502,58 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (resource.data.createdByUid == request.auth.uid || hasFullAccess());
     }
 
+    // ============================================================ PROGRAMS
+    // [2026-09-24] Jared: "what if we had another feature where the host
+    // can arrange the sequence of everything that will be presented? Along
+    // with notes and remarks for context, like a service program builder.
+    // Make it accessible for other members that the host will share it
+    // with." A `programs` doc is a host-built order-of-service -- an
+    // ordered `items` list (song/sermon/verse/media/other, each with a
+    // label, an optional POC, notes, and a `done` checkbox the host ticks
+    // off live). As close a copy of sermons/{sermonId} above as the shape
+    // allows -- same wide-open read (no "browse all programs" query
+    // anywhere, only ever a single-doc read by id), same creator-only
+    // create, same sharedWithUids self-service SHARING carve-out (see
+    // shareProgram()/unshareProgram() in firestore-data-layer.js), same
+    // creator/Admin delete. items' internal shape (done/pocUid/notes/etc.)
+    // is intentionally NOT field-validated here, same "deter casual
+    // misuse, not bank-grade" tradeoff already documented on sermons'
+    // slides -- only the outer doc shape (title, item count) is enforced.
+    //
+    // Update has a THIRD disjunct beyond sermons/media's two-disjunct
+    // shape: Jared later added "hosts have the option to tick off or check
+    // out the completed parts" as a LIVE, collaborative checkbox any
+    // shared-with person can use, not just the program's creator (see
+    // toggleProgramItemDoneLive() in app.js) -- so anyone currently listed
+    // in sharedWithUids may also patch items+updatedAt, mirroring the same
+    // "carve out just the fields this action needs" shape as the sharing
+    // disjunct right above it, just for a different pair of fields. This
+    // can't prove an item's OTHER fields (label/refId/pocUid/notes) went
+    // untouched within that same items array write -- same accepted
+    // "deter casual misuse, not bank-grade" tradeoff as everywhere else in
+    // this file -- but it does still require the caller be in
+    // sharedWithUids AT THE TIME of the write (resource.data, not
+    // request.resource.data), so removing someone from the share list
+    // revokes this the same request it takes effect.
+    match /programs/{programId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        (isEditor() || canHostRole()) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 200 &&
+        request.resource.data.items is list && request.resource.data.items.size() <= 100;
+      allow update: if isSignedIn() && (
+        resource.data.createdByUid == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt']) ||
+        (
+          request.auth.uid in resource.data.get('sharedWithUids', []) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'updatedAt'])
+        )
+      );
+      allow delete: if isSignedIn() && (resource.data.createdByUid == request.auth.uid || hasFullAccess());
+    }
+
     // ============================================================= DIRECTORY
     // [2026-09-04] See the header comment on directory/{uid} above. Every
     // field here already appears elsewhere in the app in a context any

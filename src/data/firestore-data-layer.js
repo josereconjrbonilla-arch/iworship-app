@@ -917,6 +917,95 @@ export async function deleteMediaFile(storagePath) {
   await deleteObject(storageRef(storage, storagePath));
 }
 
+// ------------------------------------------------------------ Program Builder
+// [2026-09-24] Jared: "what if we had another feature where the host can
+// arrange the sequence of everything that will be presented? Along with
+// notes and remarks for context, like a service program builder. Make it
+// accessible for other members that the host will share it with." A
+// `programs` doc is a host-built ORDER OF SERVICE -- an ordered list of
+// items (song/sermon/verse/media/other), each with a label, an optional
+// POC (point of contact -- either a directory-linked account, pocUid, or a
+// plain typed name, pocName), notes, an optional duration, and (Jared, same
+// request thread, added right after the rest was already scoped) a `done`
+// checkbox the host can tick off during a live service. Deliberately as
+// close a copy of the sermons/{sermonId} shape above as the content allows
+// -- same wide-open read, same creator-only create, same sharedWithUids
+// sharing model via shareProgram()/unshareProgram() (Jared: "make it
+// accessible for other members that the host will share it with"), since a
+// program, like a sermon, is a single host-owned document shared out to
+// specific other accounts, never queried/browsed publicly. See
+// firestore.rules' programs/{programId} block.
+//
+// A program item's songId/sermonId/mediaId (whichever applies to its
+// `type`) is a LINK, not a copy -- editing the underlying song/sermon/media
+// later is reflected automatically wherever the program shows that item's
+// title. `label` is always still stored too: it's what free-typed
+// 'verse'/'other' items use as their only title, AND it's what a linked
+// item falls back to display if the thing it links to is ever deleted out
+// from under it (see app.js's programItemDisplayLabel()).
+//
+// Room integration (no rules change needed -- see firestore.rules'
+// rooms/{code} comment: the controlling co-host may already patch any room
+// field besides hostUid/coHostUids/controllerUid): room.programId (which
+// program, if any, this room is running from) and room.programCurrentItemId
+// (the item's own id, NOT an array index, so "the current item" survives
+// the host reordering or editing the program mid-service -- see app.js's
+// Program tab, applyProgramToRoom()/setProgramCurrentItem()). Songs inside
+// a program's items sync ONE-WAY into the room's own `setlist` (Jared:
+// "keep the setlist... but whatever songs are in [t]here will also reflect
+// in the setlist") -- see applyProgramToRoom() in app.js; the setlist
+// stays the actual thing that drives song playback, the program is the
+// higher-level run-of-show layered on top of it.
+export async function createProgram(program) {
+  const ref = await addDoc(collection(db, 'programs'), {
+    ...program,
+    sharedWithUids: program.sharedWithUids || [], // see "SHARING" note on sermons above -- identical model
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  });
+  return ref.id;
+}
+
+export async function updateProgram(id, patch) {
+  await updateDoc(doc(db, 'programs', id), { ...patch, updatedAt: serverTimestamp() });
+}
+
+export async function deleteProgram(id) {
+  await deleteDoc(doc(db, 'programs', id));
+}
+
+export function watchMyPrograms(uid, callback) {
+  const q = query(collection(db, 'programs'), where('createdByUid', '==', uid));
+  return onSnapshot(q, (snap) => {
+    const mine = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    mine.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
+    callback(mine);
+  });
+}
+
+export function watchProgram(id, callback) {
+  return onSnapshot(doc(db, 'programs', id), (snap) => {
+    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+  });
+}
+
+export async function shareProgram(id, uid) {
+  await updateDoc(doc(db, 'programs', id), { sharedWithUids: arrayUnion(uid), updatedAt: serverTimestamp() });
+}
+export async function unshareProgram(id, uid) {
+  await updateDoc(doc(db, 'programs', id), { sharedWithUids: arrayRemove(uid), updatedAt: serverTimestamp() });
+}
+
+export function watchProgramsSharedWithMe(uid, callback) {
+  const q = query(collection(db, 'programs'), where('sharedWithUids', 'array-contains', uid));
+  return onSnapshot(q, (snap) => {
+    const shared = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((s) => s.createdByUid !== uid);
+    shared.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
+    callback(shared);
+  });
+}
+
 // --------------------------------------------------------- Media Folders
 // [2026-09-06] Jared: AVP team members should be able to "prep upload
 // beforehand and manage it by folders" outside a live session. A folder is

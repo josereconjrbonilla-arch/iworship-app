@@ -704,6 +704,88 @@ export function watchSermonsSharedWithMe(uid, callback) {
   return onBroadcast('sermons', fire);
 }
 
+// -------------------------------------------------------------- Program Builder
+// [2026-09-24] See firestore-data-layer.js's matching comment for the full
+// design. Exact mirror of the sermons/{sermonId} demo-mode implementation
+// just above -- same localStorage-backed list, same broadcast channel
+// pattern, same sharing model.
+const LS_PROGRAMS = 'iworship:local:programs';
+function readPrograms() { return readJSON(LS_PROGRAMS, []); }
+function writePrograms(list) { writeJSON(LS_PROGRAMS, list); broadcast('programs'); }
+
+export async function createProgram(program) {
+  const list = readPrograms();
+  const withId = {
+    ...program,
+    sharedWithUids: program.sharedWithUids || [],
+    id: 'program-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  list.push(withId);
+  writePrograms(list);
+  return withId.id;
+}
+
+export async function updateProgram(id, patch) {
+  const list = readPrograms();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], ...patch, updatedAt: Date.now() };
+  writePrograms(list);
+}
+
+export async function deleteProgram(id) {
+  writePrograms(readPrograms().filter((p) => p.id !== id));
+}
+
+export function watchMyPrograms(uid, callback) {
+  const fire = () => {
+    const mine = readPrograms().filter((p) => p.createdByUid === uid);
+    mine.sort((a, b) => b.updatedAt - a.updatedAt);
+    callback(mine);
+  };
+  fire();
+  return onBroadcast('programs', fire);
+}
+
+export function watchProgram(id, callback) {
+  const fire = () => callback(readPrograms().find((p) => p.id === id) || null);
+  fire();
+  return onBroadcast('programs', fire);
+}
+
+export async function shareProgram(id, uid) {
+  const list = readPrograms();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx === -1) return;
+  const current = list[idx].sharedWithUids || [];
+  if (!current.includes(uid)) {
+    list[idx] = { ...list[idx], sharedWithUids: current.concat([uid]), updatedAt: Date.now() };
+    writePrograms(list);
+  }
+}
+
+export async function unshareProgram(id, uid) {
+  const list = readPrograms();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx === -1) return;
+  const current = list[idx].sharedWithUids || [];
+  if (current.includes(uid)) {
+    list[idx] = { ...list[idx], sharedWithUids: current.filter((x) => x !== uid), updatedAt: Date.now() };
+    writePrograms(list);
+  }
+}
+
+export function watchProgramsSharedWithMe(uid, callback) {
+  const fire = () => {
+    const shared = readPrograms().filter((p) => (p.sharedWithUids || []).includes(uid) && p.createdByUid !== uid);
+    shared.sort((a, b) => b.updatedAt - a.updatedAt);
+    callback(shared);
+  };
+  fire();
+  return onBroadcast('programs', fire);
+}
+
 // -------------------------------------------------------------- Media/AVP
 // [2026-09-06] See firestore-data-layer.js's matching comment for the full
 // design (image/video/slideshow/embed, the sharing model). This demo-mode

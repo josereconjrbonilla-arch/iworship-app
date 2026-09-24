@@ -328,7 +328,53 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // itself to any same-device Projector tab that might be listening (posting
   // is a harmless no-op if no one's listening, and the Projector view itself
   // never re-broadcasts what it receives, so there's no echo loop).
+  // "Switching…" veil [2026-09-24] -- Jared: "when switching pages of
+  // projector mode online/offline, there's a delay. Can you remove the
+  // latency? Or if you can't totally remove it, add a loading screen in
+  // between... so it doesn't look awkward." The real gap here is the same
+  // one the room-relay comment above describes: GO LIVE writes to the room
+  // doc from the CONTROLS tab, and the Projector tab (a separate window
+  // with its own separate Firestore connection -- see watchProjectorRoom's
+  // own comment) only finds out once that write actually reaches it, which
+  // -- same device or not -- can never be truly instant over a real
+  // network. What CAN be instant, same-device, is a heads-up that a change
+  // is coming: the instant Controls calls goLive(), it also fires a tiny
+  // `pending:true` ping on the same zero-network BroadcastChannel the room
+  // snapshot itself rides on (see ROOM_RELAY_CHANNEL above) -- arrives
+  // before the real update ever could, since it's sent first and travels
+  // the exact same near-instant path. The Projector tab shows a brief
+  // "switching" veil the moment that ping lands, then clears it the moment
+  // the REAL updated content arrives (either via that same relay, or via
+  // this tab's own watchProjectorRoom() catching up over the network) --
+  // so instead of the OLD slide just sitting there frozen for however long
+  // the real update takes, the audience sees a clear, deliberate "changing"
+  // state throughout the gap. stagePendingTimer is a safety net only: if
+  // the expected follow-up update never shows up (a failed write, a closed
+  // Controls tab, etc.) the veil clears itself rather than getting stuck.
+  // For two genuinely SEPARATE devices (an actual second computer driving
+  // the projector output, no shared browser to relay through) there's no
+  // way to deliver this heads-up any faster than the real update itself,
+  // so this veil never shows there and the fade-in on arrival (see
+  // stage-fade-in, below) is still the only transition -- ordinary
+  // internet latency for that setup can be minimized (it already is, via
+  // the isolated low-overhead projector connection) but never fully
+  // eliminated.
+  let stagePending = false;
+  let stagePendingTimer = null;
+  function showStagePending(){
+    stagePending = true;
+    if(state.view === 'session-projector') render();
+    clearTimeout(stagePendingTimer);
+    stagePendingTimer = setTimeout(function(){ stagePending = false; if(state.view === 'session-projector') render(); }, 4000);
+  }
+  function clearStagePending(){
+    if(!stagePending) return;
+    stagePending = false;
+    clearTimeout(stagePendingTimer);
+    stagePendingTimer = null;
+  }
   function applyRoomSnapshot(code, room, broadcast){
+    clearStagePending(); // the real update just arrived -- see showStagePending()'s comment
     state.roomLoading = false;
     state.room = room;
     ensureViewSermonWatch(room);
@@ -355,6 +401,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     roomRelayChannel.onmessage = function(e){
       if(state.view !== 'session-projector') return;
       if(!e.data || e.data.code !== state.activeRoomCode) return;
+      if(e.data.pending){ showStagePending(); return; }
       applyRoomSnapshot(e.data.code, e.data.room, false);
     };
   }
@@ -7602,6 +7649,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         recentSongIds: pushRecentId(room.recentSongIds, hostPreview.songId) };
     } else return;
     const wentLiveSongId = hostPreview.type === 'song' ? hostPreview.songId : null;
+    // "Switching..." veil [2026-09-24] -- see showStagePending()'s own
+    // comment (near ROOM_RELAY_CHANNEL) for the full reasoning. A same-
+    // device Projector tab hears about this the instant we call
+    // postMessage -- well before the updateRoom() write below could ever
+    // land there for real -- so it can show a "switching" state right away
+    // instead of leaving the previous slide sitting frozen for however
+    // long the real update takes.
+    if(roomRelayChannel && state.activeRoomCode) roomRelayChannel.postMessage({ code: state.activeRoomCode, pending: true });
     updateRoom(state.activeRoomCode, patch)
       .then(function(){
         showToast('You&rsquo;re live.');
@@ -9941,11 +9996,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     }
     const isFull = stagePresentationMode;
     const projectorContent = resolveLiveDisplayContent(room);
+    // "Switching..." veil -- see showStagePending()'s comment. Layered on
+    // TOP of the still-current slide (never replaces it) so if the
+    // expected follow-up update is slow or never comes, the audience is
+    // still looking at real content, just dimmed, rather than a blank
+    // loading screen.
     main.innerHTML =
       '<div class="stage-view">' +
         '<button type="button" class="stage-fullscreen-btn" id="stageFullscreenBtn" aria-label="'+(isFull?'Exit full screen':'Enter full screen, hide the header')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon(isFull?'compress':'expand')+'</svg></button>' +
         '<button type="button" class="stage-exit-btn" id="stageExitBtn" aria-label="Exit projector view">&times;</button>' +
         renderStageSlide(projectorContent, 'projector') +
+        (stagePending ? '<div class="stage-pending-veil" aria-hidden="true"><span class="stage-pending-spinner"></span></div>' : '') +
       '</div>';
     const exitBtn = document.getElementById('stageExitBtn');
     if(exitBtn) exitBtn.addEventListener('click', function(){

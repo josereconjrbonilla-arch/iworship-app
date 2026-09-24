@@ -1068,6 +1068,27 @@
     .stage-fade-in{ animation:none; }
   }
 
+  /* "Switching..." veil [2026-09-24] -- see showStagePending()'s comment in
+     app.js. Sits on top of the still-current slide (position:absolute
+     against .stage-view, which is already position:relative -- see the
+     Media/AVP comment just below for the same convention) rather than
+     replacing it, and appears with NO fade-in of its own -- the whole
+     point is to react the instant the pending ping arrives, not add its
+     own extra delay before showing up. */
+  .stage-pending-veil{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.28); z-index:5;
+  }
+  .stage-pending-spinner{
+    width:44px; height:44px; border-radius:50%;
+    border:4px solid rgba(245,236,214,.35); border-top-color:#F5ECD6;
+    animation:stagePendingSpin .8s linear infinite;
+  }
+  @keyframes stagePendingSpin{ to{ transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce){
+    .stage-pending-spinner{ animation:none; }
+  }
+
   /* Media/AVP [2026-09-06] -- image/video/slideshow/embed content
      deliberately renders full-bleed (no stage-label/stage-footer chrome --
      see renderStageSlide()'s comment) by going position:absolute; inset:0

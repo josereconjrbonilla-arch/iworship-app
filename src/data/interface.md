@@ -332,6 +332,64 @@ same ground without it. Same one-off-DOM-element pattern (`document.body.appendC
 of `render()`'s reactive HTML) as `showUpdateBanner()`/`showOfflineBanner()` above. No
 `firestore.rules` or data-layer change.
 
+**Projector fullscreen shortcut (F/Escape) + offline-resilient projector** [2026-09-24] -- Jared
+tested the projector's F/Escape fullscreen shortcut and reported it didn't work, then separately
+asked for the projector to survive going offline. Two fixes: (1) F is now relayed from the Host
+Controls window to the separate Presenter/Projector window (`window.open()`-launched, a different
+browsing context with its own keyboard focus) via `BroadcastChannel('iworship:projector-fullscreen')`,
+keyed by room code -- see the keydown listeners near the projector's own space/arrow shortcut in
+`app.js` for the full reasoning; Escape still exits locally via the existing
+`toggleStagePresentationMode()`/`fullscreenchange` handling. (2) `watchActiveRoom()` now reads the
+Presenter/Projector route's room doc through a new `watchProjectorRoom()` (data layer) instead of
+the ordinary `watchRoom()` -- an otherwise-identical twin that reads through a second, isolated
+Firebase app instance (`projectorApp`/`projectorDb` in `firestore-data-layer.js`) configured with a
+real persistent (IndexedDB-backed) cache, so a projector tab that reloads while offline can still
+show its last-known content instead of going blank. This is a deliberately narrow, scoped
+re-opening of the persistent-cache question closed by "The `iworship-ph` account reset..." --
+see `architecture-and-decisions.md`'s final section for the full reasoning on why this is safe
+(the isolated connection never authenticates, since `rooms/{code}` reads are public, so it can't
+reproduce the profile/auth race that caused that incident; a cold-start race here, if it still
+happens, only ever shows the existing "session isn't available" placeholder for a moment before
+self-correcting). Every other route (host, viewer, co-host) is untouched -- still `watchRoom()` on
+the original `memoryLocalCache()` connection. `local-data-layer.js`'s `watchProjectorRoom()` is a
+plain alias of its own `watchRoom()` (demo mode has no persistence to isolate). No
+`firestore.rules` change.
+
+**Same-device room relay** [2026-09-24] -- Jared, live-testing the above: "can't move the
+lyrics" while driving both Host Controls and the Projector from one physical device offline. Root
+cause: Firestore's own "latency compensation" only ever echoes a tab's write back to THAT tab's own
+listener instantly -- the Controls tab sees its own change right away regardless of network, but the
+Projector tab is a separate `window.open()`ed context with its own separate connection
+(`projectorDb`, isolated on purpose -- see just above), which only learns of the write once it
+actually reaches Google's servers and comes back down; with no network at all, it never does. Fix:
+a second `BroadcastChannel('iworship:room-relay')`, same zero-network relay pattern as the
+fullscreen fix above. `watchActiveRoom()`'s Firestore callback was refactored into a shared
+`applyRoomSnapshot(code, room, broadcast)` -- when a non-projector tab's own listener fires
+(`broadcast: true`), it re-posts the room snapshot on this channel; the Projector tab's `onmessage`
+handler applies that same snapshot locally (`broadcast: false`, so it never re-posts and can't echo
+loop). Only the live "pointer" fields need to travel this way -- the actual lyrics are already
+sitting in `state.library` in memory on both tabs (`watchSongs()` loads the whole hymnal
+unconditionally at startup, independent of Firestore persistence). No `firestore.rules` change.
+
+**"Switching..." veil** [2026-09-24] -- Jared: "when switching pages of projector mode
+online/offline, there's a delay... add a loading screen in between... so it doesn't look awkward."
+The gap is the same one described just above: GO LIVE writes from Controls, and the Projector tab
+only finds out once that write actually reaches it, which can never be truly instant over a real
+network even same-device. What CAN be instant is a heads-up that a change is coming: `goLive()` now
+also posts a `{pending:true}` ping on the same `iworship:room-relay` channel, immediately before its
+`updateRoom()` call -- arriving well before the real update ever could, since it travels the exact
+same near-instant relay. The Projector tab's relay handler shows a brief translucent
+`.stage-pending-veil` (a spinner over the still-visible previous slide, never a blank screen) the
+instant that ping lands, via `showStagePending()`, and clears it the moment the real update arrives
+via `applyRoomSnapshot()` (either through this same relay, or through this tab's own
+`watchProjectorRoom()` catching up over the network) -- see both functions' own comments in `app.js`
+for the full reasoning. `stagePendingTimer` is a 4s safety net that clears the veil on its own if the
+expected follow-up update never shows up (a failed write, a closed Controls tab), so it can't get
+stuck. This only helps the same-device setup the relay above already covers -- two genuinely
+separate machines (a real second computer driving the projector output) have no shared browser to
+relay through, so real network latency there is unavoidable, just already minimized by the isolated
+low-overhead projector connection. No `firestore.rules` or data-layer change.
+
 ## Sermons [2026-09-04]
 
 Jared's ask: "Pastors can upload the outline of their preaching, and how they want each slide to

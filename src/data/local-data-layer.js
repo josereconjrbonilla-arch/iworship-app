@@ -352,6 +352,16 @@ export function watchRoom(code, callback) {
   return onBroadcast('rooms', fire);
 }
 
+// Projector-only [2026-09-24] -- see firestore-data-layer.js's watchProjectorRoom()
+// for the real-backend version and its full reasoning. Demo mode has no
+// IndexedDB/persistent-cache concept at all (readRooms() just reads a plain
+// localStorage-backed object every time), so there's nothing to isolate --
+// this is a plain alias of watchRoom(), kept as its own named export only
+// so app.js's data/index.js import list matches the real backend 1:1.
+export function watchProjectorRoom(code, callback) {
+  return watchRoom(code, callback);
+}
+
 export async function updateRoom(code, patch) {
   const rooms = readRooms();
   if (!rooms[code]) return;

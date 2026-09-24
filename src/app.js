@@ -8,7 +8,7 @@ import {
   signUpWithEmail, signInWithEmail, linkPasswordToAccount, hasPasswordLogin, sendPasswordReset,
   pushSupported, enablePushNotifications, currentNotificationPermission, disablePushNotifications, watchForegroundPush,
   watchProfile, fetchProfileFromServer, saveProfile, ensureDirectoryEntry,
-  createRoom, watchRoom, updateRoom, endRoom, watchPublicRooms, watchHostRooms, watchCoHostRooms, checkRoomPassword,
+  createRoom, watchRoom, watchProjectorRoom, updateRoom, endRoom, watchPublicRooms, watchHostRooms, watchCoHostRooms, checkRoomPassword,
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   checkIsAdmin, watchChurch, watchAllChurches, newChurchId, saveChurch,
   watchAllUsers, watchDirectory,
@@ -293,7 +293,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function watchActiveRoom(code){
     stopRoomWatch();
     state.roomLoading = true;
-    unsubRoom = watchRoom(code, function(room){
+    // Offline-resilient projector [2026-09-24] -- Jared, after live-testing
+    // the offline banner: "make the projector mode continue even offline."
+    // See watchProjectorRoom()'s own big comment in firestore-data-layer.js
+    // for the full reasoning/history (the account-reset bug, why this is
+    // scoped and isolated, what's actually different this time). Every
+    // other route -- host, viewer, co-host -- keeps using the exact same
+    // watchRoom() call as before, completely unchanged; only the dedicated
+    // Presenter/Projector route (state.view is already set to
+    // 'session-projector' before this ever runs for that route -- see the
+    // ?stage= branch in the startup-routing block) reads through the
+    // isolated, persistent-cache-backed watcher instead.
+    const watchFn = (state.view === 'session-projector') ? watchProjectorRoom : watchRoom;
+    unsubRoom = watchFn(code, function(room){
       state.roomLoading = false;
       state.room = room;
       ensureViewSermonWatch(room);
@@ -8701,7 +8713,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<kbd>&larr;</kbd><kbd>&rarr;</kbd> stage &nbsp;&middot;&nbsp; ' +
         '<kbd>Space</kbd><kbd>Space</kbd> or <kbd>Enter</kbd><kbd>Enter</kbd> go live &nbsp;&middot;&nbsp; ' +
         '<kbd>1</kbd>&ndash;<kbd>4</kbd> switch tabs &nbsp;&middot;&nbsp; ' +
-        '<kbd>P</kbd>rojector &nbsp;&middot;&nbsp; <kbd>S</kbd>plit screen &nbsp;&middot;&nbsp; <kbd>C</kbd>hat' +
+        '<kbd>P</kbd>rojector &nbsp;&middot;&nbsp; <kbd>F</kbd>ullscreen projector &nbsp;&middot;&nbsp; <kbd>S</kbd>plit screen &nbsp;&middot;&nbsp; <kbd>C</kbd>hat' +
         (isRoomOwner(room) ? ' &nbsp;&middot;&nbsp; <kbd>H</kbd>osts' : '') +
         ' &nbsp;&middot;&nbsp; chart <kbd>L</kbd>ink' +
       '</div>' +
@@ -10141,6 +10153,89 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(isSermon) advanceLiveSermonSlide(delta);
     else if(isMediaSlideshow) advanceLiveMediaSlide(delta);
     else advanceLiveSection(delta);
+  });
+
+  // Full-screen shortcut for projector mode [2026-09-24] -- Jared: "add a
+  // shortcut in projector mode where presenters can just click F and the
+  // projector goes full screen, and click escape to get out of full
+  // screen." Keyboard mirror of the on-screen stage-fullscreen-btn button
+  // (toggleStagePresentationMode(), see its own comment above) -- F toggles
+  // the exact same presentation-mode flag the button does, so whoever's
+  // standing at the projector laptop doesn't have to hunt for the small
+  // expand icon in the corner. Deliberately NOT gated on canControlRoom()
+  // like the space/arrow shortcut just above -- unlike advancing what's
+  // showing, going full screen changes nothing about the room, only how
+  // THIS tab displays it, so anyone who opened the projector link can use
+  // it, same as the on-screen button itself (also ungated). Escape gets its
+  // own explicit handler rather than relying only on the browser's native
+  // "Escape exits real fullscreen" behavior plus the fullscreenchange
+  // listener above: on a device where requestFullscreen() was refused or
+  // unsupported (iOS Safari, some kiosk setups -- see
+  // toggleStagePresentationMode()'s own comment), the browser was never
+  // actually in real fullscreen, so there's no native fullscreen-exit for
+  // Escape to trigger, and the header/footer-hiding chrome would otherwise
+  // be stuck on with no way back short of editing the URL. Calling
+  // toggleStagePresentationMode() here is a harmless no-op layered on top
+  // of the native path when real fullscreen IS active -- the flag only
+  // flips once, and exitFullscreen() on an element that's already exiting
+  // just resolves/rejects quietly.
+  document.addEventListener('keydown', function(e){
+    if(state.view !== 'session-projector') return;
+    if(e.metaKey || e.ctrlKey || e.altKey) return;
+    if(e.repeat) return;
+    const key = e.key;
+    if(key !== 'f' && key !== 'F' && key !== 'Escape') return;
+    if(key === 'Escape' && !stagePresentationMode) return; // nothing to exit
+    e.preventDefault();
+    toggleStagePresentationMode();
+  });
+
+  // Cross-window relay for the F shortcut above [2026-09-24 fix] -- Jared
+  // tested the shortcut and it didn't do anything. Root cause: OPEN
+  // PROJECTOR (openStageBtn, just above) launches the projector as a
+  // SEPARATE browser window/tab (window.open()), which a presenter
+  // normally drags out to the actual TV/projector output and then never
+  // clicks into again -- they keep driving the service from the Host
+  // Controls window/tab. A keydown listener only ever fires in whichever
+  // window currently has keyboard focus, and that's the Controls window,
+  // not the projector one, so the F handler just above (correctly scoped
+  // to state.view==='session-projector') never saw the keypress at all.
+  // Fix: let the Controls window relay the keypress to the projector
+  // window instead of requiring a click into it first, via
+  // BroadcastChannel -- same-origin, same-browser, no Firestore/backend
+  // involved at all, so this carries none of the persistent-cache history
+  // discussed elsewhere in this file. Keyed by room code (not just "any
+  // projector window") so a device with more than one session's windows
+  // open at once can't cross-toggle each other's projector. Gated on
+  // canControlRoom(), same reasoning as the stage-override/stream-link
+  // shortcuts above -- this affects what the whole room's projector output
+  // is doing, not just this one tab. Once the projector window actually
+  // goes full screen (assuming requestFullscreen() isn't refused), the OS
+  // brings it to the foreground on its own, so a follow-up Escape press
+  // lands on the now-focused projector window and is handled by the
+  // listener just above -- no relay needed for exiting.
+  const PROJECTOR_FULLSCREEN_CHANNEL = 'iworship:projector-fullscreen';
+  const projectorFullscreenChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel(PROJECTOR_FULLSCREEN_CHANNEL) : null;
+  if(projectorFullscreenChannel){
+    projectorFullscreenChannel.onmessage = function(e){
+      if(state.view !== 'session-projector') return;
+      if(!e.data || e.data.code !== state.activeRoomCode) return;
+      toggleStagePresentationMode();
+    };
+  }
+  document.addEventListener('keydown', function(e){
+    if(state.view !== 'session-host') return;
+    if(e.metaKey || e.ctrlKey || e.altKey) return;
+    if(e.repeat) return;
+    if(e.key !== 'f' && e.key !== 'F') return;
+    const t = e.target;
+    const tag = t && t.tagName;
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+    const room = state.room;
+    if(!room || !canControlRoom(room)) return;
+    if(!projectorFullscreenChannel || !state.activeRoomCode) return;
+    e.preventDefault();
+    projectorFullscreenChannel.postMessage({ code: state.activeRoomCode });
   });
 
   // Preview/Go Live [2026-09-06] -- Jared: "...he can [...] double enter in

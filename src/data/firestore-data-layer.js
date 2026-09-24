@@ -10,7 +10,7 @@
 // real sign-in and first hosted session as the actual first test of this file.
 import { initializeApp } from 'firebase/app';
 import {
-  initializeFirestore, memoryLocalCache,
+  initializeFirestore, memoryLocalCache, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, getDoc, getDocs, getDocFromServer,
   arrayUnion, arrayRemove, increment
@@ -94,6 +94,56 @@ const storage = isFirebaseConfigured ? getStorage(app) : null;
 // deployed to; getFunctions() defaults to us-central1, which would 404
 // every call here if left unset.
 const functionsClient = isFirebaseConfigured ? getFunctions(app, 'asia-southeast1') : null;
+
+// Projector-only isolated Firestore connection [2026-09-24] -- Jared, after
+// live-testing the offline banner: "make the projector mode continue even
+// offline." What already works with zero code here: `db` above stays on
+// memoryLocalCache() (see its own big comment), and that alone already
+// survives a mid-service connection drop just fine -- Firestore's pending-
+// writes queue and listener reconnect are tied to the client instance's
+// lifetime, not to persistence config, so the projector just holds its
+// last slide and catches back up once wifi returns. What memoryLocalCache()
+// genuinely can NOT do is survive the projector TAB ITSELF reloading or
+// relaunching while still offline (a browser/OS crash, someone bumping the
+// laptop, a kiosk auto-refresh) -- with no persistent cache, a cold reload
+// has nothing to read until the network is back, so the screen goes blank
+// mid-service. Fixing that for real needs a persistent, IndexedDB-backed
+// cache -- the exact thing that was pulled everywhere else in this file
+// after it caused a real production bug (see "The iworship-ph account
+// reset..." in architecture-and-decisions.md): a cold-IndexedDB
+// initialization race that could return a false "document doesn't exist"
+// for a moment right after a fresh start, which on the profile-setup
+// screen meant real accounts got stuck asking to re-register.
+//
+// The fix here is NOT "turn persistence back on" -- it's a second,
+// completely separate Firebase app instance (`projectorApp`/`projectorDb`,
+// same project, same config, just a second named connection), used for
+// exactly one thing: the Presenter/Projector route's own read-only room-doc
+// subscription (watchProjectorRoom() below), and nothing else -- no
+// sign-in, no profile reads, no writes of any kind ever touch this
+// instance. Two things make this meaningfully safer than just flipping the
+// old switch back on, not just "the same risk moved to a new spot":
+//   1. `rooms/{code}` reads are public (`allow read: if true` in
+//      firestore.rules) -- this connection never authenticates, so it
+//      structurally cannot reproduce the profile/auth race that actually
+//      caused the incident, even if the underlying cold-IndexedDB race
+//      itself still exists in the SDK.
+//   2. If that race DOES still fire here, the blast radius is one
+//      `onSnapshot` callback on one screen getting a stale/false null for a
+//      moment -- renderSessionProjector() already renders that as "This
+//      session isn't available" (same as any other null room) and the very
+//      next real snapshot corrects it automatically, same self-healing
+//      behavior the projector already has for an ordinary mid-service
+//      reconnect. There's no profile-setup-style dead end for it to strand
+//      anyone on.
+// persistentMultipleTabManager() (rather than the single-tab manager Jared
+// already confirmed regresses nothing) -- so this doesn't misbehave if a
+// venue ever somehow ends up with two projector tabs open in the same
+// browser profile at once.
+const projectorApp = isFirebaseConfigured ? initializeApp(firebaseConfig, 'projector') : null;
+const projectorDb = isFirebaseConfigured ? initializeFirestore(projectorApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+}) : null;
 
 // ---------------------------------------------------------------------- Songs
 export function watchSongs(callback) {
@@ -415,6 +465,18 @@ export async function createRoom(room) {
 
 export function watchRoom(code, callback) {
   return onSnapshot(doc(db, 'rooms', code), (snap) => {
+    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+  });
+}
+
+// Projector-only [2026-09-24] -- see projectorDb's own big comment above for
+// the full reasoning. Identical to watchRoom() in every way except which
+// Firestore instance it reads through -- projectorDb (persistent,
+// IndexedDB-backed cache) instead of db (memory-only) -- so app.js's
+// watchActiveRoom() can swap this in only for the Presenter/Projector
+// route with zero other behavior difference.
+export function watchProjectorRoom(code, callback) {
+  return onSnapshot(doc(projectorDb, 'rooms', code), (snap) => {
     callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
   });
 }

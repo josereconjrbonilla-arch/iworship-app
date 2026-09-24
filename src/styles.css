@@ -1033,6 +1033,19 @@
      above) so it genuinely fills the screen edge to edge like a real
      background, letting it crop rather than letterbox. */
   .stage-bg-only-frame .stage-media-img{ object-fit:cover; }
+  /* Media preview [2026-09-24] -- Jared: "where's the option to preview the
+     media?" The inline PREVIEW panel on a Media Library card (see
+     renderMediaPreviewPanel() in app.js). Unlike .stage-media-frame (which
+     is position:absolute, full-bleed against its stage view), this sits
+     in-flow inside an ordinary card, so it's a plain flex box with an
+     explicit height cap instead. */
+  .media-preview-frame{
+    width:100%; max-height:320px; border-radius:10px; overflow:hidden;
+    background:#000; display:flex; align-items:center; justify-content:center;
+  }
+  .media-preview-frame img, .media-preview-frame video{ width:100%; max-height:320px; object-fit:contain; display:block; }
+  .media-preview-frame-embed{ height:280px; }
+  .media-preview-frame-embed iframe{ width:100%; height:100%; border:0; }
   .stage-media-embed{ width:100%; height:100%; border:0; }
   /* Browser autoplay policy [2026-09-06] -- see syncStageMediaVideo()'s
      comment in app.js for why this button exists at all (muted autoplay is

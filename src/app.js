@@ -1271,7 +1271,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="topbar-dropdown-header">Notifications</div>' +
       '<div class="topbar-dropdown-list">' +
       (recent.length ? recent.map(function(n){
-        return '<button type="button" class="topbar-dropdown-row'+(n.read?'':' topbar-dropdown-row-unread')+'" data-notif-actor="'+escapeAttr(n.actorUid)+'" data-notif-type="'+escapeAttr(n.type||'')+'" data-notif-room="'+escapeAttr(n.roomCode||'')+'">' +
+        return '<button type="button" class="topbar-dropdown-row'+(n.read?'':' topbar-dropdown-row-unread')+'" data-notif-id="'+escapeAttr(n.id)+'" data-notif-actor="'+escapeAttr(n.actorUid)+'" data-notif-type="'+escapeAttr(n.type||'')+'" data-notif-room="'+escapeAttr(n.roomCode||'')+'">' +
           personAvatar(n.actorUid, 32) +
           '<span class="topbar-dropdown-row-text"><span>'+notificationText(n)+'</span><span class="hint">'+postAge(n.createdAt)+'</span></span>' +
         '</button>';
@@ -1281,9 +1281,21 @@ import { pushNotificationsConfigured } from './push-config.js';
 
     el.querySelectorAll('[data-notif-actor]').forEach(function(row){
       row.addEventListener('click', function(){
+        const id = row.getAttribute('data-notif-id');
         const actorUid = row.getAttribute('data-notif-actor');
         const type = row.getAttribute('data-notif-type');
         state.notifDropdownOpen = false;
+        // Unread badge fix [2026-09-24] -- Jared: "even though I've...
+        // viewed the notif, they still indicate the number." Opening the
+        // dropdown deliberately never mark-all-reads (see this function's
+        // own comment above), and until now clicking an individual row
+        // didn't mark THAT one read either -- nothing anywhere marked a
+        // single notification read on click, only the full Notifications
+        // screen's delayed mark-ALL-read (openNotifications()) ever did.
+        // Marking it the instant it's actually opened/acted on is more
+        // reliable than waiting on that timer, and now also covers this
+        // dropdown, which the timer never touches.
+        if(id && state.user) markNotificationRead(state.user.uid, id).catch(function(){});
         // Mirrors renderNotifications()'s own row-click branching below --
         // 'session_live' [2026-09-17] joins the room instead of opening the
         // host's profile, same reasoning as 'message' opening the thread.
@@ -5277,6 +5289,18 @@ import { pushNotificationsConfigured } from './push-config.js';
   let mediaFolderRenameName = '';
   let mediaFolderDeleteConfirmId = null;
   let mediaMoveOpenId = null; // media item id whose MOVE (to another folder) panel is open
+  // Media preview [2026-09-24] -- Jared: "where's the option to preview the
+  // media?" Before this, a Media Library card was just an icon + title/meta
+  // with no way to actually see the image/video/slideshow/embed before
+  // presenting it live. mediaPreviewOpenId is the id of the one item whose
+  // PREVIEW panel is open (same one-at-a-time convention as
+  // mediaMoveOpenId/mediaShareOpenId); mediaPreviewSlideIndex only matters
+  // for a 'slideshow' item, letting the preview page through its slides the
+  // same way the live stage does, without touching anything room/session
+  // related -- this is a purely local, read-only look, not a rehearsal of
+  // what's live.
+  let mediaPreviewOpenId = null;
+  let mediaPreviewSlideIndex = 0;
 
   function openMediaLibrary(returnView){
     mediaLibraryReturnView = returnView || 'landing';
@@ -5284,6 +5308,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     mediaAddMode = null; mediaAddTitle = ''; mediaAddEmbedUrl = ''; mediaUploadBusy = false; mediaUploadStatus = '';
     mediaLibraryFolderId = null; mediaNewFolderOpen = false; mediaNewFolderName = '';
     mediaFolderRenameId = null; mediaFolderRenameName = ''; mediaFolderDeleteConfirmId = null; mediaMoveOpenId = null;
+    mediaPreviewOpenId = null; mediaPreviewSlideIndex = 0;
     startMyMediaWatch(); startSharedMediaWatch(); startDirectoryWatch(); startMyMediaFoldersWatch();
     state.view = 'media-library';
     render(); window.scrollTo(0,0);
@@ -5466,13 +5491,45 @@ import { pushNotificationsConfigured } from './push-config.js';
       }).join('') + '</div>';
   }
 
+  // Media preview [2026-09-24] -- see mediaPreviewOpenId's own comment
+  // above. Deliberately its own small function (not folded into
+  // renderMediaItemCard() below) since it has real branching per media
+  // type, the same four-way split renderStageSlide()'s 'media' branch and
+  // renderSessionView()'s congregant card both already use -- this is a
+  // fourth, read-only-preview version of that same split, scoped to
+  // whatever's already stored on the media doc itself (no room, no
+  // resolveRoomContent() involved at all).
+  function renderMediaPreviewPanel(m){
+    if(m.type === 'image'){
+      return '<div class="media-preview-frame"><img src="'+escapeAttr(m.url)+'" alt=""></div>';
+    }
+    if(m.type === 'video'){
+      return '<div class="media-preview-frame"><video src="'+escapeAttr(m.url)+'" controls playsinline></video></div>';
+    }
+    if(m.type === 'embed'){
+      return '<div class="media-preview-frame media-preview-frame-embed"><iframe src="'+escapeAttr(m.embedUrl||'')+'" allow="autoplay; fullscreen" allowfullscreen></iframe></div>' +
+        '<p class="hint" style="margin-top:8px;">Slide navigation for an embed happens inside it once it&rsquo;s actually live &mdash; this preview just confirms the link loads.</p>';
+    }
+    // 'slideshow'
+    const slides = m.slides || [];
+    if(!slides.length) return '<p class="hint">This presentation has no slides.</p>';
+    const idx = Math.min(Math.max(mediaPreviewSlideIndex, 0), slides.length - 1);
+    const slide = slides[idx];
+    return '<div class="media-preview-frame"><img src="'+escapeAttr(slide ? slide.url : '')+'" alt=""></div>' +
+      '<p class="hint" style="text-align:center;margin:8px 0 0;">Slide '+(idx+1)+' of '+slides.length+'</p>' +
+      '<div class="now-live-jump-row" style="margin-top:8px;">' +
+        slides.map(function(s,i){ return '<button type="button" class="section-jump'+(i===idx?' active':'')+'" data-media-preview-slide="'+i+'">'+(i+1)+'</button>'; }).join('') +
+      '</div>';
+  }
+
   // One media item's card -- shared by both the root/unfiled list and a
-  // folder's own item list below, since the card itself (SHARE/DELETE/MOVE)
-  // doesn't change depending on where it's shown.
+  // folder's own item list below, since the card itself (PREVIEW/SHARE/
+  // DELETE/MOVE) doesn't change depending on where it's shown.
   function renderMediaItemCard(m){
     const confirming = mediaDeleteConfirmId === m.id;
     const sharing = mediaShareOpenId === m.id;
     const moving = mediaMoveOpenId === m.id;
+    const previewing = mediaPreviewOpenId === m.id;
     const shareCount = (m.sharedWithUids||[]).length;
     return '<div class="room-list-card">' +
       '<div class="room-list-meta" style="display:flex;align-items:center;gap:10px;flex:1;min-width:200px;">' +
@@ -5485,10 +5542,12 @@ import { pushNotificationsConfigured } from './push-config.js';
           '<button class="btn btn-primary" data-confirm-delete-media="'+m.id+'">YES, DELETE</button>' +
           '<button class="btn btn-ghost" data-cancel-delete-media="'+m.id+'">CANCEL</button></div>')
         : ('<span class="setlist-controls">' +
+            '<button class="btn btn-ghost" data-toggle-preview-media="'+m.id+'">'+(previewing?'CLOSE':'PREVIEW')+'</button>' +
             '<button class="btn btn-ghost" data-toggle-move-media="'+m.id+'">'+(moving?'CLOSE':'MOVE')+'</button>' +
             '<button class="btn btn-ghost" data-toggle-share-media="'+m.id+'">'+(sharing?'CLOSE':'SHARE')+'</button>' +
             '<button class="btn btn-ghost" data-ask-delete-media="'+m.id+'">DELETE</button>' +
           '</span>')) +
+      (previewing ? ('<div style="flex-basis:100%;width:100%;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">' + renderMediaPreviewPanel(m) + '</div>') : '') +
       (moving ? ('<div style="flex-basis:100%;width:100%;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">' + renderMediaMovePanel(m) + '</div>') : '') +
       (sharing ? ('<div style="flex-basis:100%;width:100%;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">' + renderMediaSharePanel(m) + '</div>') : '') +
     '</div>';
@@ -5714,10 +5773,28 @@ import { pushNotificationsConfigured } from './push-config.js';
     });
 
     document.querySelectorAll('[data-ask-delete-media]').forEach(function(btn){
-      btn.addEventListener('click', function(){ mediaDeleteConfirmId = btn.getAttribute('data-ask-delete-media'); mediaShareOpenId = null; render(); });
+      btn.addEventListener('click', function(){ mediaDeleteConfirmId = btn.getAttribute('data-ask-delete-media'); mediaShareOpenId = null; mediaPreviewOpenId = null; render(); });
     });
     document.querySelectorAll('[data-cancel-delete-media]').forEach(function(btn){
       btn.addEventListener('click', function(){ mediaDeleteConfirmId = null; render(); });
+    });
+    // Media preview [2026-09-24] -- see mediaPreviewOpenId's own comment up
+    // by its declaration. Exact mirror of the MOVE/SHARE toggle handlers'
+    // one-at-a-time convention.
+    document.querySelectorAll('[data-toggle-preview-media]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-toggle-preview-media');
+        mediaPreviewOpenId = (mediaPreviewOpenId === id) ? null : id;
+        mediaPreviewSlideIndex = 0;
+        mediaShareOpenId = null; mediaDeleteConfirmId = null; mediaMoveOpenId = null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-media-preview-slide]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        mediaPreviewSlideIndex = +btn.getAttribute('data-media-preview-slide');
+        render();
+      });
     });
     document.querySelectorAll('[data-confirm-delete-media]').forEach(function(btn){
       btn.addEventListener('click', async function(){
@@ -5735,7 +5812,7 @@ import { pushNotificationsConfigured } from './push-config.js';
         const id = btn.getAttribute('data-toggle-share-media');
         mediaShareOpenId = (mediaShareOpenId === id) ? null : id;
         mediaShareQuery = '';
-        mediaDeleteConfirmId = null;
+        mediaDeleteConfirmId = null; mediaPreviewOpenId = null;
         render();
       });
     });
@@ -5775,7 +5852,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     document.querySelectorAll('[data-open-media-folder]').forEach(function(btn){
       btn.addEventListener('click', function(){
         mediaLibraryFolderId = btn.getAttribute('data-open-media-folder');
-        mediaShareOpenId = null; mediaDeleteConfirmId = null; mediaMoveOpenId = null;
+        mediaShareOpenId = null; mediaDeleteConfirmId = null; mediaMoveOpenId = null; mediaPreviewOpenId = null;
         mediaAddMode = null; mediaNewFolderOpen = false;
         render(); window.scrollTo(0,0);
       });
@@ -5783,7 +5860,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     document.querySelectorAll('[data-media-folder-root]').forEach(function(btn){
       btn.addEventListener('click', function(){
         mediaLibraryFolderId = null;
-        mediaShareOpenId = null; mediaDeleteConfirmId = null; mediaMoveOpenId = null;
+        mediaShareOpenId = null; mediaDeleteConfirmId = null; mediaMoveOpenId = null; mediaPreviewOpenId = null;
         mediaAddMode = null;
         render(); window.scrollTo(0,0);
       });
@@ -5859,7 +5936,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       btn.addEventListener('click', function(){
         const id = btn.getAttribute('data-toggle-move-media');
         mediaMoveOpenId = (mediaMoveOpenId === id) ? null : id;
-        mediaShareOpenId = null; mediaDeleteConfirmId = null;
+        mediaShareOpenId = null; mediaDeleteConfirmId = null; mediaPreviewOpenId = null;
         render();
       });
     });
@@ -10540,6 +10617,16 @@ import { pushNotificationsConfigured } from './push-config.js';
     }
     dmComposerText = '';
     state.activeDmThreadId = threadId;
+    // Unread badge fix [2026-09-24] -- Jared: "even though I've checked
+    // the message... they still indicate the number." openChatDock() (the
+    // small floating popup) already stamped readAt the moment a thread
+    // opened there, but THIS function -- the one the full Messages hub
+    // screen's own thread list actually calls (see the data-open-dm click
+    // handler) -- never did, so opening a thread from the main Messages
+    // screen (rather than the dock) left it permanently "unread" no matter
+    // how many times it was actually read. Exact mirror of openChatDock()'s
+    // own call.
+    markDmThreadRead(threadId, state.user.uid).catch(function(){});
     startDmMessagesWatch(threadId);
     state.view = 'dm-thread'; render(); window.scrollTo(0,0);
   }
@@ -10551,6 +10638,10 @@ import { pushNotificationsConfigured } from './push-config.js';
   function openGroupChatThread(groupId){
     groupChatComposerText = ''; groupChatManageOpen = false; groupLeaveConfirm = false;
     state.activeGroupChatId = groupId;
+    // Unread badge fix [2026-09-24] -- see openDmThread()'s exact same fix
+    // just above; same gap, same cause (the full Messages hub's own
+    // group-chat list calls this function directly, not openChatDock()).
+    if(state.user) markGroupChatRead(groupId, state.user.uid).catch(function(){});
     startGroupChatThreadWatch(groupId);
     state.view = 'group-chat-thread'; render(); window.scrollTo(0,0);
   }
@@ -11741,7 +11832,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="back-row"><button class="back-btn" id="notifBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
       '<div class="landing-hero"><p class="display landing-greeting">Notifications</p></div>' +
       (state.notifications.length ? state.notifications.map(function(n){
-        return '<div class="notif-row'+(n.read?'':' notif-row-unread')+'" data-open-notif-actor="'+escapeAttr(n.actorUid)+'" data-open-notif-type="'+escapeAttr(n.type||'')+'" data-open-notif-room="'+escapeAttr(n.roomCode||'')+'">' +
+        return '<div class="notif-row'+(n.read?'':' notif-row-unread')+'" data-notif-id="'+escapeAttr(n.id)+'" data-open-notif-actor="'+escapeAttr(n.actorUid)+'" data-open-notif-type="'+escapeAttr(n.type||'')+'" data-open-notif-room="'+escapeAttr(n.roomCode||'')+'">' +
           personAvatar(n.actorUid, 40) +
           '<div style="flex:1;min-width:0;"><p>'+notificationText(n)+'</p><p class="hint">'+postAge(n.createdAt)+'</p></div>' +
         '</div>';
@@ -11752,8 +11843,16 @@ import { pushNotificationsConfigured } from './push-config.js';
     });
     document.querySelectorAll('[data-open-notif-actor]').forEach(function(row){
       row.addEventListener('click', function(){
+        const id = row.getAttribute('data-notif-id');
         const actorUid = row.getAttribute('data-open-notif-actor');
         const type = row.getAttribute('data-open-notif-type');
+        // Unread badge fix [2026-09-24] -- see renderNotifDropdown()'s
+        // matching fix for the full story: nothing marked an individual
+        // notification read on click before this, anywhere -- only the
+        // delayed mark-ALL-read this screen's own openNotifications() kicks
+        // off. Marking it here too means it's reliably read the instant
+        // it's actually opened, not just eventually.
+        if(id && state.user) markNotificationRead(state.user.uid, id).catch(function(){});
         // A message notification opens straight into the conversation (the
         // thing it's actually about); a session_live notification [2026-09-
         // 17] joins that room the same way, since what it's "about" is the

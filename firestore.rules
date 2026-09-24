@@ -243,7 +243,18 @@ service cloud.firestore {
 
     match /songs/{songId} {
       allow read: if true;
-      allow create, update: if isEditor() || canAddSongsRole();
+      allow create: if isEditor() || canAddSongsRole();
+      // Song usage tracking [2026-09-24]: any signed-in host can go live
+      // with a song (not just an editor/canAddSongsRole() account), so
+      // recordSongUsage() (data/firestore-data-layer.js, called from
+      // goLive()'s song branch in app.js) needs a write path open to any
+      // signed-in user -- narrowed to ONLY the two usage fields via
+      // hasOnly(), same "carve out just the fields this action needs"
+      // pattern as sermon/media sharing's sharedWithUids-only update rule
+      // and the room doc's controller-write carve-out above. An editor/
+      // canAddSongsRole() account can still update anything, as before.
+      allow update: if isEditor() || canAddSongsRole() ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['songUseCount', 'songLastUsedAt']));
       allow delete: if false; // no delete UI in the app; keep the hymnal append-only for now
     }
 

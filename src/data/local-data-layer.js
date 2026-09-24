@@ -80,6 +80,20 @@ export async function updateSong(id, patch) {
   broadcast('songs');
 }
 
+// Song usage tracking [2026-09-24] -- see firestore-data-layer.js's own
+// comment on recordSongUsage() for the full design. Demo mode has no
+// Firestore increment()/serverTimestamp(), so this just does the plain-JS
+// equivalent directly on the local songs array.
+export async function recordSongUsage(songId) {
+  ensureSongsSeeded();
+  const songs = readJSON(LS_SONGS, []);
+  const idx = songs.findIndex((s) => s.id === songId);
+  if (idx === -1) return;
+  songs[idx] = { ...songs[idx], songUseCount: (songs[idx].songUseCount || 0) + 1, songLastUsedAt: Date.now() };
+  writeJSON(LS_SONGS, songs);
+  broadcast('songs');
+}
+
 // ----------------------------------------------------------------------- Auth
 // Demo mode has no real account system — it mints a stable per-browser "local
 // demo user" id and lets the person set a display name, honestly labeled as a

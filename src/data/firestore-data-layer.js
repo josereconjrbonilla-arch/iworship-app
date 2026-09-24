@@ -117,6 +117,23 @@ export async function updateSong(id, patch) {
   await updateDoc(doc(db, 'songs', id), patch);
 }
 
+// Song usage tracking [2026-09-24] -- Jared: "song usage tracking, you can
+// add that to admins." A running per-song counter (songUseCount) plus the
+// most recent time it went live (songLastUsedAt), incremented from
+// goLive()'s song branch every time a host actually publishes a song to a
+// live room (not merely staged in preview -- see hostPreview/goLive()'s own
+// comments). Deliberately a plain running total rather than a per-event log
+// collection -- Jared's ask was "tracking," not a detailed history browser,
+// and a log would need its own new collection/rules/UI for a feature this
+// narrow. increment()/serverTimestamp() are the same primitives likeItem()/
+// followUser() above already use for other running counters. This needed a
+// narrow `songs/{songId}` update-rule carve-out (any signed-in user, but
+// ONLY these two fields) since most hosts presenting a song aren't an
+// editor/canAddSongsRole() -- see firestore.rules' own comment on it.
+export async function recordSongUsage(songId) {
+  await updateDoc(doc(db, 'songs', songId), { songUseCount: increment(1), songLastUsedAt: serverTimestamp() });
+}
+
 // ----------------------------------------------------------------------- Auth
 export function watchAuth(callback) {
   return onAuthStateChanged(auth, (user) => {

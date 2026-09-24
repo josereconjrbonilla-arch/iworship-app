@@ -3,7 +3,7 @@ import { THEMES } from './content/themes.js';
 import { VERSES } from './content/verses.js';
 import {
   usingDemoMode,
-  watchSongs, addSong, updateSong,
+  watchSongs, addSong, updateSong, recordSongUsage,
   watchAuth, signInWithGoogle, signOutUser,
   signUpWithEmail, signInWithEmail, linkPasswordToAccount, hasPasswordLogin, sendPasswordReset,
   pushSupported, enablePushNotifications, currentNotificationPermission, disablePushNotifications, watchForegroundPush,
@@ -34,6 +34,12 @@ import {
 } from './data/index.js';
 import { suggestThemes, aiTaggingConfigured } from './data/ai-tagger.js';
 import { pushNotificationsConfigured } from './push-config.js';
+import qrcodeGen from './content/qrcode.js';
+import { stringToBytes as qrStringToBytesUtf8 } from './content/qrcode-utf8.js';
+
+// Use the Unicode-safe byte encoder for QR data (our join URLs are plain
+// ASCII today, but this keeps the encoder correct if that ever changes).
+qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
 "use strict";
 
@@ -424,8 +430,22 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(chatChannel !== 'everyone' && !canSeeMusicians) chatChannel = 'everyone';
     const tabs = CHAT_CHANNELS.filter(function(c){ return c.key==='everyone' || canSeeMusicians; });
     const showNameField = !currentDisplayName();
+    // Livestream link [2026-09-24] -- rendered as a pinned banner, not an
+    // actual chat message, specifically so it "remains at the top" (Jared's
+    // words) instead of scrolling away like a normal message would. Reads
+    // state.room directly (this function is shared by the host's floating
+    // chat panel and the congregant's inline chat -- both already keep
+    // state.room current via watchActiveRoom()) rather than taking a room
+    // param, so neither call site needed to change.
+    const liveRoom = state.room;
+    const pinnedStream = (liveRoom && liveRoom.livestreamUrl) ?
+      ('<a class="chat-pinned-stream" href="'+escapeAttr(liveRoom.livestreamUrl)+'" target="_blank" rel="noopener noreferrer">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('link')+'</svg>' +
+        '<span>Watch the livestream</span>' +
+      '</a>') : '';
     return '<div class="session-card chat-card">' +
       '<h3 style="margin-bottom:12px;">Chat</h3>' +
+      pinnedStream +
       (tabs.length>1 ? ('<div class="chat-tabs">' + tabs.map(function(c){
         return '<button type="button" class="chat-tab'+(chatChannel===c.key?' active':'')+'" data-chat-tab="'+c.key+'">'+c.label+'</button>';
       }).join('') + '</div>') : '') +
@@ -1928,6 +1948,185 @@ import { pushNotificationsConfigured } from './push-config.js';
     return { songs, warnings };
   }
 
+  // Bulk import: CSV / ChordPro file upload [2026-09-24] -- Jared: "Bulk
+  // song import, build that as well." parseBulkText() above already covers
+  // pasting the app's own "# Title" plain-text format; this section adds
+  // two more input formats a worship team is realistically already sitting
+  // on -- a CSV export from a spreadsheet, and standard ChordPro (.cho/
+  // .crd/.chordpro) files, which most other worship-presentation tools
+  // (OnSong, PlanningCenter, SongSelect) can already export to. All three
+  // parsers return the exact same `{songs: [{title,key,themes,youtube,
+  // sections}], warnings}` shape, so renderBulkPreview()/submitBulkImport()
+  // below (already built, already relied on) needed zero changes -- only
+  // handleBulkFileUpload() (further down) feeds them from a different
+  // source.
+  //
+  // The lucky part: this app's own chorded-lyric storage format IS
+  // ChordPro's inline chord syntax already -- renderChordLyricLine() above
+  // parses `[G]Amazing [C]grace` directly out of a stored lyric line. That
+  // means a ChordPro file's actual chord/lyric content lines need ZERO
+  // transformation, only its `{directive}` lines (title/key/section
+  // markers) need interpreting -- so chordProToLabeledText() below just
+  // strips/translates those into this app's OWN explicit-section-label
+  // convention (the same "Verse"/"Chorus"/"Bridge" line detectSections()
+  // already recognizes via LABEL_RE) and hands the result straight to the
+  // existing, already-tested detectSections() rather than reimplementing
+  // section-grouping a second time.
+  function chordProToLabeledText(raw){
+    const lines = raw.replace(/\r\n/g,'\n').split('\n');
+    let title = '', key = '';
+    const blocks = [];
+    let current = { label: null, lines: [] };
+    let skippingTab = false;
+    function flush(){
+      if(current.lines.some(function(l){ return l.trim(); })) blocks.push(current);
+      current = { label: null, lines: [] };
+    }
+    const SECTION_OPENERS = {
+      start_of_verse:'Verse', sov:'Verse',
+      start_of_chorus:'Chorus', soc:'Chorus',
+      start_of_bridge:'Bridge', sob:'Bridge'
+    };
+    const SECTION_CLOSERS = { end_of_verse:1, eov:1, end_of_chorus:1, eoc:1, end_of_bridge:1, eob:1 };
+    lines.forEach(function(rawLine){
+      const line = rawLine.trim();
+      const m = line.match(/^\{([^:}]+)(?::\s*(.*))?\}$/);
+      if(m){
+        const directive = m[1].trim().toLowerCase().replace(/[\s-]+/g,'_');
+        const val = (m[2]||'').trim();
+        if(skippingTab){
+          if(directive==='end_of_tab' || directive==='eot') skippingTab = false;
+          return;
+        }
+        if(directive==='start_of_tab' || directive==='sot'){ flush(); skippingTab = true; return; }
+        if((directive==='title' || directive==='t') && !title){ title = val; return; }
+        if((directive==='key' || directive==='k') && !key){ key = val; return; }
+        if(SECTION_OPENERS[directive]){ flush(); current.label = SECTION_OPENERS[directive]; return; }
+        if(SECTION_CLOSERS[directive]){ flush(); return; }
+        return; // any other ChordPro directive (artist, capo, tempo, comment, ...) -- not needed here, ignored
+      }
+      if(skippingTab) return;
+      if(line === ''){
+        // A blank line only breaks the block when we're not inside an
+        // EXPLICIT {start_of_X}...{end_of_X} pair -- an explicit block is
+        // still one section even if its source happens to have a stray
+        // blank line in the middle of it.
+        if(!current.label) flush();
+        return;
+      }
+      current.lines.push(line);
+    });
+    flush();
+    const text = blocks.map(function(b){ return (b.label ? (b.label + '\n') : '') + b.lines.join('\n'); }).join('\n\n');
+    return { title: title, key: key, text: text };
+  }
+  function parseChordProText(raw, fallbackTitle){
+    const { title, key, text } = chordProToLabeledText(raw);
+    const songTitle = title || fallbackTitle || '';
+    if(!songTitle) return { song:null, warning:'No {title:} directive found, and no filename to fall back on -- skipped.' };
+    if(!text.trim()) return { song:null, warning:'"'+songTitle+'": no lyric content found -- skipped.' };
+    const sections = detectSections(text);
+    if(!sections.length) return { song:null, warning:'"'+songTitle+'": couldn&rsquo;t detect any sections -- skipped.' };
+    return { song: { title: songTitle, key: key, themes: [], youtube: '', sections: sections }, warning: null };
+  }
+
+  // Minimal RFC4180-ish CSV row parser -- handles quoted fields (embedded
+  // commas, embedded newlines for a multi-line lyrics cell, and doubled ""
+  // escaped quotes), which a naive split(',') would mangle the moment
+  // someone's lyrics cell spans multiple lines (the normal case for a real
+  // spreadsheet export). Not attempting every RFC edge case, just what an
+  // Excel/Sheets/Numbers export actually produces.
+  function parseCsvRows(text){
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    const s = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+    for(let i=0; i<s.length; i++){
+      const c = s[i];
+      if(inQuotes){
+        if(c === '"'){ if(s[i+1] === '"'){ field += '"'; i++; } else inQuotes = false; }
+        else field += c;
+      } else {
+        if(c === '"') inQuotes = true;
+        else if(c === ','){ row.push(field); field=''; }
+        else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+        else field += c;
+      }
+    }
+    row.push(field); rows.push(row);
+    if(rows.length && rows[rows.length-1].length===1 && rows[rows.length-1][0]==='') rows.pop();
+    return rows;
+  }
+  function parseCsvText(raw){
+    const cleaned = raw.replace(/^﻿/, ''); // strip a BOM -- common on an Excel CSV export
+    const rows = parseCsvRows(cleaned);
+    if(!rows.length) return { songs: [], warnings: ['Empty CSV file.'] };
+    const header = rows[0].map(function(h){ return h.trim().toLowerCase(); });
+    const idx = { title: header.indexOf('title'), key: header.indexOf('key'), themes: header.indexOf('themes'), youtube: header.indexOf('youtube'), lyrics: header.indexOf('lyrics') };
+    if(idx.title === -1 || idx.lyrics === -1){
+      return { songs: [], warnings: ['CSV needs at least "title" and "lyrics" columns (found: ' + (header.filter(Boolean).join(', ')||'an empty header row') + ').'] };
+    }
+    const songs = [], warnings = [];
+    for(let r=1; r<rows.length; r++){
+      const row = rows[r];
+      if(row.length===1 && row[0].trim()==='') continue; // stray trailing blank row
+      const title = (row[idx.title]||'').trim();
+      const lyricsRaw = (row[idx.lyrics]||'').trim();
+      if(!title){ warnings.push('Row ' + (r+1) + ': missing a title -- skipped.'); continue; }
+      if(!lyricsRaw){ warnings.push('"' + title + '": empty lyrics cell -- skipped.'); continue; }
+      const sections = detectSections(lyricsRaw);
+      if(!sections.length){ warnings.push('"' + title + '": couldn&rsquo;t detect any sections -- skipped.'); continue; }
+      const themes = idx.themes>-1 ? (row[idx.themes]||'').split(/[,;]/).map(function(t){ return t.trim().toLowerCase().replace(/\s+/g,'-'); }).filter(function(t){ return THEME_KEYS.includes(t); }) : [];
+      songs.push({ title: title, key: idx.key>-1 ? (row[idx.key]||'').trim() : '', themes: themes, youtube: idx.youtube>-1 ? (row[idx.youtube]||'').trim() : '', sections: sections });
+    }
+    return { songs, warnings };
+  }
+
+  // Per-file format detection for the BULK ADD screen's file-upload path --
+  // an explicit file extension wins when present; a plain .txt (or no
+  // extension) file is sniffed by content instead, so someone can still
+  // upload a .txt file written in either format.
+  function detectBulkFileFormat(filename, content){
+    const ext = (filename.split('.').pop()||'').toLowerCase();
+    if(ext === 'csv') return 'csv';
+    if(ext==='cho' || ext==='crd' || ext==='chordpro' || ext==='chopro') return 'chordpro';
+    if(/^\s*\{(title|t|start_of_verse|sov|start_of_chorus|soc|key|k)\b/im.test(content)) return 'chordpro';
+    const firstLine = (content.split(/\r?\n/).find(function(l){ return l.trim(); }) || '').trim();
+    if(!firstLine.startsWith('#') && firstLine.indexOf(',')>-1 && /title/i.test(firstLine) && /lyrics/i.test(firstLine)) return 'csv';
+    return 'bulktext'; // falls back to this app's own "# Title" paste format, unchanged
+  }
+  // Reads every selected file, parses each with the right parser for its
+  // format, and merges all of them into ONE combined preview -- so picking
+  // several ChordPro files (the realistic case: one song per file) at once
+  // imports the whole batch in a single PREVIEW/SAVE ALL pass, same as
+  // pasting several songs into the textarea already does.
+  async function handleBulkFileUpload(fileList){
+    const files = Array.from(fileList || []);
+    if(!files.length) return;
+    let allSongs = [], allWarnings = [];
+    for(let i=0; i<files.length; i++){
+      const file = files[i];
+      let text;
+      try{ text = await file.text(); }
+      catch(e){ allWarnings.push(file.name + ': could not read this file -- skipped.'); continue; }
+      const format = detectBulkFileFormat(file.name, text);
+      if(format === 'csv'){
+        const { songs, warnings } = parseCsvText(text);
+        allSongs = allSongs.concat(songs);
+        warnings.forEach(function(w){ allWarnings.push(file.name + ': ' + w); });
+      } else if(format === 'chordpro'){
+        const { song, warning } = parseChordProText(text, file.name.replace(/\.[^.]+$/, ''));
+        if(song) allSongs.push(song);
+        if(warning) allWarnings.push(file.name + ': ' + warning);
+      } else {
+        const { songs, warnings } = parseBulkText(text);
+        allSongs = allSongs.concat(songs);
+        warnings.forEach(function(w){ allWarnings.push(file.name + ': ' + w); });
+      }
+    }
+    bulkParsed = allSongs;
+    renderBulkPreview(allSongs, allWarnings);
+  }
+
   /* ============ RENDER ============ */
   // Preserve keyboard focus (and cursor position) across a render() call
   // that's triggered by something OTHER than the user's own typing -- an
@@ -2547,6 +2746,13 @@ import { pushNotificationsConfigured } from './push-config.js';
       render();
       window.scrollTo(0,0);
     });
+
+    // First-run tour [2026-09-24] -- see showTourOverlay()'s own comment
+    // for the full design. Deliberately gated on !needsProfileSetup so it
+    // never competes with the "Almost There" name/church form for a brand
+    // new sign-up -- it shows the first time this device lands on a fully
+    // set-up Home screen instead (signed in or signed out both count).
+    if(!needsProfileSetup) maybeShowWelcomeTour();
   }
 
   // Host hub [2026-09-10] -- extracted from the old landing page's "Worship
@@ -3074,6 +3280,11 @@ import { pushNotificationsConfigured } from './push-config.js';
   let adminRoleUserQuery = '';
   let adminBetaTargetUid = '';
   let adminBetaUserQuery = '';
+  // Song usage tracking [2026-09-24] -- see recordSongUsage()'s own comment
+  // (data/firestore-data-layer.js) for how songUseCount/songLastUsedAt get
+  // populated. Purely a local filter for this list, same pattern as
+  // adminLibraryQuery above.
+  let adminUsageQuery = '';
 
   function renderAdmin(){
     if(!state.isAdmin){ state.view='landing'; render(); return; }
@@ -3102,6 +3313,11 @@ import { pushNotificationsConfigured } from './push-config.js';
         '<h3>Beta Tester Access</h3>' +
         '<p>A beta tester bypasses every paid gate below (Play Mode, Add Song, Hosting) regardless of their role or plan &mdash; use this to onboard beta testers right now, no payment involved.</p>' +
         renderAdminBetaForm() +
+      '</div>' +
+      '<div class="session-card">' +
+        '<h3>Song Usage</h3>' +
+        '<p>How often each song has actually gone live in a session, most-used first &mdash; counted the moment a host hits GO LIVE, not just staged in preview.</p>' +
+        renderAdminSongUsageSection() +
       '</div>' +
       '<div class="session-card">' +
         '<h3>Reports</h3>' +
@@ -3140,7 +3356,46 @@ import { pushNotificationsConfigured } from './push-config.js';
     attachAdminChurchFormHandlers();
     attachAdminRoleFormHandlers();
     attachAdminBetaFormHandlers();
+    attachAdminSongUsageHandlers();
     attachAdminReportsHandlers();
+  }
+
+  // Song usage tracking [2026-09-24] -- see adminUsageQuery's own comment
+  // and recordSongUsage() (data/firestore-data-layer.js) for how the
+  // underlying songUseCount/songLastUsedAt fields get populated. Reads
+  // state.library (already kept live by watchSongs() for every screen),
+  // no separate watch/query needed. Only songs with at least one recorded
+  // use are listed, most-used first -- a full 0-use listing of the whole
+  // hymnal would bury the signal Jared actually asked for ("tracking").
+  function renderAdminUsageResults(query){
+    const q = query.trim().toLowerCase();
+    const used = state.library.filter(function(s){ return (s.songUseCount||0) > 0; });
+    const filtered = q ? used.filter(function(s){ return (s.title||'').toLowerCase().includes(q); }) : used;
+    filtered.sort(function(a,b){ return (b.songUseCount||0) - (a.songUseCount||0); });
+    if(!filtered.length) return '<p class="hint">'+(used.length ? 'No songs match that search.' : 'No songs have gone live yet &mdash; this fills in as hosts actually present songs.')+'</p>';
+    return '<ul class="setlist-items">' + filtered.slice(0,50).map(function(s){
+      return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(s.title||'(untitled)')+'</span>' +
+        '<span class="hint" style="margin-left:auto;text-align:right;">'+(s.songUseCount||0)+' time'+((s.songUseCount||0)===1?'':'s')+
+        (s.songLastUsedAt ? ' &middot; last '+timeAgo(toMillis(s.songLastUsedAt)) : '') + '</span></li>';
+    }).join('') + '</ul>';
+  }
+  function renderAdminSongUsageSection(){
+    return '<div class="field" style="margin-bottom:12px;"><label for="adminUsageSearch">FILTER BY TITLE</label>' +
+        '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+        '<input type="text" id="adminUsageSearch" placeholder="Search&hellip;" value="'+escapeAttr(adminUsageQuery)+'" autocomplete="off"></div>' +
+      '</div>' +
+      '<div id="adminUsageResults">' + renderAdminUsageResults(adminUsageQuery) + '</div>';
+  }
+  function attachAdminSongUsageHandlers(){
+    const el = document.getElementById('adminUsageSearch');
+    if(el && !el.dataset.wired){
+      el.dataset.wired = '1';
+      el.addEventListener('input', function(e){
+        adminUsageQuery = e.target.value;
+        const holder = document.getElementById('adminUsageResults');
+        if(holder) holder.innerHTML = renderAdminUsageResults(adminUsageQuery);
+      });
+    }
   }
 
   // Fellowship [2026-09-08] -- Admin moderation queue. A report just links
@@ -4165,6 +4420,17 @@ import { pushNotificationsConfigured } from './push-config.js';
       '</div>' +
       '<button class="btn btn-primary btn-lg btn-block" id="bulkPreviewBtn" style="margin-bottom:16px;">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>PREVIEW</button>' +
+      // CSV/ChordPro upload [2026-09-24] -- an alternate input path,
+      // additive to the paste flow above (unchanged): pick one or more
+      // files instead of typing the app's own "# Title" format by hand.
+      // See handleBulkFileUpload()'s own comment for the per-file format
+      // detection and why a ChordPro file's chord/lyric lines need no
+      // transformation at all.
+      '<div class="section-heading" style="margin-top:8px;"><h2 class="uc">Or Upload Files</h2></div>' +
+      '<p class="hint" style="margin-bottom:12px;">A CSV needs <code>title</code> and <code>lyrics</code> columns (plus optional <code>key</code>/<code>themes</code>/<code>youtube</code> columns); ChordPro files use their own <code>{title:}</code>/<code>[Chord]</code> markup, one song per file &mdash; pick several at once to import a whole batch. Previews automatically once you pick your files.</p>' +
+      '<div class="field"><label for="bulkFileInput">CSV, .CHO, .CRD, .CHORDPRO, OR .TXT FILES</label>' +
+        '<input type="file" id="bulkFileInput" multiple accept=".csv,.cho,.crd,.chordpro,.chopro,.txt">' +
+      '</div>' +
       '<div id="bulkPreviewHolder"></div>';
 
     document.getElementById('bulkBackBtn').addEventListener('click', function(){ state.view='add'; render(); window.scrollTo(0,0); });
@@ -4174,6 +4440,12 @@ import { pushNotificationsConfigured } from './push-config.js';
       const { songs, warnings } = parseBulkText(raw);
       bulkParsed = songs;
       renderBulkPreview(songs, warnings);
+    });
+    document.getElementById('bulkFileInput').addEventListener('change', function(e){
+      const files = e.target.files;
+      if(!files || !files.length) return;
+      handleBulkFileUpload(files).catch(function(){ showToast('Could not read one or more of those files. Try again.'); });
+      e.target.value = ''; // lets picking the exact same file(s) again re-fire change
     });
   }
 
@@ -6773,6 +7045,17 @@ import { pushNotificationsConfigured } from './push-config.js';
   // renderHostManagePanel()/attachHostManageHandlers()).
   let hostManageOpen = false;
   let hostManageQuery = '';
+  // Livestream link [2026-09-24] -- Jared: "it's enough for us to just have
+  // the option to share the link via chat. like a chat message that remains
+  // at the top so joiners can open them." room.livestreamUrl is a single
+  // plain URL (host's own FB/YouTube Live link, set/cleared from this
+  // panel), rendered as a pinned banner at the top of renderChatSection()
+  // (shared by both the host's floating chat panel and the congregant's
+  // inline chat -- see that function) rather than an actual chat message,
+  // since a real message would just scroll away like any other one. Same
+  // toggle-panel convention as hostManageOpen/hostManageQuery above.
+  let hostStreamLinkOpen = false;
+  let hostStreamLinkInput = '';
   // Ad hoc Bible verse presenting [2026-09-04] -- Jared: "add an ability for
   // the host to present bible verses at will." Distinct from a verse baked
   // into a prepared sermon slide (a 'verse'-preset text block inserted via
@@ -7253,8 +7536,18 @@ import { pushNotificationsConfigured } from './push-config.js';
       patch = { currentContentType:'song', currentSongId: hostPreview.songId, currentSectionIndex: hostPreview.sectionIndex||0,
         recentSongIds: pushRecentId(room.recentSongIds, hostPreview.songId) };
     } else return;
+    const wentLiveSongId = hostPreview.type === 'song' ? hostPreview.songId : null;
     updateRoom(state.activeRoomCode, patch)
-      .then(function(){ showToast('You&rsquo;re live.'); })
+      .then(function(){
+        showToast('You&rsquo;re live.');
+        // Song usage tracking [2026-09-24] -- see recordSongUsage()'s own
+        // comment (data/firestore-data-layer.js) for the full design. Fired
+        // only once the room write actually succeeds, and only for an
+        // actual GO LIVE publish (not staging/PREV/NEXT within the same
+        // song) -- best-effort, never blocks or errors out the go-live
+        // toast if it fails.
+        if(wentLiveSongId) recordSongUsage(wentLiveSongId).catch(function(){});
+      })
       .catch(function(){ showToast('Could not update the session. Try again.'); });
   }
   function verseAsSlide(ref, text, segments){
@@ -8583,6 +8876,73 @@ import { pushNotificationsConfigured } from './push-config.js';
     }
   }
 
+  // Livestream link [2026-09-24] -- see hostStreamLinkOpen's own comment
+  // above. Deliberately not gated to the room owner the way Manage Hosts
+  // is (renderHostManagePanel()) -- whoever currently has control
+  // (iHaveControl, same gate the stage-override buttons use) can set or
+  // clear it, since a co-host running AVP is exactly the kind of person
+  // who'd need to paste this in mid-service.
+  function renderStreamLinkPanel(room){
+    const current = room.livestreamUrl || '';
+    return '<div class="session-card">' +
+      '<p class="control-label uc" style="margin-bottom:10px;">Livestream Link</p>' +
+      '<p class="hint" style="margin:0 0 14px;">Paste your church&rsquo;s Facebook or YouTube Live link. It shows as a pinned banner at the top of chat so joiners can find and open it.</p>' +
+      (current ? ('<p class="hint" style="margin:0 0 10px;word-break:break-all;">Currently set: '+escapeHtml(current)+'</p>') : '') +
+      '<div class="field"><label for="streamLinkInput">LIVESTREAM URL</label>' +
+        '<input type="url" id="streamLinkInput" placeholder="https://facebook.com/yourchurch/live" value="'+escapeAttr(hostStreamLinkInput)+'" autocomplete="off"></div>' +
+      '<div style="display:flex;gap:10px;margin-top:10px;">' +
+        '<button type="button" class="btn btn-primary" id="streamLinkSaveBtn" style="flex:1;">SAVE</button>' +
+        (current ? '<button type="button" class="btn btn-ghost" id="streamLinkClearBtn" style="flex:1;">CLEAR</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+  function attachStreamLinkHandlers(){
+    const input = document.getElementById('streamLinkInput');
+    if(input) input.addEventListener('input', function(e){ hostStreamLinkInput = e.target.value; });
+    const saveBtn = document.getElementById('streamLinkSaveBtn');
+    if(saveBtn) saveBtn.addEventListener('click', function(){
+      const room = state.room;
+      if(!room || !canControlRoom(room)){ showToast('You don&rsquo;t have control of this session right now.'); return; }
+      const url = hostStreamLinkInput.trim();
+      if(!url){ showToast('Paste a link first.'); return; }
+      updateRoom(state.activeRoomCode, { livestreamUrl: url })
+        .then(function(){ showToast('Livestream link pinned to chat.'); hostStreamLinkInput = ''; render(); })
+        .catch(function(){ showToast('Could not save that link. Try again.'); });
+    });
+    const clearBtn = document.getElementById('streamLinkClearBtn');
+    if(clearBtn) clearBtn.addEventListener('click', function(){
+      const room = state.room;
+      if(!room || !canControlRoom(room)){ showToast('You don&rsquo;t have control of this session right now.'); return; }
+      updateRoom(state.activeRoomCode, { livestreamUrl: null })
+        .then(function(){ showToast('Livestream link removed.'); render(); })
+        .catch(function(){ showToast('Could not remove that link. Try again.'); });
+    });
+  }
+
+  // Join QR code [2026-09-24] -- Jared: "QR code: that's a yes for me,
+  // make that work please." Encodes the exact same '?join=<code>' deep
+  // link goToJoinScreenWithCode()/the startup routing block already
+  // handle (same URL shape as the '?stage='/'?chart=' links just above),
+  // so this needed zero backend or routing changes -- scanning it just
+  // opens the app straight into the join flow with the code pre-filled.
+  // Uses the vendored qrcode-generator library (see content/qrcode.js).
+  // Error-correction level 'M' (default used by most QR generators) and
+  // typeNumber 0 (auto-picks the smallest size that fits the data) keep
+  // this readable at the small size it'll usually be shown/printed at.
+  // Wrapped in a plain white card so it stays scannable in dark theme.
+  function renderJoinQrSvg(code){
+    const url = window.location.origin + window.location.pathname + '?join=' + encodeURIComponent(code);
+    try {
+      const qr = qrcodeGen(0, 'M');
+      qr.addData(url);
+      qr.make();
+      const svg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+      return '<div class="join-qr-wrap"><div class="join-qr-card">'+svg+'</div><p class="join-qr-caption">Scan to join</p></div>';
+    } catch(e) {
+      return ''; // never let a QR-generation hiccup break the room-code screen
+    }
+  }
+
   function renderSessionHost(){
     const code = state.activeRoomCode;
     const room = state.room;
@@ -8664,6 +9024,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     // the setlist and End Session.
     const controlsHtml =
       (hostManageOpen ? renderHostManagePanel(room) : '') +
+      (hostStreamLinkOpen ? renderStreamLinkPanel(room) : '') +
       (!iHaveControl ?
         ('<div class="session-card" style="border-color:var(--ink-soft);">' +
           '<p class="control-label uc" style="margin-bottom:6px;">Watch-only for now</p>' +
@@ -8719,6 +9080,11 @@ import { pushNotificationsConfigured } from './push-config.js';
           '</span>' +
         '</div>' +
         '<button type="button" class="icon-tool-btn" id="copyChartLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>CHART LINK</span><kbd class="icon-tool-kbd">L</kbd></button>' +
+        // Livestream link [2026-09-24] -- see hostStreamLinkOpen's own
+        // comment above. Gated to iHaveControl, same as the stage-override
+        // buttons just below -- setting/clearing this is a live-session
+        // control, not a roster-management action like HOSTS.
+        (iHaveControl ? ('<button type="button" class="icon-tool-btn'+(hostStreamLinkOpen?' active':'')+'" id="streamLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('link')+'</svg><span>STREAM LINK</span><kbd class="icon-tool-kbd">K</kbd></button>') : '') +
         // Stage overrides [2026-09-24] -- Jared: "I also don't see the
         // background logo, black, or option to add background." Three
         // toggle buttons, same on/off-by-clicking-again convention as
@@ -8764,6 +9130,7 @@ import { pushNotificationsConfigured } from './push-config.js';
         ('<div class="code-display" style="margin-top:8px;">' +
           '<p class="code-label uc">'+(room.isPublic?'PUBLIC ROOM CODE':'PRIVATE ROOM CODE')+'</p>' +
           '<p class="code">'+code+'</p>' +
+          renderJoinQrSvg(code) +
         '</div>') : '') +
       '<p style="text-align:center;color:var(--ink-soft);margin-bottom:0;">'+escapeHtml(room.name)+(room.churchName?' &middot; '+escapeHtml(room.churchName):'')+'</p>' +
       presenterToolbar +
@@ -8936,6 +9303,9 @@ import { pushNotificationsConfigured } from './push-config.js';
     });
     const manageHostsBtn = document.getElementById('manageHostsBtn');
     if(manageHostsBtn) manageHostsBtn.addEventListener('click', function(){ hostManageOpen = !hostManageOpen; hostManageQuery = ''; render(); });
+    const streamLinkBtn = document.getElementById('streamLinkBtn');
+    if(streamLinkBtn) streamLinkBtn.addEventListener('click', function(){ hostStreamLinkOpen = !hostStreamLinkOpen; render(); });
+    attachStreamLinkHandlers();
     document.getElementById('chatFabBtn').addEventListener('click', function(){ hostChatOpen = !hostChatOpen; render(); });
     const chatCloseBtn = document.getElementById('chatFloatingCloseBtn');
     if(chatCloseBtn) chatCloseBtn.addEventListener('click', function(){ hostChatOpen = false; render(); });
@@ -8999,6 +9369,12 @@ import { pushNotificationsConfigured } from './push-config.js';
     // (if `content` is a live 'video' item) needs the same clock-sync pass
     // the projector view gets -- see syncStageMediaVideo()'s own comment.
     if(presenterSplitView) syncStageMediaVideo(content, room);
+
+    // First-run tour [2026-09-24] -- see showTourOverlay()'s own comment.
+    // Shown once, the first time this device actually reaches the Host
+    // Session screen (any room, not just a brand new host's very first
+    // one) -- separate from the general Home-screen tour above.
+    maybeShowHostTour();
   }
 
   function hostPickerResults(){
@@ -9297,7 +9673,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     hostPickerOpen = false; hostSermonPickerOpen = false; hostVersePickerOpen = false;
     hostConfirmEnd = false; hostPickerQuery = ''; hostSermonPickerQuery = ''; hostMediaPickerQuery = ''; hostVerseRefInput = '';
     hostVerseMode = 'browse'; hostVerseBrowseBook = null; hostVerseBrowseChapter = null; hostVerseMultiSelect = []; hostVerseSelectMode = false;
-    hostManageOpen = false; hostManageQuery = '';
+    hostManageOpen = false; hostManageQuery = ''; hostStreamLinkOpen = false; hostStreamLinkInput = '';
     hostSetlistEditorOpen = false; hostContentTab = null; hostPreview = null; hostMediaPickerOpen = false; hostMediaUploadOpen = false;
     state.activeRoomCode = code;
     state.isHost = true;
@@ -9329,7 +9705,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     hostPickerOpen = false; hostSermonPickerOpen = false; hostVersePickerOpen = false;
     hostConfirmEnd = false; hostPickerQuery = ''; hostSermonPickerQuery = ''; hostMediaPickerQuery = ''; hostVerseRefInput = '';
     hostVerseMode = 'browse'; hostVerseBrowseBook = null; hostVerseBrowseChapter = null; hostVerseMultiSelect = []; hostVerseSelectMode = false;
-    hostManageOpen = false; hostManageQuery = '';
+    hostManageOpen = false; hostManageQuery = ''; hostStreamLinkOpen = false; hostStreamLinkInput = '';
     hostSetlistEditorOpen = false; hostContentTab = null; hostPreview = null; hostMediaPickerOpen = false; hostMediaUploadOpen = false;
     state.activeRoomCode = code;
     state.isHost = false;
@@ -9915,7 +10291,11 @@ import { pushNotificationsConfigured } from './push-config.js';
       // Stage overrides [2026-09-24]: 'b'lack, lo'g'o, 'd'efault bg -- 'l'
       // was already taken by chart Link, so LOGO's mnemonic letter had to
       // move one letter in rather than collide.
-      'b':'stageBlackBtn', 'g':'stageLogoOverrideBtn', 'd':'stageDefaultBgBtn'
+      'b':'stageBlackBtn', 'g':'stageLogoOverrideBtn', 'd':'stageDefaultBgBtn',
+      // Livestream link [2026-09-24]: 'l' was already chart Link, so this
+      // uses 'k' (lin'k') instead, same "move one letter in" precedent as
+      // LOGO above.
+      'k':'streamLinkBtn'
     };
     const id = idByKey[e.key.toLowerCase()];
     if(!id) return;
@@ -12260,6 +12640,114 @@ import { pushNotificationsConfigured } from './push-config.js';
     });
   }
 
+  // Offline banner [2026-09-24] -- Jared: "Offline resilience, I'd love
+  // that," for spotty PH church wifi. IMPORTANT CONTEXT for whoever touches
+  // this next: `firestore-data-layer.js` deliberately runs on
+  // `memoryLocalCache()`, NOT a persistent IndexedDB cache -- see
+  // architecture-and-decisions.md's "the iworship-ph account reset..."
+  // section. A persistent cache was tried and rolled back after it caused a
+  // real, repeatable production bug (a cold-IndexedDB race that stranded
+  // real accounts on the profile-setup screen after "Clear site data").
+  // That trade-off is a deliberate, hard-won decision -- this feature does
+  // NOT reintroduce persistent caching. What it adds instead is purely
+  // informational: `memoryLocalCache()` already gives the app "full
+  // resilience to in-session connection drops" (the SDK's own listener
+  // reconnect logic keeps working, and pending writes queue in memory and
+  // flush once the connection returns) -- what was missing is that nothing
+  // ever told the person any of that was happening, so a spotty-wifi drop
+  // just looked like the app silently hanging. This banner is that missing
+  // signal: `navigator.onLine`/the browser's online/offline events (see the
+  // startup block below) drive it, no new Firestore-layer code at all.
+  // Mirrors showUpdateBanner()'s own one-off-DOM-element pattern exactly
+  // (survives across render() calls untouched) but with no buttons -- it's
+  // just a status readout, dismissed automatically the moment connectivity
+  // returns, never by the person.
+  let offlineBannerShown = false;
+  function showOfflineBanner(){
+    if(offlineBannerShown) return;
+    offlineBannerShown = true;
+    const bar = document.createElement('div');
+    bar.className = 'update-banner offline-banner';
+    bar.id = 'appOfflineBanner';
+    bar.innerHTML = '<span>You&rsquo;re offline &mdash; iWorship will keep working and catch up once your connection is back.</span>';
+    document.body.appendChild(bar);
+  }
+  function hideOfflineBanner(){
+    offlineBannerShown = false;
+    const bar = document.getElementById('appOfflineBanner');
+    if(bar) bar.remove();
+  }
+
+  // First-run tour [2026-09-24] -- Jared: "I'd love the first run tour as
+  // well, not just for hosts, but also for new users." Two independent
+  // tours: a GENERAL one for every new person (shown once, the first time
+  // Home/landing renders) and a HOST one (shown once, the first time
+  // someone actually reaches the Host Session screen). Deliberately built
+  // as a simple full-screen step-through card, NOT a spotlight/coach-mark
+  // anchored to specific on-screen elements -- an anchored tour needs live
+  // layout measurement (getBoundingClientRect on real rendered elements) to
+  // position correctly across every screen size, which isn't something
+  // this environment can visually verify before shipping; a centered modal
+  // carries none of that risk while still covering the same ground. Same
+  // one-off-DOM-element pattern as showUpdateBanner()/showOfflineBanner()
+  // above (appended straight to document.body, independent of render()'s
+  // reactive HTML, so it survives across re-renders untouched), gated by a
+  // per-device localStorage flag rather than a synced profile field --
+  // seeing it once on THIS device is enough, and this avoids a new
+  // Firestore field/rules for something this low-stakes.
+  const TOUR_STEPS_GENERAL = [
+    { icon:'book', title:'Welcome to iWorship', body:'Your church&rsquo;s home for hymns, live worship sessions, the Bible, and your community &mdash; all in one place. Here&rsquo;s a quick look around.' },
+    { icon:'search', title:'Browse &amp; Search the Hymnal', body:'Search by title, or browse by topic from the hymnal list. Tap any hymn to read the full lyrics, or switch to Play Mode for chords.' },
+    { icon:'heart', title:'Favorites &amp; Themes', body:'Tap the heart on any hymn to save it to your Favorites. Browse by Theme to find songs for a particular mood or occasion.' },
+    { icon:'book', title:'Bible &amp; Devotionals', body:'The full King James Bible and a daily devotional are both one tap away from Home &mdash; step through any day, or jump straight to today.' },
+    { icon:'users', title:'Join a Live Session', body:'When your church is hosting a live worship session, join with the room code (or scan the host&rsquo;s QR code) to follow along in real time.' }
+  ];
+  const TOUR_STEPS_HOST = [
+    { icon:'monitor', title:'You&rsquo;re Hosting', body:'This screen drives what your congregation sees live. Pick a song, sermon, Bible verse, or media clip from the tabs above, then stage it before it goes out.' },
+    { icon:'bolt', title:'Preview, Then Go Live', body:'Whatever you stage here only YOU see, in the PREVIEW column &mdash; tap GO LIVE (or double-tap Space/Enter) when you&rsquo;re ready for the congregation to see it too.' },
+    { icon:'link', title:'Room Code &amp; QR', body:'Share your room code, or let people scan the QR code under SHOW ROOM CODE, to join instantly &mdash; no typing needed.' },
+    { icon:'chat', title:'Chat &amp; Livestream Link', body:'The chat bubble opens a floating chat with your congregation. Paste your Facebook/YouTube Live link from STREAM LINK in the toolbar and it&rsquo;ll pin to the top of chat for everyone to find.' }
+  ];
+  function showTourOverlay(steps, storageKey){
+    if(document.getElementById('appTourOverlay')) return; // one tour overlay on screen at a time
+    if(safeGet(storageKey, null)) return; // already seen on this device
+    safeSet(storageKey, '1');
+    let idx = 0;
+    const overlay = document.createElement('div');
+    overlay.className = 'tour-overlay';
+    overlay.id = 'appTourOverlay';
+    function close(){ overlay.remove(); }
+    function paint(){
+      const s = steps[idx];
+      const isLast = idx === steps.length - 1;
+      overlay.innerHTML =
+        '<div class="tour-card">' +
+          '<button type="button" class="tour-close-btn" id="tourCloseBtn" aria-label="Skip this tour">&times;</button>' +
+          '<svg class="tour-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon(s.icon)+'</svg>' +
+          '<h3>'+s.title+'</h3>' +
+          '<p>'+s.body+'</p>' +
+          '<div class="tour-dots">' + steps.map(function(_, i){ return '<span class="tour-dot'+(i===idx?' active':'')+'"></span>'; }).join('') + '</div>' +
+          '<div class="tour-actions">' +
+            (idx>0 ? '<button type="button" class="btn btn-ghost" id="tourBackBtn">BACK</button>' : '<button type="button" class="btn btn-ghost" id="tourSkipBtn">SKIP</button>') +
+            '<button type="button" class="btn btn-primary" id="tourNextBtn">'+(isLast?'GOT IT':'NEXT')+'</button>' +
+          '</div>' +
+        '</div>';
+      document.getElementById('tourCloseBtn').addEventListener('click', close);
+      const backBtn = document.getElementById('tourBackBtn');
+      if(backBtn) backBtn.addEventListener('click', function(){ idx = Math.max(0, idx-1); paint(); });
+      const skipBtn = document.getElementById('tourSkipBtn');
+      if(skipBtn) skipBtn.addEventListener('click', close);
+      document.getElementById('tourNextBtn').addEventListener('click', function(){
+        if(isLast){ close(); return; }
+        idx++; paint();
+      });
+    }
+    document.body.appendChild(overlay);
+    paint();
+  }
+  function maybeShowWelcomeTour(){ showTourOverlay(TOUR_STEPS_GENERAL, 'cv:sawWelcomeTour'); }
+  function maybeShowHostTour(){ showTourOverlay(TOUR_STEPS_HOST, 'cv:sawHostTour'); }
+
   function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
 
@@ -12425,6 +12913,14 @@ import { pushNotificationsConfigured } from './push-config.js';
       });
     }).catch(function(err){ console.error('PWA update check unavailable', err); });
   }
+
+  // Offline banner wiring [2026-09-24] -- see showOfflineBanner()'s own
+  // comment above for the full design/trade-off context. A plain, always-on
+  // listener pair (not per-view, not torn down) since connectivity can
+  // drop or return on any screen at any time.
+  window.addEventListener('online', hideOfflineBanner);
+  window.addEventListener('offline', showOfflineBanner);
+  if(typeof navigator !== 'undefined' && navigator.onLine === false) showOfflineBanner();
 
   render();
 

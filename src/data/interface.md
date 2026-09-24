@@ -262,8 +262,9 @@ query for anyone who isn't a reviewer anyway, so the subscription only ever star
 opens the Song Requests screen); an edit-after-submit flow for the submitter; and the 6-song/day
 cap mentioned above, which is a *paid*-tier limit and orthogonal to this free-tier path.
 
-`Room` shape: `{ code, name, hostUid, hostName, churchName, isPublic, passwordHash, currentSongId, currentSectionIndex, currentContentType: 'song'|'sermon'|'verse'|'media'|undefined, currentSermonId, currentSlideIndex, currentVerseRef, currentVerseText, currentVerseSegments, currentMediaId, currentMediaSlideIndex, mediaPlaying, mediaClockStartedAtMs, mediaClockBaseOffsetSec, stageOverride: 'black'|'logo'|'default-bg'|null|undefined, setlist: string[], createdAt, updatedAt }`.
+`Room` shape: `{ code, name, hostUid, hostName, churchName, isPublic, passwordHash, currentSongId, currentSectionIndex, currentContentType: 'song'|'sermon'|'verse'|'media'|undefined, currentSermonId, currentSlideIndex, currentVerseRef, currentVerseText, currentVerseSegments, currentMediaId, currentMediaSlideIndex, mediaPlaying, mediaClockStartedAtMs, mediaClockBaseOffsetSec, stageOverride: 'black'|'logo'|'default-bg'|null|undefined, livestreamUrl: string|null|undefined, setlist: string[], createdAt, updatedAt }`.
 `stageOverride` is new [2026-09-24] -- Jared: "I also don't see the background logo, black, or option to add background." Set/cleared by the presenter toolbar's BLACK/LOGO/DEFAULT BG buttons in `renderSessionHost()` (`app.js`), each a toggle: tapping an inactive one writes that string, tapping the active one writes it back to `null`. Deliberately a field that sits ALONGSIDE `currentContentType`/`currentSongId`/etc. rather than replacing them -- it's a cutaway, not a content change, so whatever's actually selected underneath is untouched and reappears exactly where it was the moment the override clears. `resolveLiveDisplayContent()` (not `resolveRoomContent()`) is what actually applies it, and only for the audience-facing surfaces (the host's own LIVE column, the `?stage=` projector, a congregant's in-app live view, and the projector's own keyboard-advance shortcut) -- `resolveRoomContent()` itself stays override-blind on purpose, since the host's own PREVIEW staging (`resolvePreviewContent()`/`ensurePreviewFromLive()`) and the musician chord chart (`renderSessionChart()`, via its own `?chart=` link) both need to keep working from the real underlying selection throughout a blackout. LOGO reads from a new `presenterLogo: {url, storagePath}|null` field on the presenter's own profile doc (`users/{uid}`, alongside the existing `defaultStageBg` field DEFAULT BG reads from) -- see the "Presentation Logo" card in `renderSettings()`, an exact mirror of the existing "Presentation Background" card's upload/replace/remove flow.
+`livestreamUrl` is new [2026-09-24] -- Jared, asked about embedding the church's Facebook/YouTube Live: "it's enough for us to just have the option to share the link via chat. like a chat message that remains at the top so joiners can open them." A single plain URL string (or `null`), set/cleared from a new STREAM LINK toolbar panel in `renderSessionHost()` (`renderStreamLinkPanel()`/`attachStreamLinkHandlers()`), gated on `canControlRoom()` same as the stage-override buttons rather than owner-only like Manage Hosts. Deliberately **not** an iframe embed (ruled out early -- most FB/YouTube Live share links aren't in the embeddable URL format without extra parsing, and Jared's own simplified ask above superseded the original embed idea anyway) and deliberately **not** a real chat message (a message scrolls away with the rest of the conversation; a "remains at the top" link needs to live outside the message list). `renderChatSection()` -- shared verbatim by the host's floating chat panel and the congregant's inline chat, per its own pre-existing comment -- reads `state.room.livestreamUrl` directly and renders it as a pinned banner link above the channel tabs/message list when set, so both surfaces pick it up automatically with no per-view wiring.
 `currentVerseSegments` is new [2026-09-15] -- `null` for a plain single presented verse, or `[{verse, text}, ...]` (one entry per verse, in combined order) when the host presented a multi-verse selection built via SELECT MULTIPLE VERSES, so every viewer can render each verse's own number as a small superscript ahead of its text instead of a same-size digit baked into `currentVerseText`'s plain string. Written explicitly as `null` (never left `undefined`) whenever a single verse goes live, so it doesn't linger from a previous multi-verse presentation.
 The last three fields are new [2026-09-04] -- see "Sermons" below. `currentContentType` absent
 (every room created before this feature) or `'song'` both mean the same thing: the original
@@ -284,6 +285,52 @@ video's own `currentTime` locally from those three fields and nudges the real `<
 match -- see `syncStageMediaVideo()` in `app.js`.
 
 `Message` shape: `{ id, channel, text, senderName, senderUid: string|null, createdAt }`
+
+`Song` gained `songUseCount: number|undefined` and `songLastUsedAt: timestamp|undefined` [2026-09-24] --
+Jared: "song usage tracking, you can add that to admins." A plain running total (not a per-event
+log collection -- the ask was "tracking," not a history browser) incremented via
+`recordSongUsage(songId)` from `goLive()`'s song branch in `app.js`, fired only once a room write
+actually succeeds and only for an actual GO LIVE publish, not staging/PREV/NEXT within the same
+song. Surfaced on a new "Song Usage" card on the Admin screen (`renderAdminSongUsageSection()`),
+most-used first, with a title filter -- Admin-only, per Jared's ask. **Needs a `firestore.rules`
+re-paste**: `songs/{songId}`'s update rule needed a narrow carve-out (any signed-in user, but only
+these two fields via `hasOnly()`) since most hosts presenting a song aren't an
+editor/`canAddSongsRole()` account -- same "carve out just the fields this action needs" pattern
+as sermon/media sharing's `sharedWithUids`-only rule and the room doc's controller-write carve-out
+above.
+
+**Bulk Add: CSV/ChordPro file upload** [2026-09-24] -- Jared: "Bulk song import, build that as
+well." The Bulk Add screen already let someone paste several songs at once in the app's own
+`# Title` plain-text format (`parseBulkText()`); this adds a second, additive input path -- a file
+picker (`<input type="file" multiple>`) accepting `.csv`, `.cho`/`.crd`/`.chordpro`, or `.txt`.
+`detectBulkFileFormat()` picks a parser per file (extension first, content-sniffed for a bare
+`.txt`); `parseCsvText()`/`parseChordProText()` both return the exact same `{songs, warnings}`
+shape `parseBulkText()` already does, so `renderBulkPreview()`/`submitBulkImport()` needed no
+changes at all. A CSV needs `title`/`lyrics` columns (optional `key`/`themes`/`youtube`);
+ChordPro is one song per file, `{title:}`/`{key:}` plus `{start_of_verse}`/`{start_of_chorus}`/
+`{start_of_bridge}` section markers (or none at all -- falls back to blank-line grouping). The one
+genuinely lucky part: this app's own chorded-lyric storage format already IS ChordPro's inline
+`[Chord]word` syntax (see `renderChordLyricLine()`), so a ChordPro file's actual chord/lyric
+content needs zero transformation -- `chordProToLabeledText()` only translates the `{directive}`
+lines into this app's own explicit section-label convention and hands the result straight to the
+existing `detectSections()`, rather than reimplementing section-grouping a second time. No
+`firestore.rules` or data-layer change -- this is pure client-side parsing feeding the same
+`addSong()` calls Bulk Add already made.
+
+**First-run tour** [2026-09-24] -- Jared: "I'd love the first run tour as well, not just for
+hosts, but also for new users." Two independent step-through overlays (`showTourOverlay()`), each
+gated by its own per-device `localStorage` flag (`cv:sawWelcomeTour`/`cv:sawHostTour`) so it shows
+once per device, not once per account: a GENERAL tour (`TOUR_STEPS_GENERAL`) fires the first time
+`renderLanding()` renders a fully set-up Home screen (deliberately skipped while
+`needsProfileSetup` is true, so it never competes with the "Almost There" name/church form), and a
+HOST tour (`TOUR_STEPS_HOST`) fires the first time `renderSessionHost()` renders. Both are a plain
+centered modal card (icon/title/body, dot progress, BACK/NEXT/SKIP/GOT IT, an always-available ×
+to dismiss), deliberately NOT a spotlight/coach-mark anchored to specific on-screen elements --
+that needs live layout measurement per screen size to position correctly, which is real risk for a
+feature with no way to visually verify positioning before shipping; a centered modal covers the
+same ground without it. Same one-off-DOM-element pattern (`document.body.appendChild`, independent
+of `render()`'s reactive HTML) as `showUpdateBanner()`/`showOfflineBanner()` above. No
+`firestore.rules` or data-layer change.
 
 ## Sermons [2026-09-04]
 

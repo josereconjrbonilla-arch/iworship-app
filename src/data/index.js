@@ -43,7 +43,7 @@ export const usingDemoMode = !isFirebaseConfigured;
 const impl = isFirebaseConfigured ? firestore : local;
 
 export const {
-  watchSongs, addSong, updateSong,
+  watchSongs, addSong, updateSong, recordSongUsage,
   watchAuth, signInWithGoogle, signOutUser,
   signUpWithEmail, signInWithEmail, linkPasswordToAccount, hasPasswordLogin, sendPasswordReset,
   pushSupported, enablePushNotifications, currentNotificationPermission, disablePushNotifications, watchForegroundPush,

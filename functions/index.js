@@ -22,7 +22,24 @@ const { setGlobalOptions } = require('firebase-functions/v2/options');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, FieldPath } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+// Devotionals [2026-09-24] -- see dailyDevotionalNotify's own comment
+// further down. This file is written by scripts/build-devotionals.mjs
+// (run locally -- this Node runtime has no outbound web access, so the
+// scrape itself can't happen from in here) into BOTH src/content/
+// devotionals.json (the client's lazy dynamic-import copy) and this
+// folder's own devotionals.json -- Cloud Functions only deploys what's
+// inside functions/, so the client copy alone wouldn't be reachable from
+// here. Starts out as the placeholder {} committed alongside this file
+// until that script has actually been run once.
+const DEVOTIONALS = require('./devotionals.json');
 
+// [2026-09-22, iworship-ph rebuild] Firestore-triggered functions (2nd gen)
+// must be deployed in the same region as the Firestore database itself, or
+// deployment fails outright -- the old project's functions ran in the
+// default us-central1 because the old Firestore was in nam5 (US). Now that
+// Firestore lives in asia-southeast1 (Singapore), every function here has
+// to move too. This sets it once for all of them instead of repeating
+// { region: 'asia-southeast1' } on each export below.
 setGlobalOptions({ region: 'asia-southeast1' });
 
 initializeApp();
@@ -524,6 +541,130 @@ exports.dailyVerseNotify = onSchedule('0 23 * * *', async () => {
     const result = await messaging.sendEachForMulticast({
       notification: { title: "Today's Verse", body },
       data: { type: 'daily_verse', ref: verse.ref },
+      tokens: tokenBatch
+    });
+    result.responses.forEach((resp, i) => {
+      if (!resp.success && resp.error && resp.error.code === 'messaging/registration-token-not-registered') {
+        staleTokens.push(tokenBatch[i]);
+      }
+    });
+  }
+  if (staleTokens.length) {
+    await Promise.all(staleTokens.map((token) => {
+      const uid = tokenToUid.get(token);
+      return uid ? db.collection('users').doc(uid).collection('pushTokens').doc(token).delete() : Promise.resolve();
+    }));
+  }
+});
+
+// ----------------------------------------------------------- dailyDevotionalNotify
+// The automatic daily devotional post [2026-09-24] -- Jared: "look for
+// public domain devotionals that can be posted automatically everyday, add
+// a feature for us to post devotionals through the fellowship page as
+// well." This is the "automatically" half (the manual half -- POST A
+// DEVOTIONAL in the Fellowship composer -- is entirely client-side, see
+// renderPostComposer()/renderDevotionalPickerPanel() in src/app.js and
+// needs no Cloud Function). DEVOTIONALS is keyed by calendar date (MMDD),
+// not rotated through a pool the way DAILY_VERSES above is -- Spurgeon's
+// "Morning and Evening" is meant to be read on its OWN matching calendar
+// day, once, so "today's" entry is a straight date lookup.
+//
+// authorUid is DEVOTIONAL_BOT_UID -- see its matching constant and comment
+// in src/app.js (MUST stay identical in both places, or the app stops
+// recognizing this as the automatic post and renders it as if a real,
+// unknown user had somehow posted it). Not a real Firebase Auth uid; the
+// Admin SDK bypasses firestore.rules entirely (same reasoning as every
+// other Admin-SDK write in this file), so there's no rule that needs to
+// allow it.
+//
+// Runs once a day, 6am Asia/Manila (iWorship's home timezone -- see
+// claude/architecture-and-decisions.md) -- picked as a reasonable "morning
+// devotional is up before people wake" time, distinct from dailyVerseNotify
+// above (11pm UTC = 7am Manila) mostly by coincidence of when each was
+// built; nothing depends on the two staying offset from each other.
+const DEVOTIONAL_BOT_UID = 'iworship-daily-devotional';
+
+function todaysDevotionalKey() {
+  // en-CA gives YYYY-MM-DD directly -- sliced for MM/DD rather than parsed
+  // as a Date a second time, which would silently re-introduce a UTC-vs-
+  // Manila mismatch right after computing the Manila-correct string.
+  const manila = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date()); // "YYYY-MM-DD"
+  return manila.slice(5, 7) + manila.slice(8, 10); // "MMDD"
+}
+
+// Walks back up to a week for a populated day -- same reasoning as
+// todaysDevotionalEntry()'s identical fallback in src/app.js (a missing
+// Feb 29 in some source year, or one failed fetch during the one-time
+// scrape, shouldn't just silently skip posting that day).
+function findRecentDevotional(which) {
+  const now = new Date();
+  for (let back = 0; back < 7; back++) {
+    const probe = new Date(now.getTime() - back * 86400000);
+    const manila = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(probe);
+    const key = manila.slice(5, 7) + manila.slice(8, 10);
+    const day = DEVOTIONALS[key];
+    if (day && day[which]) return day[which];
+  }
+  return null;
+}
+
+exports.dailyDevotionalNotify = onSchedule({ schedule: '0 22 * * *', timeZone: 'UTC' }, async () => {
+  // 22:00 UTC = 06:00 Asia/Manila (UTC+8), spelled out in UTC (like
+  // dailyVerseNotify above) rather than relying on the scheduler's own
+  // timeZone option matching what the comment says -- one fewer thing that
+  // could quietly drift out of sync if either is ever hand-edited alone.
+  const entry = findRecentDevotional('am');
+  if (!entry) return; // devotionals.json is still the {} placeholder, or every fallback day came up empty
+
+  await db.collection('posts').add({
+    authorUid: DEVOTIONAL_BOT_UID,
+    authorName: 'Daily Devotional',
+    kind: 'devotional',
+    devotionalTitle: entry.title || '',
+    devotionalRef: entry.ref || '',
+    text: entry.text || '',
+    mediaUrl: null, mediaKind: null, mediaStoragePath: null,
+    createdAt: FieldValue.serverTimestamp()
+  });
+
+  // Push notification -- same collectionGroup/notifPrefs/stale-token
+  // pattern as dailyVerseNotify above, just gated on its own
+  // notifPrefs.dailyDevotional flag (see renderNotifPrefsSection() in
+  // src/app.js) rather than dailyVerse, so someone can mute one without
+  // muting the other.
+  const tokensSnap = await db.collectionGroup('pushTokens').get();
+  if (tokensSnap.empty) return;
+
+  const tokensByUid = new Map();
+  const tokenToUid = new Map();
+  tokensSnap.forEach((d) => {
+    const uid = d.ref.parent.parent.id;
+    if (!tokensByUid.has(uid)) tokensByUid.set(uid, []);
+    tokensByUid.get(uid).push(d.id);
+    tokenToUid.set(d.id, uid);
+  });
+
+  const allUids = Array.from(tokensByUid.keys());
+  const optedInTokens = [];
+  for (const ids of chunk(allUids, 30)) {
+    const snap = await db.collection('users').where(FieldPath.documentId(), 'in', ids).get();
+    const found = new Map(snap.docs.map((d) => [d.id, d.data()]));
+    ids.forEach((uid) => {
+      const prefs = found.get(uid) && found.get(uid).notifPrefs;
+      if (!prefs || prefs.dailyDevotional !== false) optedInTokens.push(...tokensByUid.get(uid));
+    });
+  }
+  if (!optedInTokens.length) return;
+
+  const messaging = getMessaging();
+  const staleTokens = [];
+  const body = entry.ref ? (entry.title || 'Today’s reading') + ' — ' + entry.ref : (entry.title || 'A new devotional is up');
+  for (const tokenBatch of chunk(optedInTokens, 500)) {
+    const result = await messaging.sendEachForMulticast({
+      notification: { title: 'Daily Devotional', body },
+      data: { type: 'daily_devotional' },
       tokens: tokenBatch
     });
     result.responses.forEach((resp, i) => {

@@ -586,6 +586,24 @@
   .icon-tool-btn svg{ width:20px; height:20px; }
   .icon-tool-btn:hover{ background:var(--surface-2); }
   .icon-tool-btn.active{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  /* Projector text size [2026-09-24] -- Jared: "add an option to increase
+     the size in the controls." A non-toggle neighbor of the other
+     icon-tool-btn's above (PROJECTOR/SPLIT SCREEN/CHART LINK) -- reuses
+     their column layout (icon, then caption) but the third row is a
+     -/pct/+ stepper row instead of nothing, so cursor:pointer from the
+     shared rule is overridden back to default on the OUTER div (it isn't
+     itself clickable, only its two buttons are) and gap is tightened a
+     touch to fit the extra row. */
+  .icon-tool-btn.stage-font-control{ cursor:default; gap:4px; }
+  .icon-tool-btn.stage-font-control:hover{ background:var(--surface); }
+  .stage-font-steppers{ display:flex; align-items:center; gap:6px; }
+  .stage-font-step-btn{
+    width:22px; height:22px; border-radius:7px; border:1.5px solid var(--border);
+    background:var(--surface-2); color:var(--ink); font-size:.95rem; font-weight:800;
+    line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .stage-font-step-btn:hover{ background:var(--wine); border-color:var(--wine); color:var(--gold-tint); }
+  .stage-font-pct{ min-width:34px; font-size:.64rem; font-weight:700; }
   /* Presenter keyboard shortcuts [2026-09-08]: this toolbar's buttons are
      narrow, fixed-caption columns (see above) with no room to fit a key
      hint inline next to their text without wrapping, so this one's a small
@@ -849,6 +867,24 @@
   .stage-view{
     min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
     text-align:center; padding:40px; background:var(--ground); position:relative; overflow:hidden;
+    /* [2026-09-24] Jared: "use a more readable font similar to tahoma and
+       tahoma bold" for projector mode specifically -- set once here, on the
+       shared ancestor, so the label/lines/footer below all inherit it
+       rather than needing the same override three times. Tahoma itself
+       isn't a bundleable web font (Microsoft-licensed, not open), so this
+       is the standard web way to ask for it: name it first and let it
+       render as the genuine system font on any device that already has it
+       (most Windows PCs, this app's main audience here), falling back to
+       Verdana -- drawn from the same humanist, large-x-height design brief
+       as Tahoma and about as close a look-alike as exists -- then Segoe UI,
+       before the generic sans-serif floor. "Tahoma Bold" isn't a separate
+       family to name; .stage-lines p/.stage-footer's existing
+       font-weight:700 is what makes it bold once the family is Tahoma.
+       Deliberately scoped to .stage-view only, not the whole app -- Jared
+       asked for this on "projector mode", and the rest of the app keeps
+       its own Atkinson Hyperlegible/EB Garamond fonts (see the top of this
+       file) unchanged. */
+    font-family:Tahoma, Verdana, 'Segoe UI', sans-serif;
   }
   @media (max-width: 480px){
     /* Extra headroom on a phone-sized screen -- less side/top/bottom padding
@@ -1163,7 +1199,29 @@
       min-height:100dvh;
     }
     header.topbar{ grid-area:topbar; }
-    main{ grid-area:main; padding-bottom:34px; } /* no bottom tab bar to clear here anymore */
+    /* Fix [2026-09-24] Jared: "the screen layout on PC, there's an empty
+       space at the right side" -- on every screen, not just one. Root
+       cause: the three width tiers above (900px/1400px/1700px) cap `main`
+       at 1100/1320/1560px and center it with margin:0 auto -- correct back
+       when `main` spanned the full viewport, but once the sidebar grid
+       above reserved the left 260px, `main`'s own grid column
+       (minmax(0,1fr)) is already exactly viewport-260px wide, so capping
+       and re-centering INSIDE that already-narrower column just pushes an
+       ever-growing blank margin to the right of the content as monitors
+       get wider (the sidebar already accounts for the left side, so the
+       gutter only shows up on the right). `.topbar-inner` got the
+       equivalent fix in the 2026-09-15 note above (grid-column split
+       instead of independent centering) -- `main` never did. Clearing the
+       cap here lets `main` fill its actual grid column exactly, no more no
+       less; same cascade-order trick as elsewhere in this file, this rule
+       wins over the earlier max-width tiers by appearing later in the
+       file at equal specificity. Grid-based content (.hymn-list,
+       .plans-grid) reflows into more/wider cards on the freed-up width,
+       which was always the point of the width tiers in the first place;
+       text-heavy single-column content keeps its own narrower max-width/ch
+       caps elsewhere, so it doesn't turn into uncomfortably long line
+       lengths just because `main` itself got wider. */
+    main{ grid-area:main; padding-bottom:34px; max-width:none; margin:0; } /* no bottom tab bar to clear here anymore */
     .appfoot{ grid-area:footer; }
     /* Fix [2026-09-15]: Jared: "the top bar where the logo and the other
        buttons are, they're not aligned to the sidebar." Before this,
@@ -1483,6 +1541,22 @@ body.stage-page .appfoot{ display:none; }
   .avatar-fallback{
     border-radius:50%; background:var(--border); color:var(--ink-soft); flex:none;
     display:flex; align-items:center; justify-content:center; font-weight:700;
+  }
+  /* Devotional posts [2026-09-24] -- same 40px circle footprint as
+     personAvatar() so the automatic daily post's header lines up exactly
+     like every other post's, just with a fixed book mark instead of an
+     avatar (see DEVOTIONAL_BOT_UID's comment in app.js for why it isn't a
+     real, clickable account). .devotional-tag is the small title/reference
+     line every devotional post gets, bot-authored or posted by hand via
+     POST A DEVOTIONAL alike. */
+  .devotional-icon{
+    width:40px; height:40px; border-radius:50%; flex:none; background:var(--wine);
+    color:var(--gold-tint); display:flex; align-items:center; justify-content:center;
+  }
+  .devotional-icon svg{ width:20px; height:20px; }
+  .devotional-tag{
+    display:inline-block; margin-top:4px; font-size:.68rem; font-weight:800;
+    letter-spacing:.04em; color:var(--wine); text-transform:uppercase;
   }
 
   /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============

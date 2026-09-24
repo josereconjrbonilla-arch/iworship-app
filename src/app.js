@@ -1981,7 +1981,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       protoBadge() +
       '<div class="landing-hero">' +
         '<p class="display landing-greeting">'+timeGreeting()+(name ? ', '+escapeHtml(name) : '')+'</p>' +
-        '<p class="landing-sub">'+(name ? ('Welcome back'+(churchName ? ' &mdash; '+escapeHtml(churchName) : '')+'.') : 'Welcome to your congregation&rsquo;s hymnal &mdash; lyrics, chords, and a verse to carry into the day.')+'</p>' +
+        '<p class="landing-sub">'+(name ? ('Welcome back'+(churchName ? ' &mdash; '+escapeHtml(churchName) : '')+'.') : 'Welcome to your church&rsquo;s home for worship &amp; fellowship &mdash; hymns, live sessions, sermons, Bible, and your community, all in one place.')+'</p>' +
       '</div>' +
 
       '<div class="verse-card">' +
@@ -2229,7 +2229,8 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<p class="control-label uc" style="margin-bottom:2px;">What you get notified about</p>' +
       row('sessions', 'New public worship sessions from people you follow, or your own church') +
       row('dailyVerse', 'Daily Bible verse') +
-      '<p class="hint" style="margin-top:6px;">Messages and Fellowship activity (likes, comments, follows, reposts) always notify you &mdash; these two are the only ones you can turn off.</p>' +
+      row('dailyDevotional', 'Daily devotional') +
+      '<p class="hint" style="margin-top:6px;">Messages and Fellowship activity (likes, comments, follows, reposts) always notify you &mdash; these are the only ones you can turn off.</p>' +
     '</div>';
   }
 
@@ -2330,7 +2331,7 @@ import { pushNotificationsConfigured } from './push-config.js';
         '</div>'
       ) : '') +
 
-      '<p class="hint" style="text-align:center;margin-top:6px;">iWorship &mdash; your congregation&rsquo;s hymnal, chords, and worship planning.</p>';
+      '<p class="hint" style="text-align:center;margin-top:6px;">iWorship &mdash; worship &amp; fellowship for your congregation: hymns, live sessions, sermons, Bible, and community.</p>';
 
     document.getElementById('settingsBackBtn').addEventListener('click', function(){ state.view='landing'; render(); window.scrollTo(0,0); });
     document.querySelectorAll('[data-theme-pref]').forEach(function(btn){
@@ -4016,6 +4017,71 @@ import { pushNotificationsConfigured } from './push-config.js';
       kjvLoading = false;
       if(viewNeedsKjvRerender()) render();
     });
+  }
+
+  /* ============ DEVOTIONALS ============
+     Public-domain daily devotional text -- Charles Spurgeon's "Morning and
+     Evening" (1866; Spurgeon died in 1892, so the underlying text is
+     unambiguously public domain), sourced from Christian Classics Ethereal
+     Library (ccel.org) and reshaped by scripts/build-devotionals.mjs into
+     src/content/devotionals.json -- { [MMDD]: { am:{title,ref,text},
+     pm:{title,ref,text} } }, one entry per calendar day (366 keys, Feb 29
+     included). Jared's call on 2026-09-23: ship CCEL's text as-is -- the
+     1866 text itself is unquestionably PD, and CCEL's own reuse policy
+     only asks a commercial USE to contact them first, which given
+     devotionals are a free feature shown to every user (not sold
+     separately) is a low enough bar not to chase down first. See
+     claude/architecture-and-decisions.md for the fuller reasoning.
+
+     Same lazy dynamic-import pattern as the KJV Bible just above -- this
+     ships the same way, as a static read-only content asset with no
+     Firestore collection or firestore.rules change of its own. Much
+     smaller than kjv.json (366 days x two short readings, not the whole
+     Bible), so lazy-loading isn't as load-bearing here, but there's still
+     no reason to bundle it into the main chunk for the majority of visits
+     that never open Fellowship at all.
+
+     DEVOTIONAL_BOT_UID is the authorUid the dailyDevotionalNotify Cloud
+     Function (functions/index.js) stamps on the ONE automatic post it
+     creates each day -- not a real Firebase Auth uid, so it deliberately
+     has no users/{uid} doc, no directory/{uid} doc, and can't be signed
+     into. renderFeedPostCard() below checks for this exact constant to
+     skip the normal clickable-avatar/name treatment (which would either
+     show a bare "?" fallback avatar or, worse, open a profile screen for
+     an account that doesn't exist) -- a devotional a human admin/editor
+     posts manually through POST A DEVOTIONAL instead keeps their own real
+     authorUid and displays like any other post, just with the devotional
+     title/reference line added. MUST match the same constant in
+     functions/index.js exactly, or the automatic post stops being
+     recognized as one. */
+  const DEVOTIONAL_BOT_UID = 'iworship-daily-devotional';
+  let devotionalsData = null;
+  let devotionalsLoading = false;
+  function loadDevotionalsData(){
+    if(devotionalsData || devotionalsLoading) return;
+    devotionalsLoading = true;
+    import('./content/devotionals.json').then(function(mod){
+      devotionalsData = mod.default || mod;
+      devotionalsLoading = false;
+      if(state.view === 'fellowship') render();
+    }).catch(function(){ devotionalsLoading = false; });
+  }
+  function devotionalKeyFor(d){
+    return String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+  }
+  // Walks back up to a week looking for a populated day -- cheap insurance
+  // against any single day ending up missing (a failed fetch during the
+  // one-time build, or Feb 29 in a source year that skipped it) rather
+  // than the picker just going blank for that one day.
+  function todaysDevotionalEntry(which){
+    if(!devotionalsData) return null;
+    const now = new Date();
+    for(let back = 0; back < 7; back++){
+      const probe = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+      const day = devotionalsData[devotionalKeyFor(probe)];
+      if(day && day[which]) return day[which];
+    }
+    return null;
   }
 
   function bibleChapterNumbers(book){
@@ -5949,6 +6015,39 @@ import { pushNotificationsConfigured } from './push-config.js';
   // this lives in localStorage (safeGet/safeSet, already used for other
   // small device-local prefs) rather than on the room doc.
   const SPLIT_VIEW_KEY = 'iworship:local:splitView';
+
+  // Projector text size [2026-09-24] -- Jared: "for the font size of the
+  // projector mode, make it larger or add an option to increase the size
+  // in the controls." fitStageLines() (further down) auto-SHRINKS text to
+  // keep it from overflowing the screen, but its ceiling was fixed at
+  // 67px -- there was never a way to ask for text bigger than that, only
+  // to let it shrink less. This is a multiplier applied to that ceiling
+  // (and floor) instead. Same per-device localStorage reasoning as
+  // SPLIT_VIEW_KEY just above -- EXCEPT this one also needs to reach a
+  // separate tab: the Projector view is deliberately "chrome-less and
+  // read-only... no chat, no controls" (see renderSessionProjector()'s own
+  // comment) and usually sits on a second monitor/actual projector, so the
+  // +/- buttons live on the HOST's controls instead (presenterToolbar,
+  // below) and reach an already-open Projector tab live via the 'storage'
+  // event, the same way any other same-origin tab finds out localStorage
+  // changed in a DIFFERENT tab (a tab never gets a 'storage' event for its
+  // own writes, only for ones made elsewhere -- which is exactly what's
+  // wanted here: the Host tab sets hostStageFontScale directly, the
+  // Projector tab picks up the change through this listener).
+  const STAGE_FONT_SCALE_KEY = 'iworship:local:stageFontScale';
+  const STAGE_FONT_SCALE_MIN = 0.8, STAGE_FONT_SCALE_MAX = 1.8, STAGE_FONT_SCALE_STEP = 0.15;
+  let hostStageFontScale = parseFloat(safeGet(STAGE_FONT_SCALE_KEY, '1')) || 1;
+  function setStageFontScale(next){
+    hostStageFontScale = Math.max(STAGE_FONT_SCALE_MIN, Math.min(STAGE_FONT_SCALE_MAX, next));
+    safeSet(STAGE_FONT_SCALE_KEY, String(hostStageFontScale));
+    if(state.view === 'session-projector') fitStageLines();
+    render();
+  }
+  window.addEventListener('storage', function(e){
+    if(e.key !== STAGE_FONT_SCALE_KEY) return;
+    hostStageFontScale = parseFloat(e.newValue) || 1;
+    if(state.view === 'session-projector') fitStageLines();
+  });
   let presenterSplitView = safeGet(SPLIT_VIEW_KEY, '0') === '1';
 
   // Resizable PREVIEW/LIVE squares [2026-09-16] -- Jared, on the split-
@@ -7726,6 +7825,21 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="presenter-toolbar">' +
         '<button type="button" class="icon-tool-btn" id="openStageBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('monitor')+'</svg><span>PROJECTOR</span><kbd class="icon-tool-kbd">P</kbd></button>' +
         '<button type="button" class="icon-tool-btn'+(presenterSplitView?' active':'')+'" id="toggleSplitBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon(presenterSplitView?'compress':'expand')+'</svg><span>'+(presenterSplitView?'EXIT SPLIT':'SPLIT SCREEN')+'</span><kbd class="icon-tool-kbd">S</kbd></button>' +
+        // Projector text size -- see hostStageFontScale's own comment
+        // (near SPLIT_VIEW_KEY). Not a toggle like its neighbors, so it's
+        // its own small control rather than an icon-tool-btn: a live
+        // percentage readout plus -/+ steppers, clamped at
+        // STAGE_FONT_SCALE_MIN/MAX (so the buttons visibly stop doing
+        // anything rather than just silently capping).
+        '<div class="icon-tool-btn stage-font-control" aria-label="Projector text size">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('monitor')+'</svg>' +
+          '<span>TEXT SIZE</span>' +
+          '<span class="stage-font-steppers">' +
+            '<button type="button" class="stage-font-step-btn" id="stageFontDownBtn" aria-label="Decrease projector text size" title="Decrease projector text size">&minus;</button>' +
+            '<span class="stage-font-pct">'+Math.round(hostStageFontScale*100)+'%</span>' +
+            '<button type="button" class="stage-font-step-btn" id="stageFontUpBtn" aria-label="Increase projector text size" title="Increase projector text size">&plus;</button>' +
+          '</span>' +
+        '</div>' +
         '<button type="button" class="icon-tool-btn" id="copyChartLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>CHART LINK</span><kbd class="icon-tool-kbd">L</kbd></button>' +
         // Co-hosting [2026-09-05]: owner-only -- manages coHostUids and
         // hands controllerUid to whichever one of them should be presenting
@@ -7899,6 +8013,12 @@ import { pushNotificationsConfigured } from './push-config.js';
       presenterSplitView = !presenterSplitView;
       safeSet(SPLIT_VIEW_KEY, presenterSplitView ? '1' : '0');
       render();
+    });
+    document.getElementById('stageFontDownBtn').addEventListener('click', function(){
+      setStageFontScale(hostStageFontScale - STAGE_FONT_SCALE_STEP);
+    });
+    document.getElementById('stageFontUpBtn').addEventListener('click', function(){
+      setStageFontScale(hostStageFontScale + STAGE_FONT_SCALE_STEP);
     });
     attachStageColResize();
     document.getElementById('copyChartLinkBtn').addEventListener('click', function(){
@@ -8546,7 +8666,13 @@ import { pushNotificationsConfigured } from './push-config.js';
     // tried.
     const cs = getComputedStyle(stageView);
     const budget = stageView.clientHeight - (parseFloat(cs.paddingTop)||0) - (parseFloat(cs.paddingBottom)||0);
-    const MAX_PX = 67, MIN_PX = 18, STEP = 2; // MAX_PX matches .stage-lines p's clamp() upper bound (4.2rem @ 16px root)
+    // 67/18 are the un-scaled ceiling/floor (67 matches .stage-lines p's
+    // clamp() upper bound, 4.2rem @ 16px root); hostStageFontScale (see its
+    // own comment above, near SPLIT_VIEW_KEY) is the host's "make it
+    // bigger" preference on top of that -- scaling MIN_PX too, not just
+    // MAX_PX, so asking for bigger text doesn't get undercut by the OLD
+    // floor on a long passage that still needs to shrink to fit.
+    const MAX_PX = Math.round(67 * hostStageFontScale), MIN_PX = Math.round(18 * hostStageFontScale), STEP = 2;
     // Setting the --stage-font-size custom property here, not
     // linesEl.style.fontSize -- the actual text lives in the `.stage-lines
     // p` children below this div, which read their size from that property
@@ -9563,6 +9689,16 @@ import { pushNotificationsConfigured } from './push-config.js';
   let postComposerText = '';
   let postComposerMediaResult = null; // {kind:'image'|'video', url, storagePath} once an upload finishes, staged until POST is pressed
   let postComposerUploadBusy = false;
+  // POST A DEVOTIONAL [2026-09-24] -- Jared: "add a feature for us to post
+  // devotionals through the fellowship page as well" (alongside the
+  // automatic daily one -- see dailyDevotionalNotify in functions/
+  // index.js). Admin/editor-only (see renderPostComposer()'s gate below),
+  // opens inline in the composer rather than a separate screen -- today's
+  // devotional is always exactly what's on offer (no picking an arbitrary
+  // past/future day), so there's nothing here that needs more room than a
+  // small expanding panel.
+  let devotionalPickerOpen = false;
+  let devotionalPickerWhich = 'am'; // 'am' or 'pm' -- which of today's two readings is staged
   let postComposerUploadStatus = '';
   let postDeleteConfirmId = null;
   let feedReportOpenId = null;
@@ -9769,8 +9905,34 @@ import { pushNotificationsConfigured } from './push-config.js';
     });
   }
 
+  // POST A DEVOTIONAL's expanding panel -- MORNING/EVENING toggle (today
+  // only -- see devotionalPickerOpen's own comment) + a preview of
+  // whichever one is selected + the actual post button. Kept separate from
+  // renderPostComposer() itself just to keep that function's own return
+  // statement readable.
+  function renderDevotionalPickerPanel(){
+    if(!devotionalsData) return '<p class="hint" style="margin-top:10px;">Loading today&rsquo;s devotional&hellip;</p>';
+    const entry = todaysDevotionalEntry(devotionalPickerWhich);
+    if(!entry) return '<p class="hint" style="margin-top:10px;">No devotional found for today &mdash; nothing to post.</p>';
+    return '<div class="session-card" style="margin-top:10px;background:var(--surface-2);">' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button type="button" class="btn '+(devotionalPickerWhich==='am'?'btn-primary':'btn-ghost')+'" data-devotional-which="am" style="padding:6px 14px;">MORNING</button>' +
+        '<button type="button" class="btn '+(devotionalPickerWhich==='pm'?'btn-primary':'btn-ghost')+'" data-devotional-which="pm" style="padding:6px 14px;">EVENING</button>' +
+      '</div>' +
+      '<p style="font-weight:700;margin-top:10px;">'+escapeHtml(entry.title||'')+(entry.ref?(' &mdash; '+escapeHtml(entry.ref)):'')+'</p>' +
+      '<p style="white-space:pre-wrap;margin-top:6px;max-height:180px;overflow:auto;">'+escapeHtml(entry.text||'')+'</p>' +
+      '<button class="btn btn-primary" id="postDevotionalBtn" style="margin-top:10px;">POST THIS DEVOTIONAL</button>' +
+    '</div>';
+  }
+
   function renderPostComposer(){
     const media = postComposerMediaResult;
+    // Admin/editor-only -- see devotionalPickerOpen's own comment above.
+    // Preloaded here (no-ops once loaded/loading) rather than only on tap,
+    // so the panel usually has data the instant it's opened instead of a
+    // "loading" flash.
+    const canPostDevotional = state.isEditor || hasFullAccess();
+    if(canPostDevotional) loadDevotionalsData();
     return '<div class="session-card">' +
       '<div style="display:flex;gap:10px;">' +
         personAvatar(state.user.uid, 40) +
@@ -9785,8 +9947,10 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;">' +
         '<label class="switch-account" style="cursor:pointer;'+(postComposerUploadBusy||media?'opacity:.4;pointer-events:none;':'')+'">+ PHOTO<input type="file" id="postImageInput" accept="image/*" style="display:none;" '+(postComposerUploadBusy||media?'disabled':'')+'></label>' +
         '<label class="switch-account" style="cursor:pointer;'+(postComposerUploadBusy||media?'opacity:.4;pointer-events:none;':'')+'">+ VIDEO<input type="file" id="postVideoInput" accept="video/*" style="display:none;" '+(postComposerUploadBusy||media?'disabled':'')+'></label>' +
+        (canPostDevotional ? ('<button type="button" class="switch-account" id="toggleDevotionalPickerBtn" style="cursor:pointer;">'+(devotionalPickerOpen?'&minus; DEVOTIONAL':'+ DEVOTIONAL')+'</button>') : '') +
         '<button class="btn btn-primary" id="postSubmitBtn" style="margin-left:auto;" '+(postComposerUploadBusy?'disabled':'')+'>POST</button>' +
       '</div>' +
+      (canPostDevotional && devotionalPickerOpen ? renderDevotionalPickerPanel() : '') +
     '</div>';
   }
 
@@ -9868,11 +10032,28 @@ import { pushNotificationsConfigured } from './push-config.js';
     const isMine = state.user && p.authorUid === state.user.uid;
     const confirmingDelete = postDeleteConfirmId === p.id;
     const reporting = feedReportOpenId === p.id;
+    // Devotional posts [2026-09-24] -- see DEVOTIONAL_BOT_UID's own comment
+    // above. isBotDevotional is the ONE automatic post/day (functions/
+    // index.js); any OTHER devotional (posted by a real admin/editor via
+    // POST A DEVOTIONAL) keeps the normal clickable avatar/name -- only the
+    // header treatment differs for the bot, everything else (the title/ref
+    // badge line, action bar, comments) is the same either way.
+    const isDevotional = p.kind === 'devotional';
+    const isBotDevotional = isDevotional && p.authorUid === DEVOTIONAL_BOT_UID;
+    const headerName = isBotDevotional ? 'Daily Devotional' :
+      (directoryEntry(p.authorUid) ? (directoryEntry(p.authorUid).displayName||'(no name set)') : (p.authorName||'Someone'));
     return '<div class="room-list-card" style="flex-direction:column;align-items:stretch;">' +
       '<div style="display:flex;gap:10px;align-items:flex-start;">' +
-        '<button type="button" data-open-profile="'+escapeAttr(p.authorUid)+'" style="border:none;background:none;padding:0;cursor:pointer;">'+personAvatar(p.authorUid,40)+'</button>' +
+        (isBotDevotional ?
+          ('<span class="devotional-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg></span>') :
+          ('<button type="button" data-open-profile="'+escapeAttr(p.authorUid)+'" style="border:none;background:none;padding:0;cursor:pointer;">'+personAvatar(p.authorUid,40)+'</button>')) +
         '<div style="flex:1;min-width:0;">' +
-          '<p><button type="button" class="link-btn" data-open-profile="'+escapeAttr(p.authorUid)+'" style="font-weight:700;">'+ (directoryEntry(p.authorUid) ? escapeHtml(directoryEntry(p.authorUid).displayName||'(no name set)') : escapeHtml(p.authorName||'Someone')) +'</button> <span class="hint">&middot; '+postAge(p.createdAt)+(p.repostOf?' &middot; reposted':'')+'</span></p>' +
+          '<p>' + (isBotDevotional ?
+            ('<span style="font-weight:700;">'+escapeHtml(headerName)+'</span>') :
+            ('<button type="button" class="link-btn" data-open-profile="'+escapeAttr(p.authorUid)+'" style="font-weight:700;">'+escapeHtml(headerName)+'</button>')) +
+            ' <span class="hint">&middot; '+postAge(p.createdAt)+(p.repostOf?' &middot; reposted':'')+'</span></p>' +
+          (isDevotional ? ('<p class="devotional-tag">DAILY DEVOTIONAL'+((p.devotionalTitle||p.devotionalRef) ?
+            (' &middot; '+escapeHtml(p.devotionalTitle||'')+(p.devotionalRef?(' ('+escapeHtml(p.devotionalRef)+')'):'')) : '')+'</p>') : '') +
           (p.text ? ('<p style="white-space:pre-wrap;margin-top:4px;">'+escapeHtml(p.text)+'</p>') : '') +
           renderPostMediaBlock(p.mediaUrl, p.mediaKind) +
           renderRepostQuote(p.repostOf) +
@@ -9885,7 +10066,7 @@ import { pushNotificationsConfigured } from './push-config.js';
           '<button class="btn btn-primary" data-confirm-delete-post="'+p.id+'">YES, DELETE</button>' +
           '<button class="btn btn-ghost" data-cancel-delete-post="'+p.id+'">CANCEL</button></div>')
         : ('<div style="display:flex;gap:14px;margin-top:10px;">' +
-            (isMine ?
+            (isMine || (isBotDevotional && hasFullAccess()) ?
               '<button type="button" class="switch-account" data-ask-delete-post="'+p.id+'">DELETE</button>' :
               '<button type="button" class="switch-account" data-report-post="'+p.id+'">'+(reporting?'CANCEL':'REPORT')+'</button>') +
           '</div>')) +
@@ -10083,6 +10264,39 @@ import { pushNotificationsConfigured } from './push-config.js';
         postComposerText = ''; postComposerMediaResult = null;
         showToast('Posted.');
       }catch(e){ showToast('Couldn&rsquo;t post &mdash; try again.'); submitBtn.disabled = false; }
+      render();
+    });
+    const toggleDevotionalPickerBtn = document.getElementById('toggleDevotionalPickerBtn');
+    if(toggleDevotionalPickerBtn) toggleDevotionalPickerBtn.addEventListener('click', function(){
+      devotionalPickerOpen = !devotionalPickerOpen;
+      if(devotionalPickerOpen) loadDevotionalsData();
+      render();
+    });
+    document.querySelectorAll('[data-devotional-which]').forEach(function(btn){
+      btn.addEventListener('click', function(){ devotionalPickerWhich = btn.getAttribute('data-devotional-which'); render(); });
+    });
+    const postDevotionalBtn = document.getElementById('postDevotionalBtn');
+    if(postDevotionalBtn) postDevotionalBtn.addEventListener('click', async function(){
+      const entry = todaysDevotionalEntry(devotionalPickerWhich);
+      if(!entry) return;
+      postDevotionalBtn.disabled = true;
+      try{
+        // firestore.rules caps every post's `text` at 2000 chars (see its
+        // posts/{postId} create rule) -- most Morning and Evening entries
+        // are well under that, but this is a hard cap enforced server-side
+        // regardless, so truncate defensively rather than let an unusually
+        // long entry get silently rejected by the rule.
+        const bodyText = (entry.text || '').length > 1900 ? (entry.text.slice(0, 1900).trim() + '…') : (entry.text || '');
+        await createPost({
+          authorUid: state.user.uid, authorName: currentDisplayName() || 'Someone',
+          kind: 'devotional',
+          devotionalTitle: entry.title || '', devotionalRef: entry.ref || '',
+          text: bodyText,
+          mediaUrl: null, mediaKind: null, mediaStoragePath: null
+        });
+        devotionalPickerOpen = false;
+        showToast('Devotional posted.');
+      }catch(e){ showToast('Couldn&rsquo;t post &mdash; try again.'); postDevotionalBtn.disabled = false; }
       render();
     });
     document.querySelectorAll('[data-ask-delete-post]').forEach(function(btn){

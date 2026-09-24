@@ -77,3 +77,25 @@ the same second.
 
 See DEPLOY.md in this same folder for the exact commands to run once,
 from Git Bash, to get this live.
+
+## Font substitution [2026-09-24, found from Jared's real deck]
+
+His "Saved by Grace" deck used Calibri (titles/body) and Cambria --
+Microsoft's own default Office fonts, which are proprietary and can't
+legally be bundled into this container's image. Without them, LibreOffice
+silently substitutes a different font with different letter widths, which
+throws off text-box sizing designed around the real font -- exactly what
+caused the title and subtitle to overlap in his test. Fixed in the
+Dockerfile by installing `fonts-crosextra-carlito` and
+`fonts-crosextra-caladea` -- open-licensed, METRIC-COMPATIBLE stand-ins for
+Calibri/Cambria (same letter widths and line heights as the originals,
+just a slightly different look up close), which LibreOffice already knows
+to substitute in for those two fonts specifically once they're installed
+-- this is LibreOffice's own recommended fix for opening an Office file
+without Microsoft's fonts present, not a workaround improvised here.
+
+This covers Calibri/Cambria specifically. A deck using some OTHER custom
+font (a downloaded/purchased one, not a Microsoft Office default) would
+hit the same kind of substitution issue and need that specific font
+installed here too -- if that ever comes up, send the `.pptx` and I'll
+add it the same way.

@@ -104,6 +104,10 @@ import { pushNotificationsConfigured } from './push-config.js';
   function safeSessionGet(k, fallback){ try{ const v = sessionStorage.getItem(k); return v===null?fallback:v; }catch(e){ return fallback; } }
   function safeSessionSet(k, v){ try{ sessionStorage.setItem(k, v); }catch(e){ /* ignore */ } }
   function safeSessionRemove(k){ try{ sessionStorage.removeItem(k); }catch(e){ /* ignore */ } }
+  // JSON variant of safeSessionGet -- used by cv:lastView (reload-resume,
+  // see RESUMABLE_VIEWS' own comment further down) to store {view, id?}
+  // instead of a bare string.
+  function safeSessionGetJSON(k, fallback){ try{ const v = sessionStorage.getItem(k); return v===null?fallback:JSON.parse(v); }catch(e){ return fallback; } }
 
   const state = {
     view:'landing',         // landing | list | detail | add | session-*
@@ -117,6 +121,9 @@ import { pushNotificationsConfigured } from './push-config.js';
     showFavoritesOnly:false,
     activeTheme:null,
     user: null,              // populated live by watchAuth() -- {uid, displayName, email, isDemo} or null
+    pendingDmUid: null,      // ["?dm=<uid>" notification deep link, 2026-09-24] set by the startup routing block, consumed once watchAuth() has a real user -- see that block's own comment
+    pendingProfileUid: null, // ["?profile=<uid>" notification deep link, 2026-09-24] same as pendingDmUid just above, for a like/comment/repost/follow push
+    pendingResumeView: null, // ["resume where you left off" on reload, 2026-09-24] set by the startup routing block for a whitelisted view that needs a signed-in user to reconstruct -- consumed once watchAuth() has one, see RESUMABLE_VIEWS' own comment for the full mechanism
     profile: null,           // populated live by watchProfile() once signed in -- {displayName, churchName, mode, scale, theme, favorites[]}
     profileLoaded: false,    // [2026-09-22] true only once watchProfile()'s listener has actually fired at least once for the CURRENT sign-in -- see that subscription's own comment and needsProfileSetup below for why this exists as its own flag rather than inferring "loaded" from state.profile being non-null.
     isEditor: false,         // populated by checkIsEditor() once signed in -- worship-team allowlist, gates the Musicians chat tab
@@ -180,6 +187,17 @@ import { pushNotificationsConfigured } from './push-config.js';
     notifDropdownOpen: false, // topbar bell now toggles this instead of navigating straight to the Notifications page
     msgDropdownOpen: false,   // desktop-only: topbar Messages icon toggles this (a list of conversations)
     dock: null,               // floating chat-dock popup (desktop only, one at a time): {kind:'dm'|'group', id, messages:[]} or null when closed
+    // Background media-upload queue [2026-09-24, Jared: "when I upload
+    // media, it should be queued somewhere so I can safely go anywhere
+    // else in the app without cancelling it"] -- app-wide (not tied to
+    // the Media Library view) for the exact same reason as `dock` above:
+    // the little floating tray this powers (see renderUploadTray(), by
+    // renderChatDock()) has to still be visible/updating no matter which
+    // screen is on top. Each entry: {id, kind, title, status:
+    // 'uploading'|'converting'|'done'|'error', pct, error}. See
+    // pushUploadQueueEntry() (by attachMediaLibraryHandlers()) for what
+    // creates these and the fuller story on why this exists at all.
+    uploadQueue: [],
 
     // Social redesign [2026-09-09] -- see claude/fellowship-plan.md's "v2:
     // social redesign" section. These five run app-wide the moment someone
@@ -537,6 +555,14 @@ import { pushNotificationsConfigured } from './push-config.js';
   // merge write fires once per sign-in rather than on every single profile
   // snapshot (theme/scale changes included).
   let directorySelfHealedForUid = null;
+  // Notification deep links [2026-09-24, Jared: "notifs are finally
+  // working! ...but when I click/tap them, they don't open what the notif
+  // is about"] -- see the "?dm="/"?profile=" handling near watchAuth()'s
+  // first-user-available block, and the startup routing block further down
+  // this file, for the two halves of this. Guards the same "only act once
+  // per page load, not every watchAuth callback re-fire" concern
+  // directorySelfHealedForUid (just above) already solves for its own case.
+  let notifDeepLinkHandled = false;
   // Tracks the church currently being watched so a profile re-render (e.g.
   // favorites changing) doesn't tear down and resubscribe watchChurch every
   // time -- only actually resubscribes when churchId itself changes.
@@ -718,6 +744,56 @@ import { pushNotificationsConfigured } from './push-config.js';
   const HOST_VIEWS = ['host-hub','session-setup','session-host','session-join','session-projector','my-sessions','sermons','sermon-edit','media-library'];
   const MORE_VIEWS = ['settings','admin','song-request-queue'];
   const FELLOWSHIP_VIEWS = ['fellowship','profile-edit','profile-view','messages','dm-thread','group-chat-thread','shorts','explore','notifications'];
+
+  // Reload-resume whitelist [2026-09-24, Jared: "when I refresh a page
+  // somewhere, it goes back to the landing page, I need it to go to where
+  // it left off"] -- see persistLastViewForResume() (right by render()
+  // itself, further down) for what WRITES cv:lastView on every render(),
+  // and the startup routing block / watchSongs() / watchAuth() (all
+  // further down too) for the three places that READ it back, split by
+  // what each view needs ready before it's safe to reconstruct:
+  //   RESUME_NO_DEPENDENCY  -- nothing extra; restored immediately, right
+  //                            in the startup routing block, same as the
+  //                            existing ?devotional=1 deep link just above it.
+  //   RESUME_LIBRARY_DEPENDENT -- needs state.library loaded first (just
+  //                            'detail', so renderDetail()'s own "song no
+  //                            longer exists" snap-back-to-list guard has
+  //                            real data to check against instead of an
+  //                            empty array) -- restored from watchSongs().
+  //   (everything else in RESUMABLE_VIEWS) -- needs a signed-in state.user
+  //                            -- restored from watchAuth()'s first-user-
+  //                            available callback, via restoreLastViewIfNeeded()
+  //                            further down, the same timing gap ?dm=/
+  //                            ?profile= already have to deal with.
+  // Deliberately a WHITELIST, not "whatever state.view happened to be":
+  // a half-filled Add Hymn / Edit Sermon / song-request form, and the
+  // whole session-host/session-view/session-projector family (already
+  // its own separate, more specific resume mechanism via
+  // cv:activeRoomCode, above) are all left OUT on purpose -- silently
+  // reopening a form on an accidental refresh would look like data loss
+  // even though nothing was actually lost, and this would only ever step
+  // on cv:activeRoomCode's own handling of the live-session case anyway.
+  // 'admin' and 'media-library' are ALSO deliberately left out even
+  // though they're simple, safe-looking views -- both are gated by a
+  // permission flag (state.isAdmin / canHost()) that itself only
+  // resolves a moment AFTER watchAuth()'s first callback (checkIsAdmin()/
+  // checkIsEditor() are async, and canHost() also reads state.profile,
+  // which loads separately via watchProfile()) -- restoring straight into
+  // either one here would race that and could bounce right back out (or,
+  // worse, briefly show a screen the flag would have hidden). Not worth
+  // the extra plumbing for two low-traffic, host/admin-only screens; a
+  // refresh there just falls back to Home like it always has.
+  const RESUMABLE_VIEWS = {
+    'bible': null, 'devotionals': null, 'plans': null, 'list': null,
+    'settings': null, 'host-hub': null,
+    'detail': 'songId',
+    'sermons': null, 'fellowship': null, 'shorts': null, 'explore': null,
+    'notifications': null, 'messages': null, 'my-sessions': null, 'profile-edit': null,
+    'dm-thread': 'activeDmThreadId', 'group-chat-thread': 'activeGroupChatId',
+    'profile-view': 'viewProfileUid'
+  };
+  const RESUME_NO_DEPENDENCY = ['bible','devotionals','plans','list','settings','host-hub'];
+  const RESUME_LIBRARY_DEPENDENT = ['detail'];
 
   // ---- social watches [2026-09-09] -- app-wide the moment someone signs
   // in, not gated to one view, since the header's bell/avatar need fresh
@@ -912,6 +988,25 @@ import { pushNotificationsConfigured } from './push-config.js';
         startMyMediaWatch(); startSharedMediaWatch();
         if(state.isHost) startDirectoryWatch(); // only the owner's session-host resume needs the "Manage Hosts" account search
       }
+      // Notification deep links needing a signed-in user ("?dm=<uid>" from
+      // a message push, "?profile=<uid>" from a like/comment/repost/follow
+      // push -- see src/sw.js's notificationclick handler and the startup
+      // routing block further down this file, which sets these two state
+      // fields). Same timing gap as the session-resume block just above:
+      // the startup routing block runs before watchAuth's first callback
+      // ever fires, so state.user is still null when it first tries to read
+      // the URL -- this is the "once a user is actually available" catch
+      // for these two, guarded so it only ever runs once per page load.
+      // state.pendingResumeView [2026-09-24] rides along in this same
+      // once-per-load block -- it's the auth-dependent half of the
+      // reload-resume feature (RESUMABLE_VIEWS, up by HOST_VIEWS), hitting
+      // this exact same "state.user isn't ready yet" gap.
+      if(!notifDeepLinkHandled){
+        notifDeepLinkHandled = true;
+        if(state.pendingDmUid){ const u = state.pendingDmUid; state.pendingDmUid = null; openDmThread(u); }
+        else if(state.pendingProfileUid){ const u = state.pendingProfileUid; state.pendingProfileUid = null; openProfileView(u); }
+        else if(state.pendingResumeView){ const t = state.pendingResumeView; state.pendingResumeView = null; restoreLastViewIfNeeded(t); }
+      }
       checkIsEditor(user.uid).then(function(isEditor){
         state.isEditor = isEditor;
         render();
@@ -931,6 +1026,27 @@ import { pushNotificationsConfigured } from './push-config.js';
   /* ============ SONG LIBRARY ============ */
   watchSongs(function(songs){
     state.library = songs;
+    // Reload-resume, library-dependent bucket [2026-09-24] -- just
+    // 'detail' (see RESUMABLE_VIEWS' own comment, up by HOST_VIEWS): it
+    // needs a real, loaded state.library before it's safe to decide
+    // whether the song still exists, so it's stashed in
+    // state.pendingResumeView by the startup routing block (further down)
+    // and applied here instead, once the library snapshot this callback
+    // just received is the real thing -- not the (possibly still empty)
+    // array from an earlier, still-loading snapshot. Cleared either way so
+    // this only ever fires once per page load, same as the auth-dependent
+    // bucket's own notifDeepLinkHandled guard.
+    if(state.pendingResumeView && RESUME_LIBRARY_DEPENDENT.includes(state.pendingResumeView.view)){
+      const target = state.pendingResumeView;
+      state.pendingResumeView = null;
+      if(target.id && songs.some(function(s){ return s.id === target.id; })){
+        state.view = target.view;
+        state.songId = target.id;
+      }
+      // else: that song no longer exists -- leave state.view as whatever
+      // the routing block already defaulted it to ('landing'), same as
+      // renderDetail()'s own snap-back guard would do for a live navigation.
+    }
     render();
   });
 
@@ -964,6 +1080,30 @@ import { pushNotificationsConfigured } from './push-config.js';
   document.getElementById('brandHome').addEventListener('click', function(){
     state.view='landing'; render(); window.scrollTo(0,0);
   });
+
+  // Real back/forward, wiring [2026-09-24] -- see syncHistoryForView()/
+  // applyViewSnapshot()'s own comments (up by render()) for the mechanism.
+  // navBackBtn/navForwardBtn (index.html) are the on-screen stand-in for a
+  // PWA's missing browser chrome -- they just call the same
+  // history.back()/forward() the browser's own buttons (or a swipe
+  // gesture) would, which is exactly what makes them "just work" the same
+  // way regardless of which one the person actually used.
+  window.addEventListener('popstate', function(event){
+    historyNavInProgress = true;
+    const s = event.state;
+    const applied = applyViewSnapshot(s);
+    lastPushedHistoryKey = (applied && s) ? historyKeyFor(s.view, s.id) : null;
+    // !applied (s is null/unrecognized, e.g. the very first, pre-navigation
+    // history entry) -- deliberately does nothing further here rather than
+    // forcing state.view anywhere: this is genuinely "nothing more to go
+    // back to inside the app," same as a real browser's Back button
+    // quietly having nothing left to do at the start of a tab's history.
+    historyNavInProgress = false;
+  });
+  const navBackBtn = document.getElementById('navBackBtn');
+  if(navBackBtn) navBackBtn.addEventListener('click', function(){ history.back(); });
+  const navForwardBtn = document.getElementById('navForwardBtn');
+  if(navForwardBtn) navForwardBtn.addEventListener('click', function(){ history.forward(); });
 
   /* ============ BOTTOM TAB BAR [2026-09-10] ============
      Jared: "I need you to come up with a smoother and better looking way
@@ -1105,6 +1245,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     renderBottomTabs();
     renderSidebarExtra();
     renderChatDock();
+    renderUploadTray();
   }
 
   // ---- Notifications pop-down [v36] --------------------------------------
@@ -1375,6 +1516,77 @@ import { pushNotificationsConfigured } from './push-config.js';
         }
       }catch(e){ showToast('Couldn&rsquo;t send &mdash; try again.'); }
     }
+  }
+
+  // Background upload tray [2026-09-24, Jared: "when I upload media, it
+  // should be queued somewhere so I can safely go anywhere else in the app
+  // without cancelling it"] -- see index.html's #uploadTray comment and
+  // state.uploadQueue's own comment (up by `dock`) for the full story.
+  // pushUploadQueueEntry()/updateUploadQueueEntry()/removeUploadQueueEntry()
+  // are the only things that touch state.uploadQueue -- used by
+  // attachMediaLibraryHandlers()'s five upload handlers further down,
+  // each of which now runs its upload against its OWN queue entry instead
+  // of the shared mediaUploadBusy/mediaUploadStatus closure vars, so two
+  // uploads (started back to back, from two different screens, or just
+  // one still finishing while the person's wandered off elsewhere) never
+  // collide or stomp on each other's status text the way a single shared
+  // pair of variables would.
+  let uploadQueueSeq = 0;
+  function pushUploadQueueEntry(kind, title){
+    // detail: an optional override for the status line (e.g. "Uploading
+    // slide 2 of 5..." for a multi-image slideshow, "Converting your
+    // slides..." for a PowerPoint) -- separate from `error` (only ever
+    // set, and only ever shown, once status is actually 'error') so a
+    // normal in-progress message can never be mistaken for a failure.
+    const entry = { id: 'up' + (++uploadQueueSeq) + '_' + Date.now(), kind: kind, title: title, status: 'uploading', pct: 0, detail: null, error: null };
+    state.uploadQueue.push(entry);
+    renderUploadTray();
+    return entry;
+  }
+  function updateUploadQueueEntry(entry, patch){
+    Object.assign(entry, patch);
+    renderUploadTray();
+  }
+  function removeUploadQueueEntry(entry){
+    state.uploadQueue = state.uploadQueue.filter(function(e){ return e !== entry; });
+    renderUploadTray();
+  }
+  // A finished (or failed) entry doesn't need to sit in the tray forever --
+  // success clears itself a few seconds later (long enough to actually
+  // notice it landed); a failure stays until the person dismisses it
+  // themselves (the × button below), since that's the one case where they
+  // actually need to DO something (retry from Media Library) rather than
+  // just seeing a passive confirmation.
+  function scheduleUploadQueueAutoRemove(entry){
+    setTimeout(function(){ removeUploadQueueEntry(entry); }, 4000);
+  }
+  function uploadQueueStatusText(entry){
+    if(entry.status === 'error') return entry.error || 'Failed &mdash; try again from Media Library.';
+    if(entry.status === 'converting') return entry.detail || 'Converting&hellip;';
+    if(entry.status === 'uploading') return entry.detail || ('Uploading&hellip; ' + entry.pct + '%');
+    return 'Added to your media library.';
+  }
+  function renderUploadTray(){
+    const el = document.getElementById('uploadTray');
+    if(!el) return;
+    if(!state.uploadQueue.length){ el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    el.innerHTML = state.uploadQueue.map(function(entry){
+      return '<div class="upload-tray-item'+(entry.status==='error'?' upload-tray-item-error':'')+'">' +
+        '<div class="upload-tray-item-body">' +
+          '<div class="upload-tray-item-title">'+escapeHtml(entry.title||'Untitled')+'</div>' +
+          '<div class="upload-tray-item-status">'+uploadQueueStatusText(entry)+'</div>' +
+        '</div>' +
+        (entry.status === 'error' ? '<button type="button" class="upload-tray-item-dismiss" data-dismiss-upload="'+entry.id+'" aria-label="Dismiss">&times;</button>' : '') +
+      '</div>';
+    }).join('');
+    el.querySelectorAll('[data-dismiss-upload]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-dismiss-upload');
+        state.uploadQueue = state.uploadQueue.filter(function(e){ return e.id !== id; });
+        renderUploadTray();
+      });
+    });
   }
 
   function closeHamburger(){
@@ -1721,6 +1933,114 @@ import { pushNotificationsConfigured } from './push-config.js';
   // once here instead, generically, the same "fix the whole class at the
   // root" approach as bug #11 above rather than chasing every individual
   // render()-calling call site one at a time.
+  // Reload-resume snapshot [2026-09-24] -- see RESUMABLE_VIEWS' own
+  // comment (up by HOST_VIEWS/MORE_VIEWS/FELLOWSHIP_VIEWS) for the
+  // whitelist and why a form/live-session view is deliberately excluded.
+  // Called from the END of every render() (below), after renderCurrentView()
+  // has had a chance to settle state.view itself (e.g. renderDetail()'s own
+  // "song no longer exists" snap-back to 'list') -- this always persists
+  // whatever the view actually ended up being, never a value that's about
+  // to be immediately overridden. sessionStorage (not localStorage) for
+  // the same per-TAB reasoning as cv:activeRoomCode above.
+  function persistLastViewForResume(){
+    if(!Object.prototype.hasOwnProperty.call(RESUMABLE_VIEWS, state.view)) return;
+    const idField = RESUMABLE_VIEWS[state.view];
+    if(idField && !state[idField]) return; // mid-transition -- don't persist a broken snapshot
+    safeSessionSet('cv:lastView', JSON.stringify(idField ? { view: state.view, id: state[idField] } : { view: state.view }));
+  }
+  // The view as of the end of the LAST render() call -- compared against
+  // state.view at the end of THIS one to tell "the screen actually
+  // navigated" apart from "render() fired again for some unrelated live-
+  // data reason." Powers both the page-transition fade and (a separate
+  // concern, see syncHistoryForView() below) real browser back/forward.
+  let lastRenderedView = null;
+
+  // Real back/forward [2026-09-24, Jared: "add buttons that give faster
+  // back and forward"] -- until now state.view was a plain JS variable
+  // with no History API involvement at all, so the browser's own Back
+  // button (and, on an installed PWA, the on-screen #navBackBtn/
+  // #navForwardBtn pair -- see index.html's comment on those) had NOTHING
+  // to go back TO; pressing it just left the app entirely. This pushes one
+  // history entry per real navigation and restores from it on
+  // back/forward, reusing RESUMABLE_VIEWS -- the exact same whitelist (and
+  // the exact same "a mid-edit form/live session isn't safe to just jump
+  // back into" reasoning) reload-resume already established, so a form or
+  // a live hosted session simply doesn't get a history entry of its own
+  // (Back from one skips straight to whatever stable view came before it,
+  // rather than risk reopening either mid-edit or mid-session). The
+  // History `state` object shape is deliberately identical to
+  // cv:lastView's ({view} or {view,id}) so the two features can share one
+  // mental model even though they're solving different problems (surviving
+  // a RELOAD vs. surviving a BACK tap).
+  let lastPushedHistoryKey = null;
+  // Set for the duration of applying a popstate (or the very first
+  // history.replaceState() call below) so syncHistoryForView() knows NOT
+  // to push a brand-new entry for a navigation that's really just US
+  // catching up to where the browser's history already pointed -- without
+  // this, pressing Back would immediately push a fresh entry undoing the
+  // very navigation Back just performed.
+  let historyNavInProgress = false;
+  // The very FIRST time this fires (whatever screen the page happened to
+  // load on -- landing, or a deep link), it REPLACES the initial, state-
+  // less history entry the browser already created for the page load,
+  // rather than pushing a second entry for the same screen on top of it.
+  // Without this, the first real navigation's Back would land on that
+  // duplicate, visually-identical-but-technically-different entry and
+  // silently do nothing (correct, but confusingly so, on the very first
+  // press) -- replacing collapses that redundant step away.
+  let historySyncedOnce = false;
+  function historyKeyFor(view, id){ return view + (id ? (':' + id) : ''); }
+  function syncHistoryForView(){
+    if(historyNavInProgress) return;
+    if(!Object.prototype.hasOwnProperty.call(RESUMABLE_VIEWS, state.view)) return;
+    const idField = RESUMABLE_VIEWS[state.view];
+    const idVal = idField ? state[idField] : null;
+    if(idField && !idVal) return; // mid-transition, same guard as persistLastViewForResume()
+    const key = historyKeyFor(state.view, idVal);
+    if(key === lastPushedHistoryKey) return; // still the same screen -- e.g. a live-data re-render, not a real navigation
+    lastPushedHistoryKey = key;
+    const historyState = idField ? { view: state.view, id: idVal } : { view: state.view };
+    // Deliberately keeps the URL itself untouched (just the pathname, no
+    // query string) -- the ?stage=/?dm=/?devotional=/etc deep links (see
+    // the startup routing block, far below) only ever get read once, at
+    // initial page load, so there's no case where changing the visible URL
+    // on every in-app navigation would actually help anything; it would
+    // just make the address bar (where visible at all -- an installed PWA
+    // has none) show a confusing mix of query params that no longer mean
+    // what they said.
+    if(!historySyncedOnce){
+      historySyncedOnce = true;
+      history.replaceState(historyState, '', window.location.pathname);
+    } else {
+      history.pushState(historyState, '', window.location.pathname);
+    }
+  }
+  // Applies a {view, id?} snapshot -- from a popstate event, specifically
+  // -- back onto live state. Deliberately reuses the exact same three-
+  // bucket dispatch reload-resume already built (RESUME_NO_DEPENDENCY /
+  // RESUME_LIBRARY_DEPENDENT / everything else via restoreLastViewIfNeeded(),
+  // all further down this file) rather than a second copy of that same
+  // logic -- by the time a REAL popstate can fire (well after initial page
+  // load), state.user/state.library are already whatever they're going to
+  // be, so the boot-time-only timing gap that split reload-resume into
+  // three buckets in the first place mostly doesn't apply here; reusing it
+  // anyway costs nothing and means one thing to keep in sync, not two.
+  function applyViewSnapshot(snapshot){
+    if(!snapshot || !snapshot.view || !Object.prototype.hasOwnProperty.call(RESUMABLE_VIEWS, snapshot.view)) return false;
+    if(RESUME_NO_DEPENDENCY.includes(snapshot.view)){
+      state.view = snapshot.view; render(); window.scrollTo(0,0);
+      return true;
+    }
+    if(RESUME_LIBRARY_DEPENDENT.includes(snapshot.view)){
+      if(!snapshot.id || !state.library.some(function(s){ return s.id === snapshot.id; })) return false;
+      state.view = snapshot.view; state.songId = snapshot.id;
+      render(); window.scrollTo(0,0);
+      return true;
+    }
+    restoreLastViewIfNeeded(snapshot); // the auth-dependent bucket -- no-ops harmlessly if signed out
+    return true;
+  }
+
   function render(){
     const focused = document.activeElement;
     const restoreFocus = (focused && focused.id && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'))
@@ -1787,6 +2107,33 @@ import { pushNotificationsConfigured } from './push-config.js';
       ? (threadBodyBefore.scrollHeight - threadBodyBefore.scrollTop - threadBodyBefore.clientHeight) < 24
       : false;
     renderCurrentView();
+    persistLastViewForResume();
+    // Page-transition fade [2026-09-24, Jared: "check the transition
+    // between pages... make navigation smoother"] -- every render() before
+    // this just swapped #main's whole innerHTML instantly with nothing in
+    // between, which is what actually made navigation feel abrupt/jumpy
+    // (not any one screen's own content, which is why nothing about this
+    // showed up looking for a bug in a specific view). Only plays when
+    // state.view itself actually CHANGED since the last render -- render()
+    // fires constantly for reasons that have nothing to do with navigating
+    // (a live Firestore snapshot echo, a chat message arriving, a like
+    // count ticking up), and re-fading the current screen on every one of
+    // those would be constant, distracting flicker rather than a "page
+    // transition." Uses the classic remove-reflow-readd trick (rather than
+    // just add()) because #main itself is never recreated -- only its
+    // innerHTML is -- so a CSS animation class already sitting on it from
+    // the LAST navigation wouldn't replay on its own; forcing a reflow in
+    // between makes the browser treat it as a fresh animation start. See
+    // .view-fade-in in styles.css (and its stage-page override -- the live
+    // projector output deliberately never does this, timing there matters
+    // too much to risk it).
+    if(state.view !== lastRenderedView){
+      lastRenderedView = state.view;
+      main.classList.remove('view-fade-in');
+      void main.offsetWidth; // force a reflow so the removal above actually "takes" before re-adding
+      main.classList.add('view-fade-in');
+    }
+    syncHistoryForView();
     if(restoreFocus){
       const el = document.getElementById(restoreFocus.id);
       // Only re-focus if it's genuinely the same field re-appearing (same
@@ -4815,8 +5162,18 @@ import { pushNotificationsConfigured } from './push-config.js';
   let mediaAddMode = null; // null | 'image' | 'video' | 'slideshow' | 'embed'
   let mediaAddTitle = '';
   let mediaAddEmbedUrl = '';
+  // [2026-09-24] Progress display moved to the background upload tray (see
+  // pushUploadQueueEntry(), up by renderChatDock()) -- every upload
+  // handler in attachMediaLibraryHandlers() now closes this panel the
+  // instant a file's picked, before there's ever a moment to show
+  // "busy"/"uploading" IN the panel itself, so mediaUploadBusy effectively
+  // never goes true anymore and mediaUploadStatus effectively never shows
+  // anything here. Left in place (harmlessly inert, not deleted) rather
+  // than ripping out renderMediaAddPanel()'s disabled-state/hint-text
+  // markup that reads them -- a future upload TYPE that genuinely needs to
+  // block this panel while it runs could still use them again.
   let mediaUploadBusy = false;
-  let mediaUploadStatus = ''; // e.g. "Uploading... 42%" / "Uploading slide 2 of 5..."
+  let mediaUploadStatus = '';
   // Media Folders [2026-09-06] -- Jared: "these media should be available
   // outside the session like a separate folder or section where AVPs can
   // prep upload beforehand and manage it by folders." See interface.md's
@@ -5120,7 +5477,34 @@ import { pushNotificationsConfigured } from './push-config.js';
     const embedUrlInput = document.getElementById('mediaEmbedUrlInput');
     if(embedUrlInput) embedUrlInput.addEventListener('input', function(){ mediaAddEmbedUrl = embedUrlInput.value; });
 
-    async function finishUpload(kind, title, uploadResult, extra){
+    // Background upload queue [2026-09-24, Jared: "when I upload media, it
+    // should be queued somewhere so I can safely go anywhere else in the
+    // app without cancelling it"] -- the actual network upload always kept
+    // running in the background regardless of which screen was on top (a
+    // Storage upload is a request, not something tied to the DOM); what
+    // broke that illusion was (a) nothing showing its progress once you
+    // left this screen, and (b) openMediaLibrary() resetting
+    // mediaUploadBusy/mediaUploadStatus back to blank every time it's
+    // opened, wiping the one place progress WAS shown even if you came
+    // right back. Every handler below now closes the Add-Media panel the
+    // instant a file's picked (nothing left in it depends on the upload
+    // finishing) and hands the actual work to its own state.uploadQueue
+    // entry (see pushUploadQueueEntry(), up by renderChatDock()) instead --
+    // the little floating tray that powers is visible from anywhere in the
+    // app, survives navigating away and back, and (since each upload gets
+    // its OWN entry rather than sharing one pair of closure variables)
+    // supports more than one upload actually running at once.
+    //
+    // folderId is captured HERE, at pick time, rather than read live off
+    // mediaLibraryFolderId/state.view once the upload finishes -- by then
+    // the person may well have navigated to a totally different screen (or
+    // a different folder), and reading those live would silently file the
+    // item in the wrong place (or drop it to unfiled) purely because of
+    // when it happened to finish, not anything about where it was started.
+    function currentUploadFolderId(){
+      return state.view === 'media-library' ? (mediaLibraryFolderId || null) : null;
+    }
+    async function finishUpload(entry, kind, title, uploadResult, extra, folderId){
       try{
         await createMedia(Object.assign({
           title: title, type: kind,
@@ -5129,34 +5513,31 @@ import { pushNotificationsConfigured } from './push-config.js';
           // uploading from the in-session MEDIA picker (or from the
           // library's own root/unfiled view) leaves it unfiled -- folders
           // are a Library-only prep concept, see interface.md.
-          folderId: (state.view === 'media-library' ? (mediaLibraryFolderId || null) : null),
+          folderId: folderId,
           createdByUid: state.user.uid, createdByName: currentDisplayName() || 'Someone'
         }, uploadResult, extra||{}));
-        showToast('Added to your media library.');
+        updateUploadQueueEntry(entry, { status: 'done', pct: 100 });
+        scheduleUploadQueueAutoRemove(entry);
       }catch(e){
-        showToast('Couldn&rsquo;t save that &mdash; try again.');
+        updateUploadQueueEntry(entry, { status: 'error', error: 'Couldn&rsquo;t save that &mdash; try again from Media Library.' });
       }
-      mediaAddMode = null; mediaUploadBusy = false; mediaUploadStatus = '';
-      hostMediaUploadOpen = false; // collapse the in-session upload panel back to the flat picker, if that's where we are
-      render();
     }
 
     const imageInput = document.getElementById('mediaImageFileInput');
     if(imageInput) imageInput.addEventListener('change', async function(){
       const file = imageInput.files && imageInput.files[0];
       if(!file) return;
-      mediaUploadBusy = true; mediaUploadStatus = 'Uploading... 0%'; render();
+      const title = mediaAddTitle.trim() || titleFromFilename(file.name);
+      const folderId = currentUploadFolderId();
+      mediaAddMode = null; mediaUploadStatus = ''; render();
+      const entry = pushUploadQueueEntry('image', title);
       try{
         const result = await uploadMediaFile(file, state.user.uid, 'image', function(pct){
-          mediaUploadStatus = 'Uploading... ' + pct + '%';
-          const statusEl = document.getElementById('mediaUploadStatusText');
-          if(statusEl) statusEl.textContent = mediaUploadStatus;
+          updateUploadQueueEntry(entry, { pct: pct });
         });
-        await finishUpload('image', (mediaAddTitle.trim() || titleFromFilename(file.name)), result);
+        await finishUpload(entry, 'image', title, result, {}, folderId);
       }catch(e){
-        mediaUploadBusy = false; mediaUploadStatus = '';
-        showToast('Upload failed &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why. Try again once it is.' + describeError(e));
-        render();
+        updateUploadQueueEntry(entry, { status: 'error', error: 'Upload failed &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why.' + describeError(e) });
       }
     });
 
@@ -5164,18 +5545,17 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(videoInput) videoInput.addEventListener('change', async function(){
       const file = videoInput.files && videoInput.files[0];
       if(!file) return;
-      mediaUploadBusy = true; mediaUploadStatus = 'Uploading... 0%'; render();
+      const title = mediaAddTitle.trim() || titleFromFilename(file.name);
+      const folderId = currentUploadFolderId();
+      mediaAddMode = null; mediaUploadStatus = ''; render();
+      const entry = pushUploadQueueEntry('video', title);
       try{
         const result = await uploadMediaFile(file, state.user.uid, 'video', function(pct){
-          mediaUploadStatus = 'Uploading... ' + pct + '%';
-          const statusEl = document.getElementById('mediaUploadStatusText');
-          if(statusEl) statusEl.textContent = mediaUploadStatus;
+          updateUploadQueueEntry(entry, { pct: pct });
         });
-        await finishUpload('video', (mediaAddTitle.trim() || titleFromFilename(file.name)), result);
+        await finishUpload(entry, 'video', title, result, {}, folderId);
       }catch(e){
-        mediaUploadBusy = false; mediaUploadStatus = '';
-        showToast('Upload failed &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why. Try again once it is.' + describeError(e));
-        render();
+        updateUploadQueueEntry(entry, { status: 'error', error: 'Upload failed &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why.' + describeError(e) });
       }
     });
 
@@ -5183,55 +5563,52 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(slideshowInput) slideshowInput.addEventListener('change', async function(){
       const files = slideshowInput.files ? Array.from(slideshowInput.files) : [];
       if(!files.length) return;
-      mediaUploadBusy = true; render();
+      const title = mediaAddTitle.trim() || titleFromFilename(files[0].name);
+      const folderId = currentUploadFolderId();
+      mediaAddMode = null; mediaUploadStatus = ''; render();
+      const entry = pushUploadQueueEntry('slideshow', title);
       try{
         const slides = [];
         for(let i=0; i<files.length; i++){
-          mediaUploadStatus = 'Uploading slide ' + (i+1) + ' of ' + files.length + '...';
-          const statusEl = document.getElementById('mediaUploadStatusText');
-          if(statusEl) statusEl.textContent = mediaUploadStatus;
+          updateUploadQueueEntry(entry, { status: 'uploading', pct: Math.round((i/files.length)*100), detail: 'Uploading slide ' + (i+1) + ' of ' + files.length + '&hellip;' });
           const result = await uploadMediaFile(files[i], state.user.uid, 'image', function(){});
           slides.push({ url: result.url, storagePath: result.storagePath });
         }
-        await finishUpload('slideshow', (mediaAddTitle.trim() || titleFromFilename(files[0].name)), {}, { slides: slides });
+        await finishUpload(entry, 'slideshow', title, {}, { slides: slides }, folderId);
       }catch(e){
-        mediaUploadBusy = false; mediaUploadStatus = '';
-        showToast('Upload failed partway through &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why. Try again once it is.' + describeError(e));
-        render();
+        updateUploadQueueEntry(entry, { status: 'error', error: 'Upload failed partway through &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why.' + describeError(e) });
       }
     });
 
     // PowerPoint upload [2026-09-24]: unlike the other inputs, this one does
-    // NOT call finishUpload()/createMedia() -- convertPptxToSlideshow() runs
-    // server-side (see convertPptxToSlideshow in functions/index.js) and
+    // NOT go through finishUpload()/createMedia() -- convertPptxToSlideshow()
+    // runs server-side (see convertPptxToSlideshow in functions/index.js) and
     // writes the media Firestore doc itself once conversion finishes, so all
     // this needs to do is upload the raw file, await the conversion, then
-    // close the panel; the existing watchMyMedia() listener picks up the new
-    // item the moment that doc is written, same as any other realtime update.
+    // mark the queue entry done; the existing watchMyMedia() listener picks
+    // up the new item the moment that doc is written, same as any other
+    // realtime update. (Its server-side write always leaves the item
+    // unfiled/root, same as before -- folder filing on upload is a
+    // client-side-createMedia-only concept right now, see finishUpload()'s
+    // own comment; a converted deck can still be moved into a folder
+    // afterwards from the library like anything else.)
     const pptxInput = document.getElementById('mediaPptxFileInput');
     if(pptxInput) pptxInput.addEventListener('change', async function(){
       const file = pptxInput.files && pptxInput.files[0];
       if(!file) return;
-      mediaUploadBusy = true; mediaUploadStatus = 'Uploading... 0%'; render();
+      const title = mediaAddTitle.trim() || titleFromFilename(file.name);
+      mediaAddMode = null; mediaUploadStatus = ''; render();
+      const entry = pushUploadQueueEntry('slideshow', title);
       try{
-        const title = mediaAddTitle.trim() || titleFromFilename(file.name);
         const uploadResult = await uploadPptxSourceFile(file, state.user.uid, function(pct){
-          mediaUploadStatus = 'Uploading... ' + pct + '%';
-          const statusEl = document.getElementById('mediaUploadStatusText');
-          if(statusEl) statusEl.textContent = mediaUploadStatus;
+          updateUploadQueueEntry(entry, { pct: pct });
         });
-        mediaUploadStatus = 'Converting your slides... this can take a bit.';
-        const statusEl = document.getElementById('mediaUploadStatusText');
-        if(statusEl) statusEl.textContent = mediaUploadStatus;
+        updateUploadQueueEntry(entry, { status: 'converting', detail: 'Converting your slides&hellip; this can take a bit.' });
         await convertPptxToSlideshow(uploadResult.storagePath, title);
-        showToast('Added to your media library.');
-        mediaAddMode = null; mediaUploadBusy = false; mediaUploadStatus = '';
-        hostMediaUploadOpen = false;
-        render();
+        updateUploadQueueEntry(entry, { status: 'done', pct: 100, detail: null });
+        scheduleUploadQueueAutoRemove(entry);
       }catch(e){
-        mediaUploadBusy = false; mediaUploadStatus = '';
-        showToast('Couldn&rsquo;t convert that PowerPoint &mdash; try again, or use the image option below.' + describeError(e));
-        render();
+        updateUploadQueueEntry(entry, { status: 'error', error: 'Couldn&rsquo;t convert that PowerPoint &mdash; try again, or use the image option, from Media Library.' + describeError(e) });
       }
     });
 
@@ -5240,8 +5617,10 @@ import { pushNotificationsConfigured } from './push-config.js';
       const url = mediaAddEmbedUrl.trim();
       if(!url){ showToast('Paste an embed/share link first.'); return; }
       const title = mediaAddTitle.trim() || 'Presentation';
-      mediaUploadBusy = true; render();
-      await finishUpload('embed', title, {}, { embedUrl: url, embedProvider: detectEmbedProvider(url) });
+      const folderId = currentUploadFolderId();
+      mediaAddMode = null; render();
+      const entry = pushUploadQueueEntry('embed', title);
+      await finishUpload(entry, 'embed', title, {}, { embedUrl: url, embedProvider: detectEmbedProvider(url) }, folderId);
     });
 
     document.querySelectorAll('[data-ask-delete-media]').forEach(function(btn){
@@ -9982,6 +10361,55 @@ import { pushNotificationsConfigured } from './push-config.js';
     state.view = 'messages'; render(); window.scrollTo(0,0);
   }
 
+  // Reload-resume dispatch [2026-09-24] -- the auth-dependent half of
+  // RESUMABLE_VIEWS (up by HOST_VIEWS/MORE_VIEWS/FELLOWSHIP_VIEWS -- see
+  // that const's own comment for the full three-bucket mechanism and why
+  // 'admin'/'media-library' aren't in here). Called exactly once, from
+  // watchAuth()'s first-user-available callback, right alongside the
+  // ?dm=/?profile= notification deep links it shares that same
+  // "state.user isn't ready yet at a fresh page load" timing gap with.
+  // Reuses each view's REAL navigation entry point (openMessages(),
+  // openProfileView(uid), etc.) rather than just poking state.view
+  // directly, so every guard/watcher those already have runs exactly the
+  // same as a person tapping there themselves -- a stale/deleted id (a DM
+  // thread or group chat that got deleted, a profile that no longer
+  // exists) degrades exactly the way opening that screen normally would,
+  // not a special case invented here.
+  function restoreLastViewIfNeeded(target){
+    if(!target || !target.view || !state.user) return;
+    switch(target.view){
+      case 'sermons':
+        startMySermonsWatch(); startSharedSermonsWatch(); startDirectoryWatch();
+        state.view = 'sermons'; render(); window.scrollTo(0,0);
+        break;
+      case 'fellowship': openFellowshipFeed(); break;
+      case 'shorts': openShortsFeed(); break;
+      case 'explore': openExplore(); break;
+      case 'notifications': openNotifications(); break;
+      case 'messages': openMessages(); break;
+      case 'profile-edit': openProfileEdit(); break;
+      case 'my-sessions':
+        startHostRoomsWatch(); startCoHostRoomsWatch();
+        state.view = 'my-sessions'; render(); window.scrollTo(0,0);
+        break;
+      case 'dm-thread':
+        if(!target.id) break;
+        startMyDmThreadsWatch();
+        state.activeDmThreadId = target.id;
+        startDmMessagesWatch(target.id);
+        state.view = 'dm-thread'; render(); window.scrollTo(0,0);
+        break;
+      case 'group-chat-thread':
+        if(!target.id) break;
+        startMyGroupChatsWatch();
+        openGroupChatThread(target.id);
+        break;
+      case 'profile-view':
+        if(target.id) openProfileView(target.id);
+        break;
+    }
+  }
+
   // ---- block / report (shared everywhere a person or a post shows up) ---
   async function toggleBlockUser(uid){
     if(!state.user || uid === state.user.uid) return;
@@ -11598,6 +12026,28 @@ import { pushNotificationsConfigured } from './push-config.js';
   // room-list row's JOIN button already uses -- rather than assuming the
   // room is still public/still exists by the time this loads.
   const joinCode = new URLSearchParams(window.location.search).get('join');
+  // Devotional-post push deep link ("?devotional=1") [2026-09-24] -- see
+  // dailyDevotionalNotify in functions/index.js and src/sw.js's
+  // notificationclick handler. Unlike ?dm=/?profile= just below, the
+  // Devotionals section works fine signed out (see renderDevotionals()),
+  // so this can navigate immediately here rather than waiting for
+  // watchAuth() the way those two have to.
+  const devotionalDeepLink = new URLSearchParams(window.location.search).get('devotional');
+  // Like/comment/repost/follow/message push deep links ("?profile=<uid>" /
+  // "?dm=<uid>") [2026-09-24, Jared: "notifs are finally working!...but
+  // when I click/tap them, they don't open what the notif is about"] --
+  // mirrors renderNotifDropdown()'s own in-app row-click branching (near
+  // the top of this file) so tapping the OS notification lands on the same
+  // place tapping the in-app notification row already does. Unlike every
+  // other deep link on this page, these two need a signed-in user (to open
+  // a DM thread or load directory data for a profile view), which
+  // state.user still isn't yet at this exact point in a fresh page load --
+  // stashed here and actually acted on from watchAuth()'s first-user-
+  // available callback instead (see notifDeepLinkHandled's own comment).
+  const dmDeepLinkUid = new URLSearchParams(window.location.search).get('dm');
+  const profileDeepLinkUid = new URLSearchParams(window.location.search).get('profile');
+  if(dmDeepLinkUid) state.pendingDmUid = dmDeepLinkUid;
+  else if(profileDeepLinkUid) state.pendingProfileUid = profileDeepLinkUid;
   if(stageCode){
     state.activeRoomCode = stageCode.toUpperCase();
     state.isHost = false;
@@ -11617,12 +12067,38 @@ import { pushNotificationsConfigured } from './push-config.js';
     });
   } else if(joinCode){
     goToJoinScreenWithCode(joinCode.trim().toUpperCase());
+  } else if(devotionalDeepLink){
+    state.view = 'devotionals';
   } else if(state.activeRoomCode){
     // Resume straight into a session on load if this device was mid-session
     // (e.g. a page refresh, or the person re-opened the tab).
     state.view = (state.isHost || state.isCoHost) ? 'session-host' : 'session-view';
     watchActiveRoom(state.activeRoomCode);
     watchChat(state.activeRoomCode, 'everyone');
+  } else if(!dmDeepLinkUid && !profileDeepLinkUid){
+    // Reload-resume, last resort [2026-09-24, Jared: "when I refresh a
+    // page somewhere, it goes back to the landing page, I need it to go
+    // to where it left off"] -- only reached once every more-specific
+    // route above (a real deep link, or resuming a live hosted session)
+    // has had first say. cv:lastView is written on every render() (see
+    // persistLastViewForResume(), up by render() itself) for the
+    // whitelisted, stable views in RESUMABLE_VIEWS (up by HOST_VIEWS) --
+    // see that const's own comment for why a mid-edit form isn't one of
+    // them, and for the three-bucket split this dispatches into: a
+    // no-dependency view (bible/devotionals/plans/list/settings/host-hub)
+    // is restored right here, immediately; 'detail' needs state.library
+    // loaded first, so it's handed to watchSongs() instead (just below);
+    // and everything else needs a signed-in state.user, so it's handed to
+    // watchAuth() instead (further up), the exact same timing gap
+    // ?dm=/?profile= just above already have to deal with.
+    const lastView = safeSessionGetJSON('cv:lastView', null);
+    if(lastView && lastView.view && Object.prototype.hasOwnProperty.call(RESUMABLE_VIEWS, lastView.view)){
+      if(RESUME_NO_DEPENDENCY.includes(lastView.view)){
+        state.view = lastView.view;
+      } else {
+        state.pendingResumeView = lastView;
+      }
+    }
   }
 
   // PWA update prompt [2026-09-10, v29, removed v31, restored v32] -- the

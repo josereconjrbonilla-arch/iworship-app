@@ -116,6 +116,34 @@
   }
   .icon-btn:hover{ background:rgba(255,255,255,.16); }
   .icon-btn svg{ width:24px; height:24px; }
+  /* Back/Forward [2026-09-24] -- see index.html's #navBackBtn comment for
+     why these exist at all. Deliberately smaller/lighter than .icon-btn
+     (36px, no border) -- these are a secondary, "nice to have if you need
+     it" affordance next to the brand, not a primary action competing with
+     it for space on a narrow phone screen, where the brand's own
+     ellipsis-shrink (see .brand-text above) already has to give up room to
+     the notif/messages/avatar icon cluster on the other side. Always
+     enabled (no attempt to gray one out when there's genuinely nothing to
+     go back/forward to) -- the History API doesn't cleanly expose "is
+     there anything on the forward stack," and clicking either one when
+     there's truly nothing there is a harmless no-op, same as a browser's
+     own back/forward buttons in that same edge case. */
+  .nav-history-controls{ display:flex; align-items:center; gap:4px; flex:none; }
+  .nav-history-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:36px; height:36px; border-radius:10px;
+    background:none; border:none; color:inherit; opacity:.85; cursor:pointer;
+    flex:none;
+  }
+  .nav-history-btn:hover{ opacity:1; background:rgba(255,255,255,.1); }
+  .nav-history-btn svg{ width:20px; height:20px; }
+  @media (max-width:480px){
+    /* On the narrowest phones, keep just BACK (the one people actually
+       reach for) and drop FORWARD rather than squeezing the brand any
+       further -- forward is still reachable via the OS's own swipe-back-
+       then-forward gesture on these devices anyway. */
+    #navForwardBtn{ display:none; }
+  }
   /* The icon cluster (bell/home/theme/hamburger) never shrinks -- the BRAND
      (logo+title) is what gives way first, via the ellipsis rule above, so
      every icon keeps its full tap target no matter how narrow the screen. */
@@ -159,6 +187,25 @@
   /* The stage/projector view has no bottom tab bar (see above), so it
      shouldn't reserve space for one either. */
   body.stage-page main{ padding-bottom:22px; }
+
+  /* Page-transition fade [2026-09-24] -- see render()'s own comment (by
+     lastRenderedView, app.js) for when this class actually gets toggled
+     (only on a genuine view change, never on every render()). A small
+     fade+rise, not a slide -- #main gets completely replaced every
+     navigation regardless of direction (there's no persistent "old page"
+     to slide out from under the new one the way a native nav stack has),
+     so a directional slide would be guessing a direction that's wrong half
+     the time; a fade reads as "smoother" without pretending to be
+     something this architecture isn't. */
+  @keyframes viewFadeIn{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:translateY(0); } }
+  main.view-fade-in{ animation:viewFadeIn .22s ease-out; }
+  @media (prefers-reduced-motion:reduce){ main.view-fade-in{ animation:none; } }
+  /* The live projector output is the one screen where this is BAD, not
+     just unnecessary -- a congregation watching a song slide change is
+     timing-sensitive in a way no other screen in the app is, and this
+     fade would add a perceptible, unwanted delay to every single slide
+     change during a live service. */
+  body.stage-page main.view-fade-in{ animation:none; }
 
   .proto-badge{
     display:inline-flex; align-items:center; gap:8px;
@@ -1792,6 +1839,37 @@ body.stage-page .appfoot{ display:none; }
     flex:1; font-family:inherit; font-size:.92rem; padding:8px 10px; border-radius:10px;
     border:2px solid var(--border); background:var(--surface); color:var(--ink);
   }
+
+  /* Background upload tray [2026-09-24] -- see index.html's #uploadTray
+     comment for the full story. Bottom-LEFT on purpose (not stacked with
+     .chat-dock/the in-session chat FAB, both of which live bottom-right) --
+     and unlike .chat-dock, this stays visible on mobile too (no
+     max-width:899px cutoff): a host uploading a big video from their phone
+     on church wifi is exactly the case this exists for. Sits outside .app
+     so it survives every render()'s #main rewrite. */
+  .upload-tray{
+    position:fixed; left:16px; bottom:calc(var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 16px); z-index:45;
+    width:280px; max-width:calc(100vw - 32px);
+    display:flex; flex-direction:column; gap:8px;
+  }
+  @media (min-width:900px){ .upload-tray{ bottom:calc(var(--now-live-bar-h, 72px) + 16px); } }
+  body.hosting-page .upload-tray{ bottom: calc(var(--now-live-bar-h, 72px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 16px); }
+  @media (min-width:900px){ body.hosting-page .upload-tray{ bottom: calc(var(--now-live-bar-h, 72px) + 84px); } }
+  body.stage-page .upload-tray{ display:none !important; }
+  .upload-tray-item{
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    box-shadow:var(--shadow); padding:10px 12px; display:flex; align-items:center; gap:10px;
+  }
+  .upload-tray-item-body{ flex:1; min-width:0; }
+  .upload-tray-item-title{
+    font-weight:700; font-size:.86rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .upload-tray-item-status{ font-size:.78rem; color:var(--ink-soft, #6b6b6b); margin-top:2px; }
+  .upload-tray-item.upload-tray-item-error .upload-tray-item-status{ color:#b3261e; }
+  .upload-tray-item-dismiss{
+    background:none; border:none; font-size:1.1rem; line-height:1; color:inherit; opacity:.6; cursor:pointer; padding:2px 4px; flex:none;
+  }
+  .upload-tray-item-dismiss:hover{ opacity:1; }
 
   /* Hamburger drawer -- a right-side slide-in panel over a dim scrim. */
   .hamburger-overlay{ position:fixed; inset:0; z-index:60; display:flex; justify-content:flex-end; }

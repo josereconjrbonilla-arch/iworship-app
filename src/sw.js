@@ -84,27 +84,42 @@ if (isFirebaseConfigured) {
 }
 
 // Tapping the OS notification focuses/opens the app instead of just
-// dismissing it. session_live [2026-09-17, see onNewSessionNotify in
-// functions/index.js] carries a roomCode in its data payload, so tapping
-// IT specifically jumps straight into joining that session
-// ("?join=<code>", read by the startup routing block in app.js via
-// goToJoinScreenWithCode()) rather than just bringing whatever's already
-// open to the front -- every other notification type (like/comment/
-// follow/message) keeps that original, unrelated-to-content behavior
-// unchanged, since there's nothing more specific for those to jump to yet.
+// dismissing it. [2026-09-24, Jared: "notifs are finally working! ...but
+// when I click/tap them, they don't open what the notif is about"] --
+// originally only session_live deep-linked (via roomCode -> "?join=<code>",
+// added 2026-09-17); every other type just opened/focused the app with no
+// destination. Now mirrors renderNotifDropdown()'s own in-app row-click
+// branching in app.js exactly, type for type, so tapping the OS
+// notification lands wherever tapping the same notification row inside the
+// app already does:
+//   session_live         -> "?join=<roomCode>"        (goToJoinScreenWithCode)
+//   message               -> "?dm=<actorUid>"          (openDmThread)
+//   daily_devotional       -> "?devotional=1"           (renderDevotionals)
+//   like/comment/repost/
+//   follow                -> "?profile=<actorUid>"      (openProfileView, same as every other non-message/session type in the in-app dropdown)
+// daily_verse has no more specific destination than the landing page (which
+// already shows today's verse), so it deliberately falls through to the
+// plain '/' below, same as before.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
-  const joinUrl = (data.type === 'session_live' && data.roomCode) ? ('/?join=' + encodeURIComponent(data.roomCode)) : null;
+  const type = data.type;
+  let deepUrl = null;
+  if (type === 'session_live' && data.roomCode) deepUrl = '/?join=' + encodeURIComponent(data.roomCode);
+  else if (type === 'message' && data.actorUid) deepUrl = '/?dm=' + encodeURIComponent(data.actorUid);
+  else if (type === 'daily_devotional') deepUrl = '/?devotional=1';
+  else if ((type === 'like' || type === 'comment' || type === 'repost' || type === 'follow') && data.actorUid) {
+    deepUrl = '/?profile=' + encodeURIComponent(data.actorUid);
+  }
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client){
-          if(joinUrl && 'navigate' in client) return client.navigate(joinUrl).then((c) => (c || client).focus());
+          if(deepUrl && 'navigate' in client) return client.navigate(deepUrl).then((c) => (c || client).focus());
           return client.focus();
         }
       }
-      if (self.clients.openWindow) return self.clients.openWindow(joinUrl || '/');
+      if (self.clients.openWindow) return self.clients.openWindow(deepUrl || '/');
     })
   );
 });

@@ -94,6 +94,28 @@
        from the bottom tab bar's MORE tab instead of living up here. -->
   <header class="topbar">
     <div class="topbar-inner">
+      <!-- Back/Forward [2026-09-24, Jared: "make the navigation in the app
+           smoother please. add buttons that give faster back and forward."]
+           -- a PWA opened from the home screen (display:standalone, see
+           manifest) has NO browser chrome at all, so the native back/
+           forward buttons/swipe gesture a normal browser tab would offer
+           simply aren't there for anyone using it that way -- these two are
+           the on-screen stand-in, always in the same top-left spot on every
+           screen size (not just desktop, unlike #chatDock) since a phone
+           running the installed PWA is exactly the case with no native
+           alternative at all. They just call history.back()/forward() --
+           app.js wires up REAL browser history (pushState per view change,
+           a popstate listener to restore) elsewhere so those calls actually
+           go somewhere meaningful instead of leaving the page. See
+           syncHistoryForView()/applyViewSnapshot() in app.js. -->
+      <div class="nav-history-controls">
+        <button class="nav-history-btn" id="navBackBtn" aria-label="Back" title="Back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <button class="nav-history-btn" id="navForwardBtn" aria-label="Forward" title="Forward">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
       <div class="brand-row">
         <button class="brand" id="brandHome" aria-label="iWorship, go home">
           <svg viewBox="0 0 48 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round">
@@ -190,7 +212,7 @@
 
   <main id="main"></main>
 
-  <footer class="appfoot" id="appfoot">iWorship — your congregation's hymnal, chords, and worship planning.</footer>
+  <footer class="appfoot" id="appfoot">iWorship — worship &amp; fellowship for your congregation: hymns, live sessions, sermons, Bible, and community.</footer>
 
   <!-- Bottom tab bar [2026-09-10] -- Jared: "I need you to come up with a
        smoother and better looking way to switch between hymnal mode, host
@@ -249,6 +271,21 @@
      screen so it never collides with the presenter tools or projector
      view. -->
 <div class="chat-dock" id="chatDock" hidden></div>
+
+<!-- Background upload tray [2026-09-24] -- Jared: "when I upload media, it
+     should be queued somewhere so I can safely go anywhere else in the app
+     without cancelling it." The upload itself already kept running in the
+     background regardless of what screen was showing (a Storage upload is
+     just a network request, not tied to any DOM) -- what was actually
+     missing was any visible sign of that once you left the Media Library
+     screen, AND re-opening that screen before it finished used to wipe its
+     own progress text back to blank (openMediaLibrary() resets the panel
+     every time it's opened). This small floating tray, filled live by
+     renderUploadTray() in app.js off state.uploadQueue, is the fix: sits
+     outside .app like #chatDock above so it survives every render()'s
+     #main rewrite, and shows every upload's live status regardless of
+     which screen is on top. -->
+<div class="upload-tray" id="uploadTray" hidden></div>
 
 <div class="toast" id="toast" role="status" aria-live="polite">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>

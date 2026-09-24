@@ -290,6 +290,74 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // manual "publish the whole page" trick.
   let unsubRoom = null;
   function stopRoomWatch(){ if(unsubRoom){ unsubRoom(); unsubRoom = null; } }
+  // Same-device room relay [2026-09-24] -- Jared, testing the offline fix
+  // above: "can't move the lyrics" (offline), then, after being asked how he
+  // tested it: "I was controlling the projector using the same device." That
+  // pinpoints the actual remaining gap: PREV/NEXT/GO LIVE write through
+  // updateRoom() on the CONTROLS tab's own Firestore connection (`db`) --
+  // Firestore always applies your OWN pending write to your OWN listener
+  // instantly, online or not (this is standard "latency compensation", not
+  // anything specific to persistence config), so the Controls tab itself
+  // always sees its own change immediately, offline included. But the
+  // Projector tab is a SEPARATE `window.open()`ed browsing context with its
+  // own SEPARATE Firestore connection (`projectorDb`, isolated on purpose --
+  // see its own comment) -- a completely different client, which only ever
+  // learns about that write once it actually reaches Google's servers and
+  // gets pushed back down. If the one physical device driving both tabs has
+  // no network at all, that write can't leave the device, so the Projector
+  // tab -- same computer or not -- never hears about it. Same reasoning
+  // Jared already had confirmed for him for the F-key fix just above: a
+  // BroadcastChannel is a same-origin, same-browser, ZERO-network relay, so
+  // it's the right tool for exactly this same-device case.
+  //
+  // What actually needs to travel is tiny: just the live "pointer" fields on
+  // the room doc (which song/section/slide is current) -- the heavy part,
+  // the actual lyrics, is already sitting in `state.library` in memory on
+  // BOTH tabs (watchSongs() loads the whole hymnal for every screen, not
+  // just the host's -- see its own comment) the moment each tab first loads,
+  // fully independent of Firestore's cache config. So relaying just the room
+  // object, same-device, makes the Projector tab's render pick up the new
+  // pointer and resolve it against lyrics it already has -- no network
+  // needed for either half once both tabs have been open at least once.
+  //
+  // applyRoomSnapshot() is the exact body watchActiveRoom's own Firestore
+  // callback used to have inline, now shared so the relay receiver below
+  // can drive the exact same state/render path a real snapshot would.
+  // `broadcast` is false only when applyRoomSnapshot is being called BECAUSE
+  // of an incoming relay message -- otherwise every real snapshot re-posts
+  // itself to any same-device Projector tab that might be listening (posting
+  // is a harmless no-op if no one's listening, and the Projector view itself
+  // never re-broadcasts what it receives, so there's no echo loop).
+  function applyRoomSnapshot(code, room, broadcast){
+    state.roomLoading = false;
+    state.room = room;
+    ensureViewSermonWatch(room);
+    ensureViewMediaWatch(room);
+    if(!room && state.activeRoomCode === code){
+      // Room is gone -- host ended it, or it never existed on this backend.
+      stopRoomWatch();
+      stopChatWatch();
+      state.activeRoomCode = null; state.isHost = false; state.isCoHost = false; state.room = null;
+      safeSessionRemove('cv:activeRoomCode'); safeSessionRemove('cv:isHost'); safeSessionRemove('cv:isCoHost');
+      if(state.view === 'session-host' || state.view === 'session-view'){
+        showToast('This service session has ended.');
+        state.view = 'landing';
+      }
+    }
+    if(broadcast && roomRelayChannel && state.view !== 'session-projector' && state.activeRoomCode === code){
+      roomRelayChannel.postMessage({ code: code, room: room });
+    }
+    render();
+  }
+  const ROOM_RELAY_CHANNEL = 'iworship:room-relay';
+  const roomRelayChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel(ROOM_RELAY_CHANNEL) : null;
+  if(roomRelayChannel){
+    roomRelayChannel.onmessage = function(e){
+      if(state.view !== 'session-projector') return;
+      if(!e.data || e.data.code !== state.activeRoomCode) return;
+      applyRoomSnapshot(e.data.code, e.data.room, false);
+    };
+  }
   function watchActiveRoom(code){
     stopRoomWatch();
     state.roomLoading = true;
@@ -306,22 +374,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // isolated, persistent-cache-backed watcher instead.
     const watchFn = (state.view === 'session-projector') ? watchProjectorRoom : watchRoom;
     unsubRoom = watchFn(code, function(room){
-      state.roomLoading = false;
-      state.room = room;
-      ensureViewSermonWatch(room);
-      ensureViewMediaWatch(room);
-      if(!room && state.activeRoomCode === code){
-        // Room is gone -- host ended it, or it never existed on this backend.
-        stopRoomWatch();
-        stopChatWatch();
-        state.activeRoomCode = null; state.isHost = false; state.isCoHost = false; state.room = null;
-        safeSessionRemove('cv:activeRoomCode'); safeSessionRemove('cv:isHost'); safeSessionRemove('cv:isCoHost');
-        if(state.view === 'session-host' || state.view === 'session-view'){
-          showToast('This service session has ended.');
-          state.view = 'landing';
-        }
-      }
-      render();
+      applyRoomSnapshot(code, room, true);
     });
   }
 

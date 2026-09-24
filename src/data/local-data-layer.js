@@ -789,6 +789,27 @@ export async function deleteMediaFile(storagePath) {
   }
 }
 
+// PowerPoint upload [2026-09-24] -- see firestore-data-layer.js's matching
+// pair for the real design. There's no local/offline way to actually
+// render a .pptx (that needs LibreOffice, running server-side in the real
+// pptx-converter Cloud Run service) -- uploadPptxSourceFile() still works
+// locally (same object-URL trick as uploadMediaFile() above, since the
+// caller just needs SOME storagePath back to hand to the next call), but
+// convertPptxToSlideshow() below honestly rejects rather than pretending
+// to convert anything, so the UI's existing "couldn't convert" error
+// handling is what a demo-mode user actually sees.
+export function uploadPptxSourceFile(file, uid, onProgress) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    if (onProgress) onProgress(100);
+    resolve({ storagePath: 'local:' + url });
+  });
+}
+
+export async function convertPptxToSlideshow(storagePath, title) {
+  throw new Error('PowerPoint conversion needs the real (non-demo) app -- it runs on a server, not in this browser.');
+}
+
 // --------------------------------------------------------- Media Folders
 // [2026-09-06] See firestore-data-layer.js's matching comment for the full
 // design. Demo-mode twin, same localStorage+BroadcastChannel pattern as

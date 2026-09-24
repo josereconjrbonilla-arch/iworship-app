@@ -25,6 +25,14 @@ import { VAPID_KEY, pushNotificationsConfigured } from '../push-config.js';
 import {
   getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject
 } from 'firebase/storage';
+// PowerPoint upload [2026-09-24] -- see convertPptxToSlideshow() below and
+// its matching Cloud Function in functions/index.js for the full design.
+// The only Cloud Function this app's CLIENT calls directly (registerChurch/
+// assignRole/updateChurchLibrary are all still client-side-write bridges
+// for now -- see their own comments) -- this one genuinely has to run
+// server-side (it needs to reach the pptx-converter Cloud Run service),
+// so this is this file's first-ever use of the Functions SDK.
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { firebaseConfig, isFirebaseConfigured } from '../firebase-config.js';
 import { sha256Hex } from './hash.js';
 
@@ -81,6 +89,11 @@ const auth = isFirebaseConfigured ? getAuth(app) : null;
 // network error, so the UI's existing "couldn't save, try again" toast
 // pattern already covers it without any special-casing.
 const storage = isFirebaseConfigured ? getStorage(app) : null;
+// Must match functions/index.js's setGlobalOptions({region:'asia-southeast1'})
+// -- an onCall function is only reachable at the region it's actually
+// deployed to; getFunctions() defaults to us-central1, which would 404
+// every call here if left unset.
+const functionsClient = isFirebaseConfigured ? getFunctions(app, 'asia-southeast1') : null;
 
 // ---------------------------------------------------------------------- Songs
 export function watchSongs(callback) {
@@ -779,6 +792,46 @@ export function uploadMediaFile(file, uid, kind, onProgress) {
       }
     );
   });
+}
+
+// PowerPoint upload [2026-09-24] -- see convertPptxToSlideshow()'s own
+// comment just below, and the matching Cloud Function in
+// functions/index.js, for the full design. Uploads the RAW .pptx to a
+// staging path only that Cloud Function (via the Admin SDK) ever reads --
+// see storage.rules' pptx-source/{fileId} block, which deliberately has no
+// `allow read` at all, unlike uploadMediaFile()'s image/video paths above.
+// No getDownloadURL() call here on purpose: this path isn't publicly
+// readable, so minting one would just fail (or be useless even if it
+// didn't) -- the caller already knows the storagePath it just uploaded to,
+// which is all convertPptxToSlideshow() needs.
+export function uploadPptxSourceFile(file, uid, onProgress) {
+  const id = Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+  const path = 'media/' + uid + '/pptx-source/' + id + '.pptx';
+  const task = uploadBytesResumable(storageRef(storage, path), file, { contentType: file.type || 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+  return new Promise((resolve, reject) => {
+    task.on('state_changed',
+      (snap) => { if (onProgress) onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)); },
+      (err) => reject(err),
+      () => resolve({ storagePath: path })
+    );
+  });
+}
+
+// Calls convertPptxToSlideshow (functions/index.js) with the storagePath
+// uploadPptxSourceFile() above just produced -- that function does the
+// actual conversion (via the pptx-converter Cloud Run service) AND writes
+// the resulting 'slideshow' media doc itself (it has to: it's the only
+// place with server-side access to do the conversion at all), so unlike
+// every other upload path in this file there's no separate createMedia()
+// call needed here -- the caller's existing watchMyMedia() listener picks
+// the new doc up on its own the moment this resolves. Can take a while
+// (LibreOffice rendering a real deck, one slide at a time) -- the caller
+// is expected to show its own "converting..." status while this is
+// in flight; the Cloud Function's own timeout is 300s.
+export async function convertPptxToSlideshow(storagePath, title) {
+  const fn = httpsCallable(functionsClient, 'convertPptxToSlideshow');
+  const result = await fn({ storagePath, title });
+  return result.data; // { mediaId, slideCount }
 }
 
 export async function deleteMediaFile(storagePath) {

@@ -2,6 +2,7 @@ node_modules/
 dist/
 .firebase/
 service-account.json
+*firebase-adminsdk*.json
 *.log
 .DS_Store
 
@@ -9,4 +10,8 @@ service-account.json
 iworship-deploy-v*.zip
 iworship-full-source-v*.zip
 dist.zip
-*firebase-adminsdk*.json
+
+# scripts/build-devotionals.mjs's fetch cache -- raw scraped HTML, not
+# source we own; devotionals.json (the actual built output, in
+# src/content/ and functions/) IS committed as normal.
+.devotional-cache/

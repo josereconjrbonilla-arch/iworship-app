@@ -57,7 +57,7 @@ export const {
   shareSermon, unshareSermon, watchSermonsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
   shareMedia, unshareMedia, watchMediaSharedWithMe,
-  uploadMediaFile, deleteMediaFile,
+  uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow,
   createMediaFolder, updateMediaFolder, deleteMediaFolder, watchMyMediaFolders,
   createPost, deletePost, watchFeedPosts, watchUserPosts,
   submitReport, watchPendingReports, resolveReport,

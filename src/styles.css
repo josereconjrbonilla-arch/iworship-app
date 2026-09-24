@@ -425,11 +425,12 @@
   /* ============ ADD SONG ============ */
   .field{ margin-bottom:18px; }
   .field label{ display:block; font-weight:700; font-size:.85rem; letter-spacing:.04em; margin-bottom:8px; }
-  .field input[type=text], .field input[type=email], .field input[type=password], .field textarea, .field select{
+  .field input[type=text], .field input[type=email], .field input[type=password], .field input[type=date], .field textarea, .field select{
     width:100%; font-size:1.05rem; padding:14px 16px;
     border-radius:14px; border:2px solid var(--border);
     background:var(--surface); color:var(--ink); font-family:inherit;
   }
+  .field input[type=date]{ color-scheme:light dark; }
   .field textarea{ min-height:220px; line-height:1.7; resize:vertical; }
   /* Search-icon overlap fix [reported 2026-09-09, fixed v24] -- several
      screens (Messages' "start a new conversation", group-chat member add,
@@ -915,6 +916,36 @@
   .stage-lines.type-title p{ letter-spacing:.02em; }
   .stage-footer{ margin-top:36px; font-size:1.2rem; color:var(--ink-soft); }
   .stage-waiting{ font-size:1.6rem; color:var(--ink-soft); }
+  /* Default Presentation Background [2026-09-24] -- see presenterStageBg()'s
+     comment in app.js. Unlike a sermon slide's own custom background (an
+     intentionally-composed image a host picked FOR that slide, where
+     .slide-canvas-dark just flips text color and trusts the host's choice),
+     this same photo sits behind auto-generated song lyrics/an old legacy
+     sermon slide that were never composed with any particular image in
+     mind -- a dark scrim under the text is what keeps it legible against
+     an unpredictable photo without a host having to think about contrast.
+     `.stage-slide-body` itself is deliberately left NON-positioned here (a
+     plain flex child of `.stage-view`, shrink-to-fit around the text, same
+     as always) -- `.stage-slide-bg-img` and the scrim below are absolutely
+     positioned, which resolves through it to `.stage-view` (already
+     `position:relative`, see its own rule above) as their containing
+     block, so they fill the WHOLE stage edge to edge rather than just the
+     text's own bounding box. Same "positioned nearest ancestor" convention
+     `.slide-canvas-bg-img`/`.stage-media-frame` already use elsewhere in
+     this file. Painting order needs no explicit z-index: both are
+     negative-z-index children of `.stage-view`'s stacking context, and
+     `.stage-slide-body`'s own normal in-flow text content always paints
+     above a positioned ancestor's negative-z-index children by ordinary
+     CSS stacking rules. */
+  .stage-slide-bg-img{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:-2;
+  }
+  .stage-slide-body-custom-bg::before{
+    content:''; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:-1;
+  }
+  .stage-slide-body-custom-bg .stage-label,
+  .stage-slide-body-custom-bg .stage-lines p,
+  .stage-slide-body-custom-bg .stage-footer{ color:#F5ECD6; }
   .stage-exit-btn{
     position:absolute; top:20px; right:24px; width:44px; height:44px; border-radius:50%;
     border:1px solid var(--border); background:var(--surface); color:var(--ink-soft);
@@ -1246,11 +1277,22 @@
        the icon cluster's own right edge lines up with `main`'s right-
        padded text content, not just its outer box -- see the sizing note
        above main{padding:...} for why main's box already reaches the same
-       column edge regardless. */
-    .topbar-icons{ width:100%; max-width:1100px; margin:0 auto; padding-right:20px; justify-content:flex-end; }
+       column edge regardless.
+       Fix [2026-09-24] Jared: "the icons at the upper right do not align
+       with the right side of the whole page." Same bug class as `main`'s
+       own fix above, just not caught here yet: this was still capping
+       itself at max-width:1100/1320/1560px and re-centering with
+       margin:0 auto INSIDE `.topbar-inner`'s second grid column (already
+       exactly viewport-260px wide), so the icon cluster stopped short of
+       the real right edge by a growing amount as the window got wider --
+       the wider the screen, the bigger the gap. Clearing max-width/margin
+       lets it fill that column exactly like `main` does; justify-content:
+       flex-end (unchanged) is what actually pins the icons to the right
+       edge of that now-full-width box. The three width-tier overrides this
+       used to need are gone with it -- they only ever existed to grow that
+       stale cap, which no longer exists to grow. */
+    .topbar-icons{ width:100%; max-width:none; margin:0; padding-right:20px; justify-content:flex-end; }
   }
-  @media (min-width: 1400px){ .topbar-icons{ max-width:1320px; } }
-  @media (min-width: 1700px){ .topbar-icons{ max-width:1560px; } }
   /* The projector/stage view (see body.stage-page/body.stage-hide-chrome
      elsewhere in this file) has to stay genuinely full-bleed even from a
      desktop browser -- plugging a laptop into a TV/projector is a normal
@@ -1557,6 +1599,42 @@ body.stage-page .appfoot{ display:none; }
   .devotional-tag{
     display:inline-block; margin-top:4px; font-size:.68rem; font-weight:800;
     letter-spacing:.04em; color:var(--wine); text-transform:uppercase;
+  }
+
+  /* Standalone Devotionals reader (renderDevotionals() in app.js)
+     [2026-09-24] -- Jared: "make sure that users can access it easily and
+     can toggle from different days of the year easily." The day-stepper
+     row mirrors .slide-nav's centered arrow-button layout already used by
+     the Bible chapter reader just above it in app.js, and the reading card
+     itself reuses the same devotional-icon/devotional-tag treatment as a
+     Fellowship devotional post so the two places this content shows up
+     feel like one feature, not two. */
+  .devotional-reader-nav{
+    display:flex; align-items:center; justify-content:center; gap:18px; margin-bottom:14px;
+  }
+  .devotional-reader-step{ width:38px; height:38px; border-radius:50%; flex:none; }
+  .devotional-reader-date{ display:flex; flex-direction:column; align-items:center; min-width:160px; text-align:center; }
+  .devotional-reader-date-label{ font-family:'EB Garamond',serif; font-weight:700; font-size:1.3rem; color:var(--ink); }
+  .devotional-reader-date .switch-account{ margin-top:0; padding:4px; font-size:.72rem; }
+  .devotional-reader-jump{ max-width:260px; margin-left:auto; margin-right:auto; text-align:center; }
+  .devotional-reader-jump label{ text-align:center; }
+  .devotional-reader-tabs{ display:flex; justify-content:center; gap:10px; margin-bottom:20px; }
+  .devotional-reader-card{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:20px;
+    padding:28px 26px; text-align:center; max-width:64ch; margin:0 auto;
+  }
+  .devotional-reader-card .devotional-icon{ margin:0 auto 14px; }
+  .devotional-reader-title{
+    font-family:'EB Garamond',serif; font-weight:700; font-size:1.2rem; color:var(--wine); margin:0 0 16px;
+  }
+  .devotional-reader-ref{ font-weight:600; color:var(--ink-soft); font-size:1rem; }
+  .devotional-reader-text{
+    font-family:'EB Garamond',serif; font-size:1.15rem; line-height:1.75; color:var(--ink);
+    text-align:left; white-space:pre-wrap; margin:0;
+  }
+  @media (max-width:560px){
+    .devotional-reader-card{ padding:22px 18px; }
+    .devotional-reader-text{ font-size:1.05rem; }
   }
 
   /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============
@@ -1915,6 +1993,16 @@ body.stage-page .appfoot{ display:none; }
     letter-spacing:.04em; cursor:pointer;
   }
   .settings-theme-opt-active{ border-color:var(--wine); color:var(--wine); background:var(--wine-tint); }
+
+  /* Default Presentation Background [2026-09-24] -- see presenterStageBg()'s
+     comment in app.js. 16:9 to preview roughly how it'll actually crop
+     behind stage content (object-fit:cover, same as the real stage/
+     projector rendering), not just an arbitrary square thumbnail. */
+  .stage-bg-preview{
+    width:100%; max-width:320px; aspect-ratio:16/9; border-radius:14px; overflow:hidden;
+    border:1px solid var(--border); margin:0 auto;
+  }
+  .stage-bg-preview img{ width:100%; height:100%; object-fit:cover; display:block; }
 
   /* Notification preference toggles [2026-09-17] -- a real switch (not the
      theme row's button-pair pattern above) since these are plain on/off

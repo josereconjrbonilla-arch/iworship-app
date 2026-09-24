@@ -17,7 +17,7 @@ import {
   shareSermon, unshareSermon, watchSermonsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
   shareMedia, unshareMedia, watchMediaSharedWithMe,
-  uploadMediaFile, deleteMediaFile,
+  uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow,
   createMediaFolder, updateMediaFolder, deleteMediaFolder, watchMyMediaFolders,
   createPost, deletePost, watchFeedPosts, watchUserPosts,
   submitReport, watchPendingReports, resolveReport,
@@ -204,6 +204,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     // switching/log in/log out." Transient UI-only state for that screen.
     settingsAddPasswordOpen: false,
     settingsPushStatus: null,   // last result string from enablePushNotifications(), for a one-line status message
+    settingsStageBgStatus: null, // last status string from the presentation-background upload below, for a one-line status message
   };
 
   /* ============ MONETIZATION: access checks ============ */
@@ -1405,6 +1406,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="hamburger-items">' +
       (signedIn ? (
         '<button type="button" class="hamburger-item" id="hbMyProfileBtn">MY PROFILE</button>' +
+        '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
         ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
@@ -1413,6 +1415,7 @@ import { pushNotificationsConfigured } from './push-config.js';
         '<button type="button" class="hamburger-item hamburger-item-danger" id="hbSignOutBtn">SIGN OUT</button>'
       ) : (
         '<button type="button" class="hamburger-item" id="hbHomeBtn">HOME</button>' +
+        '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>'
       )) +
@@ -1424,6 +1427,8 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(hbHome) hbHome.addEventListener('click', function(){ goTo(function(){ state.view='landing'; render(); window.scrollTo(0,0); }); });
     const hbProfile = document.getElementById('hbMyProfileBtn');
     if(hbProfile) hbProfile.addEventListener('click', function(){ goTo(openProfileEdit); });
+    const hbDevotionals = document.getElementById('hbDevotionalsBtn');
+    if(hbDevotionals) hbDevotionals.addEventListener('click', function(){ goTo(function(){ state.view='devotionals'; render(); window.scrollTo(0,0); }); });
     const hbExplore = document.getElementById('hbExploreBtn');
     if(hbExplore) hbExplore.addEventListener('click', function(){ goTo(openExplore); });
     const hbPlans = document.getElementById('hbPlansBtn');
@@ -1457,9 +1462,12 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(!signedIn){
       slot.innerHTML =
         '<div class="sidebar-section">' +
+          '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
           '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
           '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
         '</div>';
+      const devotionalsBtn0 = document.getElementById('sideDevotionalsBtn');
+      if(devotionalsBtn0) devotionalsBtn0.addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
       const plansBtn = document.getElementById('sidePlansBtn');
       if(plansBtn) plansBtn.addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
       const settingsBtn = document.getElementById('sideSettingsBtn');
@@ -1484,6 +1492,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="sidebar-divider"></div>' +
       '<div class="sidebar-section">' +
         '<button type="button" class="sidebar-item" id="sideMessagesBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('messenger')+'</svg><span>Messages</span>'+(unreadMsgs?(' <span class="notif-badge-inline">'+(unreadMsgs>99?'99+':unreadMsgs)+'</span>'):'')+'</button>' +
+        '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
         '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
         ((state.isEditor || hasFullAccess()) ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
@@ -1495,6 +1504,7 @@ import { pushNotificationsConfigured } from './push-config.js';
 
     document.getElementById('sideProfileBtn').addEventListener('click', openProfileEdit);
     document.getElementById('sideMessagesBtn').addEventListener('click', openMessages);
+    document.getElementById('sideDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
     document.getElementById('sideExploreBtn').addEventListener('click', openExplore);
     document.getElementById('sidePlansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     const songReqBtn = document.getElementById('sideSongRequestsBtn');
@@ -1858,6 +1868,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(state.view==='song-request') return renderSongRequest();
     if(state.view==='song-request-queue') return renderSongRequestQueue();
     if(state.view==='bible') return renderBible();
+    if(state.view==='devotionals') return renderDevotionals();
     if(state.view==='sermons') return renderSermons();
     if(state.view==='sermon-edit') return renderSermonEdit();
     if(state.view==='shared-sermon-link') return renderSharedSermonLink();
@@ -2041,6 +2052,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       renderLandingFellowshipSection(signedIn) +
 
       '<button class="btn btn-ghost btn-lg btn-block" id="openBibleBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>OPEN THE BIBLE (KJV)</button>' +
+      '<button class="btn btn-ghost btn-lg btn-block" id="openDevotionalsBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>DAILY DEVOTIONALS</button>' +
       '<p style="text-align:center;margin-top:14px;">' +
       (signedIn ? '<button class="switch-account" id="messagesBtn">MESSAGES</button> &middot; <button class="switch-account" id="landingShortsBtn">SHORTS</button> &middot; <button class="switch-account" id="landingExploreBtn">EXPLORE</button> &middot; ' : '') +
       '<button class="switch-account" id="plansBtn">PLANS &amp; PRICING</button>' +
@@ -2076,6 +2088,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(switchBtn) switchBtn.addEventListener('click', async function(){ await signOutUser(); });
     document.getElementById('plansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     document.getElementById('openBibleBtn').addEventListener('click', function(){ state.view='bible'; render(); window.scrollTo(0,0); });
+    document.getElementById('openDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
     const reviewRequestsBtn = document.getElementById('reviewRequestsBtn');
     if(reviewRequestsBtn) reviewRequestsBtn.addEventListener('click', function(){
       state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch();
@@ -2305,6 +2318,29 @@ import { pushNotificationsConfigured } from './push-config.js';
         '<div class="session-card"><h3>Account</h3><p>Sign in from the home screen to manage your account here.</p></div>'
       )) +
 
+      // Default Presentation Background [2026-09-24] -- see
+      // presenterStageBg()'s comment near newSermonSlide() for the full
+      // design. Gated to the same people who can actually present
+      // something with it (canHost(), or the legacy isEditor allowlist, or
+      // an Admin/beta tester) -- a plain congregant account has no use for
+      // this control, same reasoning as canHost() itself.
+      (signedIn && (canHost() || state.isEditor || hasFullAccess()) ? (
+        '<div class="session-card">' +
+          '<h3>Presentation Background</h3>' +
+          '<p class="hint" style="margin-top:-6px;">Shown behind song lyrics on the stage/projector view, and used as the starting background for new in-app sermon slides &mdash; a slide you&rsquo;ve already given its own background keeps it either way.</p>' +
+          (presenterStageBg() ?
+            '<div class="stage-bg-preview"><img src="'+escapeAttr(presenterStageBg().url)+'" alt=""></div>' +
+            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">' +
+              '<label class="btn btn-ghost" style="cursor:pointer;">REPLACE<input type="file" accept="image/*" id="stageBgFileInput" style="display:none;"></label>' +
+              '<button type="button" class="btn btn-ghost" id="stageBgRemoveBtn">REMOVE</button>' +
+            '</div>'
+            :
+            '<label class="btn btn-primary" style="cursor:pointer;">UPLOAD A BACKGROUND IMAGE<input type="file" accept="image/*" id="stageBgFileInput" style="display:none;"></label>'
+          ) +
+          '<p class="hint" id="settingsStageBgStatusText" style="margin-top:8px;">'+escapeHtml(state.settingsStageBgStatus||'')+'</p>' +
+        '</div>'
+      ) : '') +
+
       (signedIn ? (
         '<div class="session-card">' +
           '<h3>Notifications</h3>' +
@@ -2353,6 +2389,44 @@ import { pushNotificationsConfigured } from './push-config.js';
         showToast('Password login added &mdash; you can now sign in with email + password on any device.');
       }catch(e){ showToast((e && e.message) ? e.message : 'Couldn&rsquo;t add that &mdash; try again.'); }
       pwSaveBtn.disabled = false; render();
+    });
+    const stageBgFileInput = document.getElementById('stageBgFileInput');
+    if(stageBgFileInput) stageBgFileInput.addEventListener('change', async function(){
+      const file = stageBgFileInput.files && stageBgFileInput.files[0];
+      if(!file) return;
+      const oldBg = presenterStageBg();
+      state.settingsStageBgStatus = 'Uploading... 0%';
+      const statusEl = document.getElementById('settingsStageBgStatusText');
+      if(statusEl) statusEl.textContent = state.settingsStageBgStatus;
+      try{
+        const result = await uploadMediaFile(file, state.user.uid, 'image', function(pct){
+          state.settingsStageBgStatus = 'Uploading... ' + pct + '%';
+          const el = document.getElementById('settingsStageBgStatusText');
+          if(el) el.textContent = state.settingsStageBgStatus;
+        });
+        await saveProfile(state.user.uid, { defaultStageBg: { url: result.url, storagePath: result.storagePath } });
+        // Best-effort cleanup of the file it's replacing -- never blocks the
+        // new one taking effect if this fails (same "never blocks" pattern
+        // deleteMedia()/deleteMediaFile() use everywhere else in this app).
+        if(oldBg && oldBg.storagePath) deleteMediaFile(oldBg.storagePath).catch(function(){});
+        state.settingsStageBgStatus = null;
+        showToast('Presentation background saved.');
+      }catch(e){
+        state.settingsStageBgStatus = null;
+        showToast('Upload failed &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why.' + describeError(e));
+      }
+      render();
+    });
+    const stageBgRemoveBtn = document.getElementById('stageBgRemoveBtn');
+    if(stageBgRemoveBtn) stageBgRemoveBtn.addEventListener('click', async function(){
+      const oldBg = presenterStageBg();
+      stageBgRemoveBtn.disabled = true;
+      try{
+        await saveProfile(state.user.uid, { defaultStageBg: null });
+        if(oldBg && oldBg.storagePath) deleteMediaFile(oldBg.storagePath).catch(function(){});
+        showToast('Removed.');
+      }catch(e){ showToast('Couldn&rsquo;t remove &mdash; try again.'); }
+      render();
     });
     const enablePushBtn = document.getElementById('settingsEnablePushBtn');
     if(enablePushBtn) enablePushBtn.addEventListener('click', async function(){
@@ -4063,7 +4137,7 @@ import { pushNotificationsConfigured } from './push-config.js';
     import('./content/devotionals.json').then(function(mod){
       devotionalsData = mod.default || mod;
       devotionalsLoading = false;
-      if(state.view === 'fellowship') render();
+      if(state.view === 'fellowship' || state.view === 'devotionals') render();
     }).catch(function(){ devotionalsLoading = false; });
   }
   function devotionalKeyFor(d){
@@ -4082,6 +4156,63 @@ import { pushNotificationsConfigured } from './push-config.js';
       if(day && day[which]) return day[which];
     }
     return null;
+  }
+
+  /* Standalone "Devotionals" section [2026-09-24] -- Jared: "make sure
+     that users can access it easily and can toggle from different days of
+     the year easily." Until now the only way to see a devotional at all
+     was the automatic daily Fellowship post, or an admin manually posting
+     one -- there was no place to just go read one, let alone browse any
+     OTHER day. This gives every user (signed in or not, matching the
+     free-feature decision recorded above) its own reachable page: a big
+     button on the Home screen (mirroring OPEN THE BIBLE (KJV) right next
+     to it) plus a permanent sidebar/hamburger entry, landing on TODAY's
+     reading with MORNING/EVENING tabs and a day-stepper (&larr;/&rarr; one
+     day at a time, or a date picker to jump straight to any day of the
+     year -- year itself is meaningless here since devotionalsData is only
+     ever keyed by MMDD, so the picker always shows 2024 (a leap year, so
+     Feb 29 is reachable) and only its month/day are read back out).
+
+     devotionalsViewMonth/Day track the day currently on SCREEN, separately
+     from "today" (todaysDevotionalEntry() above stays exactly as it was,
+     still only ever used for the automatic post + the composer's POST A
+     DEVOTIONAL picker, both of which are always about today's reading) --
+     null until renderDevotionals() first runs, at which point it's seeded
+     to the real current day. */
+  let devotionalsViewMonth = null;
+  let devotionalsViewDay = null;
+  let devotionalsViewWhich = 'am';
+  const DEVOTIONAL_MONTH_DAYS = [31,29,31,30,31,30,31,31,30,31,30,31];
+  const DEVOTIONAL_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  function ensureDevotionalsViewDate(){
+    if(devotionalsViewMonth != null) return;
+    const now = new Date();
+    devotionalsViewMonth = now.getMonth() + 1;
+    devotionalsViewDay = now.getDate();
+  }
+  function devotionalsViewKey(){
+    ensureDevotionalsViewDate();
+    return String(devotionalsViewMonth).padStart(2,'0') + String(devotionalsViewDay).padStart(2,'0');
+  }
+  function devotionalsViewLabel(){
+    ensureDevotionalsViewDate();
+    return DEVOTIONAL_MONTH_NAMES[devotionalsViewMonth-1] + ' ' + devotionalsViewDay;
+  }
+  // Only ever stepped by exactly +-1 (the &larr;/&rarr; buttons), so this
+  // single-step month-rollover walk is all the arithmetic it needs.
+  function devotionalsStepDay(delta){
+    ensureDevotionalsViewDate();
+    let m = devotionalsViewMonth, d = devotionalsViewDay + delta;
+    if(delta > 0){
+      while(d > DEVOTIONAL_MONTH_DAYS[m-1]){ d -= DEVOTIONAL_MONTH_DAYS[m-1]; m = (m===12?1:m+1); }
+    } else {
+      while(d < 1){ m = (m===1?12:m-1); d += DEVOTIONAL_MONTH_DAYS[m-1]; }
+    }
+    devotionalsViewMonth = m; devotionalsViewDay = d;
+  }
+  function devotionalsIsToday(){
+    const now = new Date();
+    return devotionalsViewMonth === (now.getMonth()+1) && devotionalsViewDay === now.getDate();
   }
 
   function bibleChapterNumbers(book){
@@ -4257,6 +4388,112 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="section-heading"><h2 class="uc">New Testament</h2></div>' + bookChips(ntBooks);
   }
 
+  function renderDevotionals(){
+    if(!devotionalsData) loadDevotionalsData();
+    ensureDevotionalsViewDate();
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="devotionalsBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Devotionals</p>' +
+        '<p class="landing-sub">Charles Spurgeon&rsquo;s &ldquo;Morning and Evening&rdquo; (1866) &mdash; a Morning and an Evening reading for every day of the year.</p>' +
+      '</div>' +
+      '<div id="devotionalsBody">' + renderDevotionalsBody() + '</div>';
+
+    document.getElementById('devotionalsBackBtn').addEventListener('click', function(){
+      state.view='landing'; render(); window.scrollTo(0,0);
+    });
+    attachDevotionalsBodyHandlers();
+  }
+
+  // Rebuilds just the #devotionalsBody pane (day nav / tabs / reading /
+  // share) in place, same "patch one stable container" reasoning as
+  // renderBibleBody()'s own callers -- stepping a day or flipping
+  // MORNING/EVENING shouldn't scroll the page back up to the hero text.
+  function renderDevotionalsBody(){
+    if(!devotionalsData){
+      return '<p class="hint" style="text-align:center;">'+(devotionalsLoading ? 'Loading today&rsquo;s devotional&hellip;' : 'Couldn&rsquo;t load the devotionals. Please try again.')+'</p>';
+    }
+    const key = devotionalsViewKey();
+    const day = devotionalsData[key] || null;
+    const entry = day ? day[devotionalsViewWhich] : null;
+    const isToday = devotionalsIsToday();
+    const canShare = !!state.user && (state.isEditor || hasFullAccess());
+    // Dummy year 2024 (a leap year, so Feb 29 is a selectable date) -- the
+    // <input type="date"> control only ever exists to let someone jump to
+    // an arbitrary month/day; its year is discarded the moment it fires
+    // (see the 'change' handler below).
+    const dateValue = '2024-' + String(devotionalsViewMonth).padStart(2,'0') + '-' + String(devotionalsViewDay).padStart(2,'0');
+    return (
+      '<div class="devotional-reader-nav">' +
+        '<button type="button" class="icon-btn-sm devotional-reader-step" id="devotionalPrevDayBtn" aria-label="Previous day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>' +
+        '<div class="devotional-reader-date">' +
+          '<span class="devotional-reader-date-label">'+escapeHtml(devotionalsViewLabel())+'</span>' +
+          (isToday ? '<span class="devotional-tag" style="margin-top:2px;">TODAY</span>' : '<button type="button" class="switch-account" id="devotionalTodayBtn">JUMP TO TODAY</button>') +
+        '</div>' +
+        '<button type="button" class="icon-btn-sm devotional-reader-step" id="devotionalNextDayBtn" aria-label="Next day"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>' +
+      '</div>' +
+      '<div class="field devotional-reader-jump"><label for="devotionalDateInput">JUMP TO A DATE</label><input type="date" id="devotionalDateInput" value="'+dateValue+'" aria-label="Jump to a date (day and month only -- this reading repeats every year)"></div>' +
+      '<div class="devotional-reader-tabs" role="tablist" aria-label="Morning or Evening reading">' +
+        '<button type="button" role="tab" aria-selected="'+(devotionalsViewWhich==='am'?'true':'false')+'" class="btn '+(devotionalsViewWhich==='am'?'btn-primary':'btn-ghost')+'" data-devotionals-which="am">MORNING</button>' +
+        '<button type="button" role="tab" aria-selected="'+(devotionalsViewWhich==='pm'?'true':'false')+'" class="btn '+(devotionalsViewWhich==='pm'?'btn-primary':'btn-ghost')+'" data-devotionals-which="pm">EVENING</button>' +
+      '</div>' +
+      (entry ? (
+        '<div class="devotional-reader-card">' +
+          '<span class="devotional-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg></span>' +
+          '<p class="devotional-reader-title">'+escapeHtml(entry.title||'')+(entry.ref?(' <span class="devotional-reader-ref">&mdash; '+escapeHtml(entry.ref)+'</span>'):'')+'</p>' +
+          '<p class="devotional-reader-text">'+escapeHtml(entry.text||'')+'</p>' +
+          (canShare ? '<button type="button" class="btn btn-ghost" id="shareDevotionalBtn" style="margin-top:16px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('link')+'</svg>SHARE TO FELLOWSHIP</button>' : '') +
+        '</div>'
+      ) : '<p class="hint" style="text-align:center;">No reading found for '+escapeHtml(devotionalsViewLabel())+'.</p>')
+    );
+  }
+
+  function attachDevotionalsBodyHandlers(){
+    const body = document.getElementById('devotionalsBody');
+    if(!body) return;
+    function refreshBody(){ body.innerHTML = renderDevotionalsBody(); attachDevotionalsBodyHandlers(); }
+    const prevBtn = document.getElementById('devotionalPrevDayBtn');
+    if(prevBtn) prevBtn.addEventListener('click', function(){ devotionalsStepDay(-1); refreshBody(); });
+    const nextBtn = document.getElementById('devotionalNextDayBtn');
+    if(nextBtn) nextBtn.addEventListener('click', function(){ devotionalsStepDay(1); refreshBody(); });
+    const todayBtn = document.getElementById('devotionalTodayBtn');
+    if(todayBtn) todayBtn.addEventListener('click', function(){
+      const now = new Date();
+      devotionalsViewMonth = now.getMonth()+1; devotionalsViewDay = now.getDate();
+      refreshBody();
+    });
+    const dateInput = document.getElementById('devotionalDateInput');
+    if(dateInput) dateInput.addEventListener('change', function(){
+      const parts = (dateInput.value||'').split('-'); // "2024-MM-DD" -- year is discarded, see this control's own comment above
+      if(parts.length===3){
+        devotionalsViewMonth = Number(parts[1]); devotionalsViewDay = Number(parts[2]);
+        refreshBody();
+      }
+    });
+    document.querySelectorAll('[data-devotionals-which]').forEach(function(btn){
+      btn.addEventListener('click', function(){ devotionalsViewWhich = btn.getAttribute('data-devotionals-which'); refreshBody(); });
+    });
+    const shareBtn = document.getElementById('shareDevotionalBtn');
+    if(shareBtn) shareBtn.addEventListener('click', async function(){
+      const day = devotionalsData[devotionalsViewKey()];
+      const entry = day ? day[devotionalsViewWhich] : null;
+      if(!entry || !state.user) return;
+      shareBtn.disabled = true;
+      try{
+        const bodyText = (entry.text || '').length > 1900 ? (entry.text.slice(0, 1900).trim() + '…') : (entry.text || '');
+        await createPost({
+          authorUid: state.user.uid, authorName: currentDisplayName() || 'Someone',
+          kind: 'devotional',
+          devotionalTitle: entry.title || '', devotionalRef: entry.ref || '',
+          text: bodyText,
+          mediaUrl: null, mediaKind: null, mediaStoragePath: null
+        });
+        showToast('Devotional shared to Fellowship.');
+      }catch(e){ showToast('Couldn&rsquo;t share &mdash; try again.'); }
+      shareBtn.disabled = false;
+    });
+  }
+
   /* ============ SERMON PRESENTATIONS ============
      [2026-09-04] Jared's ask: "Pastors can upload the outline of their
      preaching... there will be readymade templates," presented "kinda like
@@ -4334,8 +4571,32 @@ import { pushNotificationsConfigured } from './push-config.js';
   function newImageBlock(){
     return { id:blockId(), type:'image', x:20, y:15, w:60, h:70, url:'', storagePath:'' };
   }
+  // Default Presentation Background [2026-09-24] -- Jared: "add an option
+  // for presenters to upload a default screen or background image for
+  // songs and in-app built sermons." Settable from Settings (see
+  // renderSettings()'s "Presentation Background" card), stored on the
+  // presenter's own profile (users/{uid}.defaultStageBg) as the same
+  // {url, storagePath} shape uploadMediaFile() already returns everywhere
+  // else in this app. Two, deliberately different, application points:
+  //   - Brand new sermon slides (newSermonSlide() below) start with this as
+  //     their background instead of the plain Ivory default -- an EXISTING
+  //     slide never changes underneath someone; a per-slide background,
+  //     already a fully built feature (see the BACKGROUND swatch row in
+  //     renderSermonSlidesList()), always still overrides this per slide.
+  //   - Song lyrics on the stage/projector view have never had a
+  //     background-image concept before at all -- renderStageSlide() below
+  //     paints this behind the lyric lines directly.
+  function presenterStageBg(){
+    const bg = state.profile && state.profile.defaultStageBg;
+    return (bg && bg.url) ? bg : null;
+  }
   function newSermonSlide(){
-    return { id: 'slide-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), background: { type:'color', color:'default' }, blocks: [] };
+    const presenterBg = presenterStageBg();
+    return {
+      id: 'slide-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      background: presenterBg ? { type:'image', url: presenterBg.url, storagePath: presenterBg.storagePath || '' } : { type:'color', color:'default' },
+      blocks: []
+    };
   }
   function isBlocksSlide(slide){ return !!(slide && Array.isArray(slide.blocks)); }
   // Legacy-only label -- a blocks-based slide has no single "type" anymore,
@@ -4670,8 +4931,11 @@ import { pushNotificationsConfigured } from './push-config.js';
         '<p class="hint">Up to 300MB. A shorter, compressed (H.264/MP4) file uploads faster and plays back more reliably during a live service.</p>';
     } else if(mediaAddMode === 'slideshow'){
       body = titleField +
+        '<div class="field"><label for="mediaPptxFileInput">UPLOAD A POWERPOINT (.PPTX)</label><input type="file" id="mediaPptxFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" '+(mediaUploadBusy?'disabled':'')+'></div>' +
+        '<p class="hint">Upload your .pptx file directly &mdash; each slide is converted into an image automatically, in order.</p>' +
+        '<p class="hint" style="text-align:center;margin:12px 0;">&mdash; OR &mdash;</p>' +
         '<div class="field"><label for="mediaSlideshowFileInput">CHOOSE IMAGES, IN ORDER</label><input type="file" id="mediaSlideshowFileInput" accept="image/*" multiple '+(mediaUploadBusy?'disabled':'')+'></div>' +
-        '<p class="hint">Export your Canva/Google Slides/PowerPoint deck as images (or a PDF converted to images) first, then select every page here at once, in the order they should present.</p>';
+        '<p class="hint">Or export your Canva/Google Slides deck as images (or a PDF converted to images) first, then select every page here at once, in the order they should present.</p>';
     } else {
       body = titleField +
         '<div class="field"><label for="mediaEmbedUrlInput">EMBED / SHARE LINK</label><input type="text" id="mediaEmbedUrlInput" placeholder="https://..." value="'+escapeAttr(mediaAddEmbedUrl)+'" '+(mediaUploadBusy?'disabled':'')+'></div>' +
@@ -4933,6 +5197,40 @@ import { pushNotificationsConfigured } from './push-config.js';
       }catch(e){
         mediaUploadBusy = false; mediaUploadStatus = '';
         showToast('Upload failed partway through &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why. Try again once it is.' + describeError(e));
+        render();
+      }
+    });
+
+    // PowerPoint upload [2026-09-24]: unlike the other inputs, this one does
+    // NOT call finishUpload()/createMedia() -- convertPptxToSlideshow() runs
+    // server-side (see convertPptxToSlideshow in functions/index.js) and
+    // writes the media Firestore doc itself once conversion finishes, so all
+    // this needs to do is upload the raw file, await the conversion, then
+    // close the panel; the existing watchMyMedia() listener picks up the new
+    // item the moment that doc is written, same as any other realtime update.
+    const pptxInput = document.getElementById('mediaPptxFileInput');
+    if(pptxInput) pptxInput.addEventListener('change', async function(){
+      const file = pptxInput.files && pptxInput.files[0];
+      if(!file) return;
+      mediaUploadBusy = true; mediaUploadStatus = 'Uploading... 0%'; render();
+      try{
+        const title = mediaAddTitle.trim() || titleFromFilename(file.name);
+        const uploadResult = await uploadPptxSourceFile(file, state.user.uid, function(pct){
+          mediaUploadStatus = 'Uploading... ' + pct + '%';
+          const statusEl = document.getElementById('mediaUploadStatusText');
+          if(statusEl) statusEl.textContent = mediaUploadStatus;
+        });
+        mediaUploadStatus = 'Converting your slides... this can take a bit.';
+        const statusEl = document.getElementById('mediaUploadStatusText');
+        if(statusEl) statusEl.textContent = mediaUploadStatus;
+        await convertPptxToSlideshow(uploadResult.storagePath, title);
+        showToast('Added to your media library.');
+        mediaAddMode = null; mediaUploadBusy = false; mediaUploadStatus = '';
+        hostMediaUploadOpen = false;
+        render();
+      }catch(e){
+        mediaUploadBusy = false; mediaUploadStatus = '';
+        showToast('Couldn&rsquo;t convert that PowerPoint &mdash; try again, or use the image option below.' + describeError(e));
         render();
       }
     });
@@ -9143,6 +9441,15 @@ import { pushNotificationsConfigured } from './push-config.js';
     const sig = stageContentSignature(content);
     const fadeClass = (sig !== lastStageSignatures[key]) ? ' stage-fade-in' : '';
     lastStageSignatures[key] = sig;
+    // Default Presentation Background, applied here -- see
+    // presenterStageBg()'s own comment above for the full design. Only
+    // song lyrics and an OLD, not-yet-migrated legacy sermon slide (no
+    // background concept of its own) ever use this fallback; a blocks-based
+    // sermon slide always has its OWN background field (defaulted to this
+    // same image at creation time by newSermonSlide(), but freely
+    // overridable per slide afterward), so it's deliberately excluded here
+    // to avoid two different code paths fighting over the same slide.
+    const stageBg = presenterStageBg();
     let inner;
     if(content.type === 'sermon'){
       // Presentation builder [2026-09-08]: a blocks-based slide is fully
@@ -9200,7 +9507,16 @@ import { pushNotificationsConfigured } from './push-config.js';
         // skips this footer.
         (content.section.type === 'title' ? '' : '<p class="stage-footer">'+escapeHtml(content.song.title)+'</p>');
     }
-    return '<div class="stage-slide-body'+fadeClass+'">' + inner + '</div>';
+    const usesStageBg = !!stageBg && (
+      content.type === 'song' ||
+      (content.type === 'sermon' && content.slide && !isBlocksSlide(content.slide))
+    );
+    return usesStageBg ?
+      ('<div class="stage-slide-body'+fadeClass+' stage-slide-body-custom-bg">' +
+        '<img class="stage-slide-bg-img" src="'+escapeAttr(stageBg.url)+'" alt="">' +
+        '<div class="stage-slide-inner">' + inner + '</div>' +
+      '</div>') :
+      ('<div class="stage-slide-body'+fadeClass+'">' + inner + '</div>');
   }
 
   // Media/AVP [2026-09-06] -- makes the `.stage-media-video` element

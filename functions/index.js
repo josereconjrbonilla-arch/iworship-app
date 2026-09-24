@@ -22,6 +22,15 @@ const { setGlobalOptions } = require('firebase-functions/v2/options');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, FieldPath } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+const { getStorage } = require('firebase-admin/storage');
+// convertPptxToSlideshow [2026-09-24] -- see that function's own comment
+// further down for the full design. google-auth-library is what lets this
+// function authenticate to the pptx-converter Cloud Run service as
+// ITSELF (its own runtime service account), with no API key or secret to
+// store -- firebase-admin already depends on this package internally, but
+// it's declared directly in package.json (see that file's own comment)
+// since this is the first place this codebase calls it by name.
+const { GoogleAuth } = require('google-auth-library');
 // Devotionals [2026-09-24] -- see dailyDevotionalNotify's own comment
 // further down. This file is written by scripts/build-devotionals.mjs
 // (run locally -- this Node runtime has no outbound web access, so the
@@ -679,4 +688,147 @@ exports.dailyDevotionalNotify = onSchedule({ schedule: '0 22 * * *', timeZone: '
       return uid ? db.collection('users').doc(uid).collection('pushTokens').doc(token).delete() : Promise.resolve();
     }));
   }
+});
+
+// ------------------------------------------------------- convertPptxToSlideshow
+// Media Library's "UPLOAD A POWERPOINT (.PPTX)" option [2026-09-24] --
+// Jared: "can we just upload the pptx file directly? Instead of exporting
+// as images or embedding. Embedding is fine but google slides only has
+// the option to auto advance slides." The client has already uploaded the
+// raw .pptx to Storage at media/{uid}/pptx-source/{fileId} (see
+// uploadPptxSource() in firestore-data-layer.js and storage.rules); this
+// function does the real conversion and finishes the job exactly like a
+// manual "CHOOSE IMAGES, IN ORDER" slideshow upload would -- a
+// 'slideshow' media doc with a slides[] array of {url, storagePath} PNGs
+// -- so every existing slideshow-presenting code path (stage/projector,
+// split-screen, chart view, next/prev slide controls) picks this up with
+// zero changes on that side, and slide navigation is a real manual
+// next/prev like any other slideshow, not an embed's own auto-advance
+// timer.
+//
+// The actual pptx->PNG rendering happens in a separate, tiny Cloud Run
+// service (see pptx-converter/ at the repo root, and ITS OWN README.md
+// for the full "why a separate service, why LibreOffice, why not Google
+// Slides or a paid conversion API"). This function is the bridge: it
+// downloads the source file, calls that service, uploads the results,
+// writes the Firestore doc, and cleans up. Reaching that service uses
+// Google Cloud's own service-to-service identity (an ID token for this
+// function's own runtime service account, via google-auth-library) --
+// no API key or third-party secret to store, and pptx-converter is
+// deployed with --no-allow-unauthenticated so nothing else can call it.
+// See pptx-converter/DEPLOY.md for the one-time setup (including granting
+// this function's service account permission to invoke it) and for where
+// PPTX_CONVERTER_URL (read from functions/.env below) comes from --
+// this function fails with a clear message if that setup hasn't been
+// done yet.
+exports.convertPptxToSlideshow = onCall({ timeoutSeconds: 300, memory: '512MiB' }, async (request) => {
+  const uid = requireAuth(request);
+  const { storagePath, title } = request.data || {};
+
+  if (typeof storagePath !== 'string' || storagePath.indexOf('media/' + uid + '/pptx-source/') !== 0) {
+    throw new HttpsError('invalid-argument', 'storagePath must be this account\'s own uploaded PowerPoint file.');
+  }
+  if (typeof title !== 'string' || !title.trim()) {
+    throw new HttpsError('invalid-argument', 'A title is required.');
+  }
+
+  // Mirrors firestore.rules' media/{mediaId} create rule (isEditor() ||
+  // canHostRole()) exactly -- this function uses the Admin SDK, which
+  // bypasses those rules entirely, so the same permission check has to be
+  // done by hand here rather than relying on them.
+  const [editorSnap, adminSnap, profileSnap] = await Promise.all([
+    db.collection('editors').doc(uid).get(),
+    db.collection('admins').doc(uid).get(),
+    db.collection('users').doc(uid).get()
+  ]);
+  const profile = profileSnap.exists ? profileSnap.data() : {};
+  const hasFullAccess = adminSnap.exists || profile.isBetaTester === true;
+  const canHostRole = hasFullAccess || ['editor', 'musicDirector', 'individualPremium'].includes(profile.role);
+  if (!editorSnap.exists && !canHostRole) {
+    throw new HttpsError('permission-denied', 'Only an editor or someone who can host a session can upload media.');
+  }
+
+  const converterUrl = process.env.PPTX_CONVERTER_URL;
+  if (!converterUrl) {
+    throw new HttpsError('failed-precondition', 'The PowerPoint converter isn\'t set up yet -- see pptx-converter/DEPLOY.md.');
+  }
+
+  const bucket = getStorage().bucket();
+  const [pptxBuffer] = await bucket.file(storagePath).download();
+
+  // Authenticate to the Cloud Run service as THIS function's own identity
+  // -- no key file, no stored secret -- then call it with a plain fetch
+  // (Node 22's built-in fetch handles a raw Buffer body correctly; kept
+  // deliberately separate from google-auth-library's own request() helper
+  // to avoid any ambiguity in how a non-JSON Buffer body gets serialized).
+  const auth = new GoogleAuth();
+  const idTokenClient = await auth.getIdTokenClient(converterUrl);
+  const idToken = await idTokenClient.idTokenProvider.fetchIdToken(converterUrl);
+
+  let convertRes;
+  try {
+    convertRes = await fetch(converterUrl + '/convert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'Authorization': 'Bearer ' + idToken },
+      body: pptxBuffer
+    });
+  } catch (e) {
+    throw new HttpsError('internal', 'Couldn\'t reach the PowerPoint converter: ' + ((e && e.message) || 'network error') + '.');
+  }
+  if (!convertRes.ok) {
+    let detail = 'HTTP ' + convertRes.status;
+    try { const j = await convertRes.json(); if (j && j.error) detail = j.error; } catch (e) { /* non-JSON error body, keep the HTTP status as the detail */ }
+    throw new HttpsError('internal', 'Couldn\'t convert that PowerPoint: ' + detail);
+  }
+  const convertJson = await convertRes.json();
+  const slideBase64 = convertJson.slides || [];
+  if (!slideBase64.length) {
+    throw new HttpsError('internal', 'The converter didn\'t return any slides.');
+  }
+
+  const mediaId = db.collection('media').doc().id; // reserved up front so every slide's own storage path can be filed under this same id
+  const bucketName = bucket.name;
+  const uploadedPaths = [];
+  try {
+    const slides = [];
+    for (let i = 0; i < slideBase64.length; i++) {
+      const slidePath = 'media/' + uid + '/images/' + mediaId + '-' + (i + 1) + '.png';
+      await bucket.file(slidePath).save(Buffer.from(slideBase64[i], 'base64'), {
+        contentType: 'image/png',
+        resumable: false // a single small in-memory buffer, not a large streamed upload
+      });
+      uploadedPaths.push(slidePath);
+      // Same token-less "alt=media" URL shape storage.rules' own public
+      // read rule for this exact path (allow read: if true) already makes
+      // valid -- no signed URL or download token needed, same as every
+      // other public-readable file this app serves.
+      slides.push({
+        url: 'https://firebasestorage.googleapis.com/v0/b/' + bucketName + '/o/' + encodeURIComponent(slidePath) + '?alt=media',
+        storagePath: slidePath
+      });
+    }
+
+    await db.collection('media').doc(mediaId).set({
+      title: title.trim(),
+      type: 'slideshow',
+      slides,
+      folderId: null,
+      createdByUid: uid,
+      createdByName: profile.displayName || 'Someone',
+      sharedWithUids: [],
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    // Best-effort cleanup -- a failed write shouldn't leave orphaned slide
+    // images sitting in Storage with no media doc pointing at them.
+    await Promise.all(uploadedPaths.map((p) => bucket.file(p).delete().catch(() => {})));
+    throw new HttpsError('internal', 'Converted the slides but couldn\'t save them -- try again.');
+  }
+
+  // The raw .pptx source has done its job -- delete it rather than leaving
+  // a second, now-redundant copy of the file sitting in Storage forever.
+  await bucket.file(storagePath).delete().catch(() => {});
+
+  return { mediaId, slideCount: slideBase64.length };
 });

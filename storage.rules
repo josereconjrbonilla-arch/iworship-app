@@ -7,8 +7,26 @@ rules_version = '2';
 // the actual image/video bytes live here, under one path per uploader:
 //
 //   media/{uid}/images/{fileId}   -- a single full-screen image, or one
-//                                    slide of a slideshow import
+//                                    slide of a slideshow import (including
+//                                    one converted from a PowerPoint --
+//                                    see pptx-source/ below)
 //   media/{uid}/videos/{fileId}   -- a single uploaded video
+//   media/{uid}/pptx-source/{fileId} -- a raw .pptx file, uploaded here
+//                                    ONLY as a staging step for
+//                                    convertPptxToSlideshow() in
+//                                    functions/index.js to read (Admin
+//                                    SDK, bypasses these rules entirely)
+//                                    and convert into real slide images
+//                                    above -- see that function's own
+//                                    comment, and pptx-converter/'s
+//                                    README.md, for the full design. NOT
+//                                    world-readable like the other two
+//                                    paths (nobody presents a raw .pptx
+//                                    file directly), and deleted by that
+//                                    same function once conversion
+//                                    finishes, so it's only ever meant to
+//                                    exist for the few seconds a
+//                                    conversion is in flight.
 //
 // Read is wide open, same reasoning as every other public-readable
 // collection in this app (songs, rooms, sermons) -- a congregant's phone or
@@ -50,6 +68,19 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.uid == uid &&
         request.resource.size <= 300 * 1024 * 1024 &&
         request.resource.contentType.matches('video/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+    // See this file's header comment for the full design. No `allow read`
+    // at all -- unlike images/videos above, nothing ever presents this
+    // raw file directly, only convertPptxToSlideshow() reads it (via the
+    // Admin SDK, which isn't subject to these rules in the first place).
+    // 100 MB covers a real, image-heavy deck; content-type is left loose
+    // (some browsers report a plain octet-stream for .pptx depending on
+    // file association) since the real validation is the conversion
+    // itself succeeding or failing, not a guess at a MIME type here.
+    match /media/{uid}/pptx-source/{fileId} {
+      allow write: if request.auth != null && request.auth.uid == uid &&
+        request.resource.size <= 100 * 1024 * 1024;
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
     // Everything else is denied by default.

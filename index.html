@@ -94,29 +94,40 @@
        from the bottom tab bar's MORE tab instead of living up here. -->
   <header class="topbar">
     <div class="topbar-inner">
-      <!-- Back/Forward [2026-09-24, Jared: "make the navigation in the app
-           smoother please. add buttons that give faster back and forward."]
-           -- a PWA opened from the home screen (display:standalone, see
-           manifest) has NO browser chrome at all, so the native back/
-           forward buttons/swipe gesture a normal browser tab would offer
-           simply aren't there for anyone using it that way -- these two are
-           the on-screen stand-in, always in the same top-left spot on every
-           screen size (not just desktop, unlike #chatDock) since a phone
-           running the installed PWA is exactly the case with no native
-           alternative at all. They just call history.back()/forward() --
-           app.js wires up REAL browser history (pushState per view change,
-           a popstate listener to restore) elsewhere so those calls actually
-           go somewhere meaningful instead of leaving the page. See
-           syncHistoryForView()/applyViewSnapshot() in app.js. -->
-      <div class="nav-history-controls">
-        <button class="nav-history-btn" id="navBackBtn" aria-label="Back" title="Back">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
-        </button>
-        <button class="nav-history-btn" id="navForwardBtn" aria-label="Forward" title="Forward">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-      </div>
       <div class="brand-row">
+        <!-- Back/Forward [2026-09-24, Jared: "make the navigation in the
+             app smoother please. add buttons that give faster back and
+             forward."] -- a PWA opened from the home screen
+             (display:standalone, see manifest) has NO browser chrome at
+             all, so the native back/forward buttons/swipe gesture a normal
+             browser tab would offer simply aren't there for anyone using
+             it that way -- these two are the on-screen stand-in. They just
+             call history.back()/forward() -- app.js wires up REAL browser
+             history (pushState per view change, a popstate listener to
+             restore) elsewhere so those calls actually go somewhere
+             meaningful instead of leaving the page. See
+             syncHistoryForView()/applyViewSnapshot() in app.js.
+             [Fix, same day] Originally a sibling of .brand-row, sitting
+             directly in .topbar-inner -- broke the desktop (>=900px)
+             topbar layout (Jared: "layout at the top got messed up",
+             screenshot showed three stacked rows instead of one), because
+             .topbar-inner switches to a 2-column CSS grid at that width
+             (see styles.css's own "Desktop navigation redesign" comment)
+             built assuming EXACTLY two direct children (.brand-row,
+             .topbar-icons) -- a 3rd sibling there broke that grid's
+             auto-placement entirely. Nested inside .brand-row instead (its
+             own first child, before the brand button) so .topbar-inner
+             still only ever sees its original two children; .brand-row is
+             already a flex row on every width, so this just adds one more
+             item to its start, with no effect on the grid around it. -->
+        <div class="nav-history-controls">
+          <button class="nav-history-btn" id="navBackBtn" aria-label="Back" title="Back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <button class="nav-history-btn" id="navForwardBtn" aria-label="Forward" title="Forward">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
         <button class="brand" id="brandHome" aria-label="iWorship, go home">
           <svg viewBox="0 0 48 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round">
             <path d="M24 6 C19 2, 9 1, 4 4 L4 27 C9 24, 19 25, 24 29 C29 25, 39 24, 44 27 L44 4 C39 1, 29 2, 24 6 Z"/>

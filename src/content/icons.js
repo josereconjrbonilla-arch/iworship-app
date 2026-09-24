@@ -54,5 +54,12 @@ export const ICONS = {
     // topbar/sidebar -- deliberately different from `chat` above, which
     // stays reserved for the in-session host/live chat widget so the two
     // are never visually confused.
-    messenger:'<path d="M12 3C6.5 3 2 6.9 2 11.8c0 2.8 1.5 5.3 3.9 6.9V22l3.6-2c.8.2 1.6.3 2.5.3 5.5 0 10-3.9 10-8.8S17.5 3 12 3Z"/><path d="m7 13.5 3.6-3.8 2.7 2 3.6-3.8"/>'
+    messenger:'<path d="M12 3C6.5 3 2 6.9 2 11.8c0 2.8 1.5 5.3 3.9 6.9V22l3.6-2c.8.2 1.6.3 2.5.3 5.5 0 10-3.9 10-8.8S17.5 3 12 3Z"/><path d="m7 13.5 3.6-3.8 2.7 2 3.6-3.8"/>',
+    // Stage overrides [2026-09-24]: a solid filled square for the presenter
+    // toolbar's BLACK button -- the one icon in this whole set drawn
+    // filled (fill="currentColor" stroke="none" set right on the shape
+    // itself) rather than as an outline, on purpose, so it visually reads
+    // as "this fills the whole screen with a solid color" at a glance,
+    // distinct from every stroke-only glyph around it.
+    blackout:'<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" stroke="none"/>'
   };

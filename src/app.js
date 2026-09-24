@@ -1619,6 +1619,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       (signedIn ? (
         '<button type="button" class="hamburger-item" id="hbMyProfileBtn">MY PROFILE</button>' +
         '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
+        (canHost() ? '<button type="button" class="hamburger-item" id="hbMediaLibraryBtn">MEDIA LIBRARY</button>' : '') +
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
         ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
@@ -1641,6 +1642,8 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(hbProfile) hbProfile.addEventListener('click', function(){ goTo(openProfileEdit); });
     const hbDevotionals = document.getElementById('hbDevotionalsBtn');
     if(hbDevotionals) hbDevotionals.addEventListener('click', function(){ goTo(function(){ state.view='devotionals'; render(); window.scrollTo(0,0); }); });
+    const hbMediaLibrary = document.getElementById('hbMediaLibraryBtn');
+    if(hbMediaLibrary) hbMediaLibrary.addEventListener('click', function(){ goTo(function(){ openMediaLibrary('landing'); }); });
     const hbExplore = document.getElementById('hbExploreBtn');
     if(hbExplore) hbExplore.addEventListener('click', function(){ goTo(openExplore); });
     const hbPlans = document.getElementById('hbPlansBtn');
@@ -1705,6 +1708,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       '<div class="sidebar-section">' +
         '<button type="button" class="sidebar-item" id="sideMessagesBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('messenger')+'</svg><span>Messages</span>'+(unreadMsgs?(' <span class="notif-badge-inline">'+(unreadMsgs>99?'99+':unreadMsgs)+'</span>'):'')+'</button>' +
         '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
+        (canHost() ? ('<button type="button" class="sidebar-item" id="sideMediaLibraryBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>Media Library</span></button>') : '') +
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
         '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
         ((state.isEditor || hasFullAccess()) ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
@@ -1717,6 +1721,8 @@ import { pushNotificationsConfigured } from './push-config.js';
     document.getElementById('sideProfileBtn').addEventListener('click', openProfileEdit);
     document.getElementById('sideMessagesBtn').addEventListener('click', openMessages);
     document.getElementById('sideDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
+    const sideMediaLibraryBtn = document.getElementById('sideMediaLibraryBtn');
+    if(sideMediaLibraryBtn) sideMediaLibraryBtn.addEventListener('click', function(){ openMediaLibrary('landing'); });
     document.getElementById('sideExploreBtn').addEventListener('click', openExplore);
     document.getElementById('sidePlansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     const songReqBtn = document.getElementById('sideSongRequestsBtn');
@@ -2400,6 +2406,18 @@ import { pushNotificationsConfigured } from './push-config.js';
 
       '<button class="btn btn-ghost btn-lg btn-block" id="openBibleBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>OPEN THE BIBLE (KJV)</button>' +
       '<button class="btn btn-ghost btn-lg btn-block" id="openDevotionalsBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>DAILY DEVOTIONALS</button>' +
+      // Media Library, promoted to its own Home button [2026-09-24, Jared:
+      // "let's add it as a separate section as well just like devotionals
+      // (of course this will only appear to those who have host access)"
+      // -- then, separately, "i can't find the media library section" once
+      // the notification/upload-tray/back-forward work shipped without
+      // this]. Before this it was reachable ONLY via a small link buried
+      // inside the Host Hub card (renderHostHub(), below) -- easy to miss
+      // entirely if you'd never opened Host Hub for another reason. Mirrors
+      // the Bible/Devotionals buttons just above exactly (same style, same
+      // "big button on Home" treatment); canHost()-gated since it's a
+      // host-only tool, same gate the Host Hub link itself already used.
+      (canHost() ? ('<button class="btn btn-ghost btn-lg btn-block" id="openMediaLibraryFromHomeBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg>MEDIA LIBRARY</button>') : '') +
       '<p style="text-align:center;margin-top:14px;">' +
       (signedIn ? '<button class="switch-account" id="messagesBtn">MESSAGES</button> &middot; <button class="switch-account" id="landingShortsBtn">SHORTS</button> &middot; <button class="switch-account" id="landingExploreBtn">EXPLORE</button> &middot; ' : '') +
       '<button class="switch-account" id="plansBtn">PLANS &amp; PRICING</button>' +
@@ -2436,6 +2454,8 @@ import { pushNotificationsConfigured } from './push-config.js';
     document.getElementById('plansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     document.getElementById('openBibleBtn').addEventListener('click', function(){ state.view='bible'; render(); window.scrollTo(0,0); });
     document.getElementById('openDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
+    const openMediaLibraryFromHomeBtn = document.getElementById('openMediaLibraryFromHomeBtn');
+    if(openMediaLibraryFromHomeBtn) openMediaLibraryFromHomeBtn.addEventListener('click', function(){ openMediaLibrary('landing'); });
     const reviewRequestsBtn = document.getElementById('reviewRequestsBtn');
     if(reviewRequestsBtn) reviewRequestsBtn.addEventListener('click', function(){
       state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch();
@@ -2688,6 +2708,29 @@ import { pushNotificationsConfigured } from './push-config.js';
         '</div>'
       ) : '') +
 
+      // Presentation Logo [2026-09-24] -- Jared: "I also don't see the
+      // background logo, black, or option to add background." Exact mirror
+      // of the Presentation Background card just above (same gating, same
+      // upload/replace/remove flow) -- this is the image the new LOGO
+      // stage-override button in the presenter toolbar shows full-screen
+      // (see renderStageSlide()'s stage-override branch).
+      (signedIn && (canHost() || state.isEditor || hasFullAccess()) ? (
+        '<div class="session-card">' +
+          '<h3>Presentation Logo</h3>' +
+          '<p class="hint" style="margin-top:-6px;">Shown full-screen on the stage/projector view when you tap LOGO during a live session &mdash; handy for a church or ministry logo between songs.</p>' +
+          (presenterLogoUrl() ?
+            '<div class="stage-bg-preview"><img src="'+escapeAttr(presenterLogoUrl().url)+'" alt=""></div>' +
+            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">' +
+              '<label class="btn btn-ghost" style="cursor:pointer;">REPLACE<input type="file" accept="image/*" id="stageLogoFileInput" style="display:none;"></label>' +
+              '<button type="button" class="btn btn-ghost" id="stageLogoRemoveBtn">REMOVE</button>' +
+            '</div>'
+            :
+            '<label class="btn btn-primary" style="cursor:pointer;">UPLOAD A LOGO IMAGE<input type="file" accept="image/*" id="stageLogoFileInput" style="display:none;"></label>'
+          ) +
+          '<p class="hint" id="settingsStageLogoStatusText" style="margin-top:8px;">'+escapeHtml(state.settingsStageLogoStatus||'')+'</p>' +
+        '</div>'
+      ) : '') +
+
       (signedIn ? (
         '<div class="session-card">' +
           '<h3>Notifications</h3>' +
@@ -2771,6 +2814,43 @@ import { pushNotificationsConfigured } from './push-config.js';
       try{
         await saveProfile(state.user.uid, { defaultStageBg: null });
         if(oldBg && oldBg.storagePath) deleteMediaFile(oldBg.storagePath).catch(function(){});
+        showToast('Removed.');
+      }catch(e){ showToast('Couldn&rsquo;t remove &mdash; try again.'); }
+      render();
+    });
+    // Presentation Logo [2026-09-24] -- exact mirror of the Presentation
+    // Background upload/remove handlers just above.
+    const stageLogoFileInput = document.getElementById('stageLogoFileInput');
+    if(stageLogoFileInput) stageLogoFileInput.addEventListener('change', async function(){
+      const file = stageLogoFileInput.files && stageLogoFileInput.files[0];
+      if(!file) return;
+      const oldLogo = presenterLogoUrl();
+      state.settingsStageLogoStatus = 'Uploading... 0%';
+      const statusEl = document.getElementById('settingsStageLogoStatusText');
+      if(statusEl) statusEl.textContent = state.settingsStageLogoStatus;
+      try{
+        const result = await uploadMediaFile(file, state.user.uid, 'image', function(pct){
+          state.settingsStageLogoStatus = 'Uploading... ' + pct + '%';
+          const el = document.getElementById('settingsStageLogoStatusText');
+          if(el) el.textContent = state.settingsStageLogoStatus;
+        });
+        await saveProfile(state.user.uid, { presenterLogo: { url: result.url, storagePath: result.storagePath } });
+        if(oldLogo && oldLogo.storagePath) deleteMediaFile(oldLogo.storagePath).catch(function(){});
+        state.settingsStageLogoStatus = null;
+        showToast('Presentation logo saved.');
+      }catch(e){
+        state.settingsStageLogoStatus = null;
+        showToast('Upload failed &mdash; if Cloud Storage/Blaze billing isn&rsquo;t set up yet, that&rsquo;s why.' + describeError(e));
+      }
+      render();
+    });
+    const stageLogoRemoveBtn = document.getElementById('stageLogoRemoveBtn');
+    if(stageLogoRemoveBtn) stageLogoRemoveBtn.addEventListener('click', async function(){
+      const oldLogo = presenterLogoUrl();
+      stageLogoRemoveBtn.disabled = true;
+      try{
+        await saveProfile(state.user.uid, { presenterLogo: null });
+        if(oldLogo && oldLogo.storagePath) deleteMediaFile(oldLogo.storagePath).catch(function(){});
         showToast('Removed.');
       }catch(e){ showToast('Couldn&rsquo;t remove &mdash; try again.'); }
       render();
@@ -4937,6 +5017,16 @@ import { pushNotificationsConfigured } from './push-config.js';
     const bg = state.profile && state.profile.defaultStageBg;
     return (bg && bg.url) ? bg : null;
   }
+  // Presentation Logo [2026-09-24] -- exact mirror of presenterStageBg()
+  // just above, for the new "LOGO" stage override (see resolveRoomContent()'s
+  // comment). Stored the same way, on the presenter's own profile
+  // (users/{uid}.presenterLogo, same {url, storagePath} shape), with its
+  // own upload/replace/remove card in Settings right below Presentation
+  // Background.
+  function presenterLogoUrl(){
+    const logo = state.profile && state.profile.presenterLogo;
+    return (logo && logo.url) ? logo : null;
+  }
   function newSermonSlide(){
     const presenterBg = presenterStageBg();
     return {
@@ -6914,6 +7004,35 @@ import { pushNotificationsConfigured } from './push-config.js';
     const song = room.currentSongId ? state.library.find(function(s){ return s.id===room.currentSongId; }) : null;
     return { type:'song', song: song, section: song ? songSectionsForPresenting(song)[room.currentSectionIndex] : null, sectionIndex: room.currentSectionIndex };
   }
+  // Stage overrides [2026-09-24] -- Jared: "I also don't see the background
+  // logo, black, or option to add background." A quick cutaway the host
+  // can flip on/off during a live session (BLACK/LOGO/DEFAULT BG buttons in
+  // the presenter toolbar, see renderSessionHost()) without touching
+  // whatever song/sermon/verse/media is actually selected underneath --
+  // turning it back off (room.stageOverride back to null/absent) instantly
+  // reveals that same content exactly where it was, the same way a
+  // physical "blackout"/"logo" button on a video switcher works.
+  //
+  // Deliberately a SEPARATE function from resolveRoomContent() above,
+  // rather than a branch added to the top of it, because resolveRoomContent()
+  // is also the source of truth for things that must NEVER be blanked out
+  // by an override: resolvePreviewContent()'s "nothing staged yet" fallback
+  // and ensurePreviewFromLive() both need the REAL underlying selection to
+  // seed the host's own staging draft (a black screen has no song/sermon/
+  // verse to stage from), and renderSessionChart() (the musician's own
+  // chord-chart link) must keep showing the real chart throughout a
+  // blackout/logo cutaway -- musicians still need to see what they're
+  // playing even when the audience-facing screen is intentionally blank.
+  // Only the actual audience-facing surfaces -- the host's own LIVE column,
+  // the ?stage= projector, a congregant's in-app live view, and the
+  // projector's own keyboard-advance shortcut -- call this wrapper instead
+  // of resolveRoomContent() directly.
+  function resolveLiveDisplayContent(room){
+    if(room && room.stageOverride){
+      return { type:'stage-override', mode: room.stageOverride };
+    }
+    return resolveRoomContent(room);
+  }
   // Media/AVP [2026-09-06] -- exact mirror of findSermonById() just below,
   // for a STAGED (not-yet-live) media item.
   function findMediaById(id){
@@ -8081,6 +8200,11 @@ import { pushNotificationsConfigured } from './push-config.js';
   // interactive statusText built below (no nav, no jump chips, just "here's
   // what the congregation is actually looking at right now").
   function liveStatusSummary(content){
+    // Stage overrides [2026-09-24]: a plain-language readout so the "LIVE
+    // NOW" line never falsely reads "Nothing presented yet" while the
+    // screen is actually just cut away to black/the logo/the default bg --
+    // see resolveLiveDisplayContent()'s comment.
+    if(content.type === 'stage-override') return content.mode==='black' ? 'Black screen' : content.mode==='logo' ? 'Logo screen' : 'Default background';
     if(content.type === 'sermon') return content.slide ? ((content.sermon?escapeHtml(content.sermon.title)+' &middot; ':'')+'Slide '+(content.slideIndex+1)+' of '+content.slides.length) : 'Nothing presented yet';
     if(content.type === 'verse') return content.verseText ? escapeHtml(content.verseRef) : 'Nothing presented yet';
     if(content.type === 'media') return content.media ? (escapeHtml(content.media.title)+(content.media.type==='slideshow'?(' &middot; Slide '+(content.slideIndex+1)+' of '+content.slides.length):'')) : 'Nothing presented yet';
@@ -8389,7 +8513,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       main.innerHTML = '<p style="text-align:center;color:var(--ink-soft);padding:60px 20px;">'+(state.roomLoading ? 'Connecting&hellip;' : 'Session not found.')+'</p>';
       return;
     }
-    const content = resolveRoomContent(room); // TRUE LIVE content -- what the congregation/projector currently sees
+    const content = resolveLiveDisplayContent(room); // TRUE LIVE content (or a stage override) -- what the congregation/projector currently sees
     const isSermon = content.type === 'sermon';
     const isVerse = content.type === 'verse';
     const isMedia = content.type === 'media';
@@ -8518,6 +8642,23 @@ import { pushNotificationsConfigured } from './push-config.js';
           '</span>' +
         '</div>' +
         '<button type="button" class="icon-tool-btn" id="copyChartLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>CHART LINK</span><kbd class="icon-tool-kbd">L</kbd></button>' +
+        // Stage overrides [2026-09-24] -- Jared: "I also don't see the
+        // background logo, black, or option to add background." Three
+        // toggle buttons, same on/off-by-clicking-again convention as
+        // SPLIT SCREEN above: tapping an inactive one writes that mode to
+        // room.stageOverride (instantly cutting away from whatever's live,
+        // see resolveRoomContent()'s comment), tapping the already-active
+        // one clears it back to null (instantly back to normal live
+        // content) -- see the data-stage-override click handler below.
+        // Gated to iHaveControl, same as every other room-writing action on
+        // this screen (goLive(), changeSection(), etc.) -- a watch-only
+        // co-host shouldn't be able to blackout the screen out from under
+        // whoever actually has control.
+        (iHaveControl ? (
+          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='black'?' active':'')+'" id="stageBlackBtn" data-stage-override="black"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('blackout')+'</svg><span>BLACK</span><kbd class="icon-tool-kbd">B</kbd></button>' +
+          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='logo'?' active':'')+'" id="stageLogoOverrideBtn" data-stage-override="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>LOGO</span><kbd class="icon-tool-kbd">G</kbd></button>' +
+          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='default-bg'?' active':'')+'" id="stageDefaultBgBtn" data-stage-override="default-bg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('layers')+'</svg><span>DEFAULT BG</span><kbd class="icon-tool-kbd">D</kbd></button>'
+        ) : '') +
         // Co-hosting [2026-09-05]: owner-only -- manages coHostUids and
         // hands controllerUid to whichever one of them should be presenting
         // right now (see renderHostManagePanel()).
@@ -8703,6 +8844,18 @@ import { pushNotificationsConfigured } from './push-config.js';
       if(navigator.clipboard && navigator.clipboard.writeText){
         navigator.clipboard.writeText(link).then(function(){ showToast('Musician chart link copied.'); }).catch(function(){ showToast(link); });
       } else { showToast(link); }
+    });
+    // Stage overrides [2026-09-24] -- see the presenterToolbar markup's own
+    // comment just above for the toggle-on/toggle-off design. A direct,
+    // instant room write (not staged through hostPreview/GO LIVE) -- same
+    // "controls what's already showing" reasoning mediaPlayPause() uses.
+    document.querySelectorAll('[data-stage-override]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        if(!canControlRoom(room)){ showToast('You don&rsquo;t have control of this session right now.'); return; }
+        const mode = btn.getAttribute('data-stage-override');
+        const next = (room.stageOverride === mode) ? null : mode;
+        updateRoom(state.activeRoomCode, { stageOverride: next }).catch(function(){ showToast('Could not update the session. Try again.'); });
+      });
     });
     const manageHostsBtn = document.getElementById('manageHostsBtn');
     if(manageHostsBtn) manageHostsBtn.addEventListener('click', function(){ hostManageOpen = !hostManageOpen; hostManageQuery = ''; render(); });
@@ -9178,13 +9331,30 @@ import { pushNotificationsConfigured } from './push-config.js';
       main.innerHTML = '<p style="text-align:center;color:var(--ink-soft);padding:60px 20px;">'+(state.roomLoading ? 'Connecting&hellip;' : 'This session isn&rsquo;t available.')+'</p>';
       return;
     }
-    const content = resolveRoomContent(room);
+    const content = resolveLiveDisplayContent(room);
 
     main.innerHTML =
       '<span class="live-badge"><span class="live-dot"></span>LIVE</span>' +
       '<p style="text-align:center;color:var(--ink-soft);margin:14px 0 4px;">'+escapeHtml(room.name)+'</p>' +
       '<p style="text-align:center;color:var(--ink-soft);margin:0 0 18px;font-size:.9rem;">'+escapeHtml(room.hostName)+(room.churchName?' &middot; '+escapeHtml(room.churchName):'')+'</p>' +
-      (content.type==='sermon' ? (
+      // Stage overrides [2026-09-24] -- see resolveLiveDisplayContent()'s
+      // comment: a congregant's own in-app view follows the same BLACK/
+      // LOGO/DEFAULT BG cutaway as the big screen, since most churches
+      // want phones dark too during a prayer/offering moment, not just the
+      // projector.
+      (content.type==='stage-override' ? (
+        content.mode==='logo' ? (
+          presenterLogoUrl() ?
+            '<div class="slide-card" style="padding:0;overflow:hidden;background:#000;"><img src="'+escapeAttr(presenterLogoUrl().url)+'" style="display:block;width:100%;max-height:60vh;object-fit:contain;" alt=""></div>' :
+            '<div class="slide-card"><p class="lyric-line" style="color:var(--ink-soft);">No presentation logo uploaded yet.</p></div>'
+        ) : content.mode==='default-bg' ? (
+          presenterStageBg() ?
+            '<div class="slide-card" style="padding:0;overflow:hidden;"><img src="'+escapeAttr(presenterStageBg().url)+'" style="display:block;width:100%;max-height:60vh;object-fit:cover;" alt=""></div>' :
+            '<div class="slide-card"><p class="lyric-line" style="color:var(--ink-soft);">No presentation background uploaded yet.</p></div>'
+        ) : (
+          '<div class="slide-card" style="background:#000;min-height:160px;"></div>'
+        )
+      ) : content.type==='sermon' ? (
         content.slide ? (
           '<div class="slide-card"'+(isBlocksSlide(content.slide)?' style="padding:0;overflow:hidden;"':'')+'>' + (isBlocksSlide(content.slide) ? renderSlideCanvas(content.slide,'card') : sermonLinesAsCardHtml(content.slide)) + '</div>' +
           '<p class="slide-progress">'+(content.sermon?escapeHtml(content.sermon.title)+' &middot; ':'')+'Slide '+(content.slideIndex+1)+' of '+content.slides.length+'</p>'
@@ -9252,7 +9422,7 @@ import { pushNotificationsConfigured } from './push-config.js';
       return;
     }
     const isFull = stagePresentationMode;
-    const projectorContent = resolveRoomContent(room);
+    const projectorContent = resolveLiveDisplayContent(room);
     main.innerHTML =
       '<div class="stage-view">' +
         '<button type="button" class="stage-fullscreen-btn" id="stageFullscreenBtn" aria-label="'+(isFull?'Exit full screen':'Enter full screen, hide the header')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon(isFull?'compress':'expand')+'</svg></button>' +
@@ -9482,7 +9652,12 @@ import { pushNotificationsConfigured } from './push-config.js';
     if(e.key !== ' ' && e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     const room = state.room;
     if(!canControlRoom(room)) return;
-    const content = resolveRoomContent(room);
+    // Stage overrides [2026-09-24]: resolveLiveDisplayContent(), not
+    // resolveRoomContent() -- while blacked out/showing the logo/default
+    // bg, content.song/content.slide below are all undefined, so showNav
+    // stays false and Space/arrow keys correctly do nothing (nothing
+    // visible to advance through).
+    const content = resolveLiveDisplayContent(room);
     const isSermon = content.type === 'sermon';
     const isVerse = content.type === 'verse';
     // Media/AVP [2026-09-06] -- a live 'slideshow' pages through content.slides
@@ -9659,7 +9834,11 @@ import { pushNotificationsConfigured } from './push-config.js';
     const idByKey = {
       '1':'pickSongBtn', '2':'pickSermonBtn', '3':'pickVerseBtn', '4':'pickMediaBtn',
       'p':'openStageBtn', 's':'toggleSplitBtn', 'c':'chatFabBtn', 'h':'manageHostsBtn',
-      'l':'copyChartLinkBtn'
+      'l':'copyChartLinkBtn',
+      // Stage overrides [2026-09-24]: 'b'lack, lo'g'o, 'd'efault bg -- 'l'
+      // was already taken by chart Link, so LOGO's mnemonic letter had to
+      // move one letter in rather than collide.
+      'b':'stageBlackBtn', 'g':'stageLogoOverrideBtn', 'd':'stageDefaultBgBtn'
     };
     const id = idByKey[e.key.toLowerCase()];
     if(!id) return;
@@ -9804,6 +9983,7 @@ import { pushNotificationsConfigured } from './push-config.js';
   // whichever column's call happened to run second.
   let lastStageSignatures = {};
   function stageContentSignature(content){
+    if(content.type === 'stage-override') return 'stage-override:'+content.mode;
     if(content.type === 'sermon') return 'sermon:'+(content.sermon?content.sermon.id:'')+':'+content.slideIndex;
     if(content.type === 'verse') return 'verse:'+content.verseRef;
     if(content.type === 'song') return 'song:'+(content.song?content.song.id:'')+':'+content.sectionIndex;
@@ -9846,6 +10026,25 @@ import { pushNotificationsConfigured } from './push-config.js';
       inner = !content.verseText ? '<p class="stage-waiting">Waiting for the host to present a verse&hellip;</p>' :
         ('<p class="stage-label uc">SCRIPTURE</p>' +
         '<div class="stage-lines">' + sermonLinesAsStageHtml(verseAsSlide(content.verseRef, content.verseText, content.verseSegments)) + '</div>');
+    } else if(content.type === 'stage-override'){
+      // Stage overrides [2026-09-24] -- see resolveRoomContent()'s comment.
+      // Deliberately chromeless (no stage-label/stage-footer), same
+      // reasoning as the 'media' branch just below -- these are meant to
+      // fill the whole screen, not read as a lyric slide.
+      if(content.mode === 'logo'){
+        const logo = presenterLogoUrl();
+        inner = logo ?
+          '<div class="stage-media-frame"><img class="stage-media-img" src="'+escapeAttr(logo.url)+'" alt=""></div>' :
+          '<p class="stage-waiting">No presentation logo uploaded yet &mdash; add one in Settings.</p>';
+      } else if(content.mode === 'default-bg'){
+        inner = stageBg ?
+          '<div class="stage-media-frame stage-bg-only-frame"><img class="stage-media-img" src="'+escapeAttr(stageBg.url)+'" alt=""></div>' :
+          '<p class="stage-waiting">No presentation background uploaded yet &mdash; add one in Settings.</p>';
+      } else {
+        // 'black' (also the fallback for any unrecognized value) -- a
+        // plain black frame, .stage-media-frame's own background:#000.
+        inner = '<div class="stage-media-frame"></div>';
+      }
     } else if(content.type === 'media'){
       // Media/AVP [2026-09-06] -- deliberately chromeless (no stage-label/
       // stage-footer) for image/slideshow/video/embed: these are meant to

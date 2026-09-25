@@ -10110,32 +10110,43 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '</div>' +
         '<button type="button" class="icon-tool-btn" id="copyChartLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>CHART LINK</span><kbd class="icon-tool-kbd">L</kbd></button>' +
         // Livestream link [2026-09-24] -- see hostStreamLinkOpen's own
-        // comment above. Gated to iHaveControl, same as the stage-override
-        // buttons just below -- setting/clearing this is a live-session
-        // control, not a roster-management action like HOSTS.
+        // comment above. Gated to iHaveControl -- setting/clearing this is
+        // a live-session control, not a roster-management action like HOSTS.
         (iHaveControl ? ('<button type="button" class="icon-tool-btn'+(hostStreamLinkOpen?' active':'')+'" id="streamLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('link')+'</svg><span>STREAM LINK</span><kbd class="icon-tool-kbd">K</kbd></button>') : '') +
-        // Stage overrides [2026-09-24] -- Jared: "I also don't see the
-        // background logo, black, or option to add background." Three
-        // toggle buttons, same on/off-by-clicking-again convention as
-        // SPLIT SCREEN above: tapping an inactive one writes that mode to
-        // room.stageOverride (instantly cutting away from whatever's live,
-        // see resolveRoomContent()'s comment), tapping the already-active
-        // one clears it back to null (instantly back to normal live
-        // content) -- see the data-stage-override click handler below.
-        // Gated to iHaveControl, same as every other room-writing action on
-        // this screen (goLive(), changeSection(), etc.) -- a watch-only
-        // co-host shouldn't be able to blackout the screen out from under
-        // whoever actually has control.
-        (iHaveControl ? (
-          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='black'?' active':'')+'" id="stageBlackBtn" data-stage-override="black"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('blackout')+'</svg><span>BLACK</span><kbd class="icon-tool-kbd">B</kbd></button>' +
-          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='logo'?' active':'')+'" id="stageLogoOverrideBtn" data-stage-override="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>LOGO</span><kbd class="icon-tool-kbd">G</kbd></button>' +
-          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='default-bg'?' active':'')+'" id="stageDefaultBgBtn" data-stage-override="default-bg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('layers')+'</svg><span>DEFAULT BG</span><kbd class="icon-tool-kbd">D</kbd></button>'
-        ) : '') +
         // Co-hosting [2026-09-05]: owner-only -- manages coHostUids and
         // hands controllerUid to whichever one of them should be presenting
         // right now (see renderHostManagePanel()).
         (iAmOwner ? ('<button type="button" class="icon-tool-btn'+(hostManageOpen?' active':'')+'" id="manageHostsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>HOSTS</span><kbd class="icon-tool-kbd">H</kbd></button>') : '') +
       '</div>';
+
+    // Stage overrides [2026-09-24], pulled into their own row [2026-09-25]
+    // -- Jared: "move these somewhere more optimal, like sides or somewhere
+    // else so that part is not too crowded" -- screenshots showed BLACK/
+    // LOGO/DEFAULT BG landing on the presenter-toolbar's last wrapped row
+    // alongside its other 4-6 buttons on a phone-width screen, all squeezed
+    // together. True left/right "side rails" aren't practical on the
+    // single-column phone width this screen mostly runs at (there's no
+    // spare horizontal space beside the stage/controls column below), so
+    // instead this trio gets its own small labeled row -- always its own
+    // dedicated space instead of competing for width with the primary
+    // controls above, the same "give the crowded subgroup its own home"
+    // fix already used for CHAT (see the "Host-screen reorganization,
+    // round 2" comment in styles.css). Same toggle convention as before
+    // (tapping the already-active one clears it back to null -- see the
+    // data-stage-override click handler below) and same iHaveControl gate
+    // (a watch-only co-host shouldn't be able to blackout the screen out
+    // from under whoever actually has control) -- only the markup's
+    // location and its container styling changed, not the ids, the click
+    // handler, or the keyboard shortcuts, so nothing else needed updating.
+    const stageOverrideToolbar = iHaveControl ?
+      ('<div class="stage-override-toolbar">' +
+        '<span class="stage-override-label">STAGE OVERRIDE</span>' +
+        '<div class="stage-override-buttons">' +
+          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='black'?' active':'')+'" id="stageBlackBtn" data-stage-override="black"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('blackout')+'</svg><span>BLACK</span><kbd class="icon-tool-kbd">B</kbd></button>' +
+          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='logo'?' active':'')+'" id="stageLogoOverrideBtn" data-stage-override="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>LOGO</span><kbd class="icon-tool-kbd">G</kbd></button>' +
+          '<button type="button" class="icon-tool-btn'+(room.stageOverride==='default-bg'?' active':'')+'" id="stageDefaultBgBtn" data-stage-override="default-bg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('layers')+'</svg><span>DEFAULT BG</span><kbd class="icon-tool-kbd">D</kbd></button>' +
+        '</div>' +
+      '</div>') : '';
 
     // Resizable squares [2026-09-16]: an explicit inline height once the
     // host has dragged a square at least once (see hostStageColHeight's own
@@ -10163,6 +10174,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '</div>') : '') +
       '<p style="text-align:center;color:var(--ink-soft);margin-bottom:0;">'+escapeHtml(room.name)+(room.churchName?' &middot; '+escapeHtml(room.churchName):'')+'</p>' +
       presenterToolbar +
+      stageOverrideToolbar +
       '<div style="margin-top:20px;padding-bottom:calc(var(--now-live-bar-h, 90px) + 24px);">' +
         (presenterSplitView ?
           ('<div class="host-split-grid">' +

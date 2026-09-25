@@ -686,6 +686,25 @@
   }
   @media (hover:none) and (pointer:coarse){ .icon-tool-kbd{ display:none; } }
 
+  /* Stage override row [2026-09-25] -- Jared: screenshots showed BLACK/
+     LOGO/DEFAULT BG crammed onto the presenter-toolbar's last wrapped row
+     with its other buttons on a phone-width screen ("move these somewhere
+     more optimal... so that part is not too crowded"). Given its own small
+     bordered/labeled row below the main toolbar instead, so it always gets
+     dedicated width rather than fighting the 4-6 primary buttons above for
+     leftover space on the wrap. Buttons here use flex:0 1 auto (not the
+     shared .icon-tool-btn flex:1 1 0) so they size to their own content and
+     stay centered as a tight trio instead of stretching to fill the row. */
+  .stage-override-toolbar{
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    margin:14px 0 0; padding-top:12px; border-top:1px solid var(--border);
+  }
+  .stage-override-label{
+    font-size:.62rem; font-weight:800; letter-spacing:.12em; color:var(--ink-soft);
+  }
+  .stage-override-buttons{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .stage-override-buttons .icon-tool-btn{ flex:0 1 auto; }
+
   /* Host-screen reorganization, round 2 [2026-09-04] -- Jared: "put the
      'now live' section as a non moving part somewhere... chat can just be
      a floating chat at the bottom right... hard to navigate because

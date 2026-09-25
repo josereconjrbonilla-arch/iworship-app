@@ -1438,6 +1438,50 @@
        used to need are gone with it -- they only ever existed to grow that
        stale cap, which no longer exists to grow. */
     .topbar-icons{ width:100%; max-width:none; margin:0; padding-right:20px; justify-content:flex-end; }
+    /* Fix [2026-09-25] Jared: screenshots from both the installed desktop
+       app and a plain browser tab showing "iWorsh…" / "WORSHIP & F…"
+       ellipsis-truncated in the header, every time, not just on a narrow
+       window. Root cause: this breakpoint's own .topbar-inner rule above
+       hard-caps column 1 (the brand) at exactly 260px to stay pixel-
+       aligned with the sidebar -- fine for the brand alone, but the
+       Back/Forward buttons added into .brand-row on 2026-09-24 (see
+       index.html's #navBackBtn comment) sit in that SAME column and don't
+       shrink (.nav-history-controls is flex:none), so they permanently
+       eat ~86px out of the 260px before the brand/tagline ever get a
+       chance -- leaving .brand-text only ~100px, nowhere near enough for
+       "iWorship" (~106px) let alone "Worship & Fellowship" (~171px) at
+       their original sizing. That gap didn't exist before the Back/Forward
+       buttons landed, and wasn't caught because they were tested for
+       breaking the grid layout (see that same comment), not for shrinking
+       their neighbor. Rather than widen the 260px sidebar-aligned column
+       (a much bigger visual change) or drop the tagline Jared specifically
+       asked for on 2026-09-16, this shrinks the tagline's own footprint --
+       its heavy .16em letter-spacing was the single biggest cost, at this
+       length ("WORSHIP & FELLOWSHIP" as three words instead of the
+       original shorter "HYMNAL & CHORD BOOK"-shaped phrase) -- down to a
+       size that actually fits the space Back/Forward left it, confirmed
+       with a Playwright measurement (scrollWidth <= clientWidth) rather
+       than guessed. The ellipsis rule on .brand-name/.brand-tag (up top)
+       stays as a safety net for anything narrower still, it just no longer
+       fires here by default.
+       Two things reclaim the room: the Back/Forward buttons/gaps shrink a
+       little (desktop-only -- these stay full 36px tap targets on
+       mobile/tablet, where a finger, not a mouse pointer, has to hit them),
+       and the tagline's own oversized letter-spacing comes down closer to
+       the brand name's. Together that's enough for both lines to render
+       in full at every desktop width tested (900px up), confirmed with a
+       Playwright measurement (scrollWidth <= clientWidth) rather than
+       guessed. The ellipsis rule on .brand-name/.brand-tag (up top) stays
+       as a safety net for anything narrower still, it just no longer fires
+       here by default.
+    */
+    .nav-history-btn{ width:26px; height:26px; }
+    .nav-history-controls{ gap:2px; }
+    .brand-row{ gap:6px; padding-left:14px; }
+    .brand{ gap:8px; padding:2px; }
+    .brand svg{ width:28px; height:22px; }
+    .brand-name{ font-size:1.2rem; }
+    .brand-tag{ font-size:.6rem; letter-spacing:.02em; }
   }
   /* The projector/stage view (see body.stage-page/body.stage-hide-chrome
      elsewhere in this file) has to stay genuinely full-bleed even from a

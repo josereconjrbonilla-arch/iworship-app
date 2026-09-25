@@ -38,11 +38,25 @@ function readBody(req) {
 }
 
 // The actual conversion: pptx -> pdf (LibreOffice, the one piece of this
-// that genuinely understands PowerPoint's layout/fonts/images) -> one PNG
+// that genuinely understands PowerPoint's layout/fonts/images) -> one JPEG
 // per page (poppler-utils' pdftoppm). Everything happens in its own
 // throwaway temp folder, deleted in the `finally` whether this succeeds or
 // throws, so a failed conversion never leaves debris behind for the next
 // request.
+//
+// JPEG, not PNG [2026-09-25] -- Jared: "when presenting powerpoints, it
+// really is laggy when moving from one slide to another." A big chunk of
+// that lag is just file size: a losslessly-encoded 150dpi PNG of a
+// photo/gradient-heavy slide routinely runs several MB, and every one of
+// those bytes has to cross the network (church wifi/mobile hotspots,
+// exactly the kind of connection this app is built for) before the next
+// slide can paint. `-jpeg -jpegopt quality=85` typically cuts that by
+// 5-10x for photographic content, and shrinks even plain text-on-solid-
+// color slides too -- at quality 85 the compression artifacts aren't
+// visible on a projector, while the size drop directly shortens both the
+// first paint AND every background preload (see preloadSlideshowImages()
+// in app.js, the other half of this fix). Text-only decks were never the
+// slow case; this targets the ones that actually were.
 async function convertPptxToSlidePngs(pptxBuffer) {
   const workDir = path.join(os.tmpdir(), 'convert-' + crypto.randomUUID());
   await fs.mkdir(workDir, { recursive: true });
@@ -58,13 +72,13 @@ async function convertPptxToSlidePngs(pptxBuffer) {
     await fs.access(pdfPath); // throws a clear error if LibreOffice silently didn't produce one (e.g. a corrupt/non-pptx upload)
 
     const pagePrefix = path.join(workDir, 'slide');
-    await execFileAsync('pdftoppm', ['-png', '-r', '150', pdfPath, pagePrefix], { timeout: 120000 });
+    await execFileAsync('pdftoppm', ['-jpeg', '-jpegopt', 'quality=85', '-r', '150', pdfPath, pagePrefix], { timeout: 120000 });
 
-    // pdftoppm names output slide-1.png, slide-2.png, ... -- plain string
+    // pdftoppm names output slide-1.jpg, slide-2.jpg, ... -- plain string
     // sort matches page order correctly up to 9999 slides (zero-padding
     // isn't part of its naming), comfortably more than any real deck.
     const files = (await fs.readdir(workDir))
-      .filter((f) => f.startsWith('slide') && f.endsWith('.png'))
+      .filter((f) => f.startsWith('slide') && f.endsWith('.jpg'))
       .sort();
     if (!files.length) throw new Error('LibreOffice/pdftoppm produced no slide images.');
 

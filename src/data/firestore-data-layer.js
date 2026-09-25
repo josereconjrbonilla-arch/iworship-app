@@ -855,10 +855,17 @@ export function watchMediaSharedWithMe(uid, callback) {
 // mimeType/sizeBytes fields need; the caller (app.js) decides whether that's
 // the whole media item (a single image/video) or one entry in a slideshow's
 // `slides` array.
+//
+// cacheControl [2026-09-25] -- see convertPptxToSlideshow()'s matching
+// comment in functions/index.js for the full "laggy moving between slides"
+// reasoning; same fix applied here for a manually-uploaded image/video/
+// slideshow-image, not just a PPTX-converted one. `id` above is a fresh
+// timestamp+random string every call, so this path is never reused for
+// different bytes -- safe to mark cacheable for a full year.
 export function uploadMediaFile(file, uid, kind, onProgress) {
   const id = Date.now() + '-' + Math.random().toString(36).slice(2, 10);
   const path = 'media/' + uid + '/' + kind + 's/' + id;
-  const task = uploadBytesResumable(storageRef(storage, path), file, { contentType: file.type });
+  const task = uploadBytesResumable(storageRef(storage, path), file, { contentType: file.type, cacheControl: 'public, max-age=31536000, immutable' });
   return new Promise((resolve, reject) => {
     task.on('state_changed',
       (snap) => { if (onProgress) onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)); },

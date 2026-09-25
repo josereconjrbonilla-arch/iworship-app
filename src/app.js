@@ -667,7 +667,28 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function stopPublicRoomsWatch(){ if(unsubPublicRooms){ unsubPublicRooms(); unsubPublicRooms = null; } }
   function startPublicRoomsWatch(){
     stopPublicRoomsWatch();
-    unsubPublicRooms = watchPublicRooms(function(rooms){
+    // Reentrancy guard [2026-09-25, found while testing the mobile toast/
+    // tab-bar bug -- see this fix's own commit for the full story] --
+    // ensureLandingActiveSessionsWatchStarted() below only calls this when
+    // `!unsubPublicRooms`, on the assumption that assigning unsubPublicRooms
+    // is what "started" means. That's true for the real Firestore layer
+    // (onSnapshot's first callback is always at least a microtask away,
+    // long after this function has returned and unsubPublicRooms is set),
+    // but demo mode's watchPublicRooms() (local-data-layer.js) fires its
+    // callback SYNCHRONOUSLY, DURING the call below -- before its return
+    // value has been assigned to unsubPublicRooms. That callback calls
+    // render() while state.view === 'landing', which can reach
+    // ensureLandingActiveSessionsWatchStarted() again; it still sees
+    // unsubPublicRooms as null (the assignment hasn't happened yet) and
+    // starts a SECOND watch, which fires synchronously too, and so on --
+    // an unbounded synchronous render() recursion that stack-overflows the
+    // tab before it ever paints anything past the splash screen. Setting a
+    // truthy placeholder first closes that window: any reentrant call
+    // during the synchronous first fire now sees a non-null
+    // unsubPublicRooms and skips re-starting, exactly like it would once
+    // the real unsubscribe function lands a moment later.
+    unsubPublicRooms = function(){};
+    const unsub = watchPublicRooms(function(rooms){
       state.publicRooms = rooms;
       if(state.view === 'session-join') renderSessionJoin();
       // Active Sessions on the landing page [2026-09-24] -- see
@@ -675,6 +696,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // same watch/list rather than a second query.
       if(state.view === 'landing') render();
     });
+    unsubPublicRooms = unsub;
   }
 
   // "My Sessions" -- every room this signed-in person has ever hosted, so a
@@ -701,7 +723,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function startHostRoomsWatch(){
     stopHostRoomsWatch();
     if(!state.user) return;
-    unsubHostRooms = watchHostRooms(state.user.uid, function(rooms){
+    // Same synchronous-first-fire reentrancy guard as startPublicRoomsWatch()
+    // just above -- see that function's own comment for the full story.
+    unsubHostRooms = function(){};
+    const unsub = watchHostRooms(state.user.uid, function(rooms){
       hostRoomsList = rooms;
       if(state.view === 'my-sessions') render();
       // Active Sessions on the landing page [2026-09-24] -- a room doc only
@@ -711,6 +736,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // as-is for "which sessions are currently active."
       if(state.view === 'landing') render();
     });
+    unsubHostRooms = unsub;
   }
 
   // Co-hosting [2026-09-05]: the companion list to hostRoomsList above --
@@ -725,11 +751,15 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function startCoHostRoomsWatch(){
     stopCoHostRoomsWatch();
     if(!state.user) return;
-    unsubCoHostRooms = watchCoHostRooms(state.user.uid, function(rooms){
+    // Same synchronous-first-fire reentrancy guard as startPublicRoomsWatch()
+    // above -- see that function's own comment for the full story.
+    unsubCoHostRooms = function(){};
+    const unsub = watchCoHostRooms(state.user.uid, function(rooms){
       coHostRoomsList = rooms;
       if(state.view === 'my-sessions') render();
       if(state.view === 'landing') render();
     });
+    unsubCoHostRooms = unsub;
   }
   function toMillis(ts){
     if(!ts) return 0;
@@ -9648,6 +9678,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     } else if(isMedia){
       typeIcon = mediaTypeIcon(content.media);
       if(content.media){
+        // Slideshow preloading [2026-09-25] -- same call as
+        // renderStageSlide()'s slideshow branch, see preloadSlideshowImages()'s
+        // own comment. Added here too because in non-split-view mode the
+        // host's OWN device never calls renderStageSlide('live') at all --
+        // this now-live bar's small thumbnail is the only place a live
+        // slideshow ever renders on the host's own screen -- so without this
+        // call the host's own browser (and thus e.g. a future split-view
+        // toggle) wouldn't get warmed until the projector tab happened to.
+        // Idempotent (preloadedSlideshowIds), so calling it from two spots
+        // never double-fetches.
+        preloadSlideshowImages(content.media);
         statusText = escapeHtml(content.media.title) + (content.media.type==='slideshow' ? (' &middot; Slide '+(content.slideIndex+1)+' of '+content.slides.length) : '');
         if(content.media.type==='slideshow'){
           canPrev = iHaveControl && content.slideIndex > 0;
@@ -11636,6 +11677,54 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(content.type === 'media') return 'media:'+(content.media?content.media.id:'')+':'+content.slideIndex;
     return 'none';
   }
+  // Slideshow preloading [2026-09-25] -- Jared: "when presenting
+  // powerpoints, it really is laggy when moving from one slide to
+  // another." Previously each NEXT/PREV tap just wrote a brand new
+  // <img src=...> (see renderStageSlide()'s 'slideshow' branch below) and
+  // the browser had to fetch that slide's file from Cloud Storage cold --
+  // exactly the lag Jared saw, and exactly why showStagePending()'s veil
+  // (added 2026-09-24) had to exist at all in the first place. That veil
+  // hides the wait, it doesn't shorten it.
+  //
+  // A slideshow is NOT an infinite feed -- the instant any one slide is on
+  // screen, the whole ordered slides[] array (every URL, in order) is
+  // already sitting in memory (see resolveRoomContent()/
+  // resolvePreviewContent()'s 'media' branches). So rather than guessing
+  // which direction the host will go next, this just warms the browser's
+  // own HTTP cache for the ENTIRE deck the moment any slide of it renders:
+  // a bare `new Image()` per URL is enough to make the browser fetch (and
+  // decode) it in the background with no UI attached, no await, no effect
+  // on the slide actually on screen right now. By the time the host taps
+  // NEXT a few seconds later -- reading a lyric or making a point takes
+  // real time -- the next file is very likely already cached, so the
+  // <img> swap in renderStageSlide() paints instantly instead of blocking
+  // on a fresh network round trip. Paired with two other fixes for the
+  // same report: pptx-converter/server.js now renders JPEG instead of PNG
+  // (smaller files = faster fetch, whether preloaded or not), and both
+  // upload paths (functions/index.js's convertPptxToSlideshow,
+  // firestore-data-layer.js's uploadMediaFile) now mark every slide image
+  // cacheable for a year, so a slide already fetched once this session
+  // (or a past one) is never re-fetched at all.
+  //
+  // preloadedSlideshowIds guards against re-issuing the same fetches on
+  // every render (renderStageSlide runs on every room-doc update -- often
+  // several times a minute) -- once a given media id has been warmed in
+  // THIS browser tab, it's done for the rest of the page's lifetime. Each
+  // context that shows a slideshow -- the host's own PREVIEW/LIVE columns,
+  // the ?stage= projector tab/window, a congregant's in-app live view --
+  // is a separate tab with its own cache and its own module state, so each
+  // warms its own copy independently, which is exactly what's needed since
+  // each one is what actually has to paint the image on ITS OWN screen.
+  const preloadedSlideshowIds = new Set();
+  function preloadSlideshowImages(media){
+    if(!media || media.type !== 'slideshow' || !media.id || preloadedSlideshowIds.has(media.id)) return;
+    preloadedSlideshowIds.add(media.id);
+    (media.slides || []).forEach(function(slide){
+      if(!slide || !slide.url) return;
+      const img = new Image();
+      img.src = slide.url;
+    });
+  }
   function renderStageSlide(content, trackKey){
     const key = trackKey || 'default';
     const sig = stageContentSignature(content);
@@ -11699,6 +11788,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       } else if(content.media.type === 'image'){
         inner = '<div class="stage-media-frame"><img class="stage-media-img" src="'+escapeAttr(content.media.url)+'" alt=""></div>';
       } else if(content.media.type === 'slideshow'){
+        preloadSlideshowImages(content.media); // see this function's own comment -- warms the rest of the deck in the background
         const slide = content.slides[content.slideIndex];
         inner = '<div class="stage-media-frame"><img class="stage-media-img" src="'+escapeAttr(slide?slide.url:'')+'" alt=""></div>';
       } else if(content.media.type === 'video'){

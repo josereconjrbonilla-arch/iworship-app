@@ -699,7 +699,7 @@ exports.dailyDevotionalNotify = onSchedule({ schedule: '0 22 * * *', timeZone: '
 // uploadPptxSource() in firestore-data-layer.js and storage.rules); this
 // function does the real conversion and finishes the job exactly like a
 // manual "CHOOSE IMAGES, IN ORDER" slideshow upload would -- a
-// 'slideshow' media doc with a slides[] array of {url, storagePath} PNGs
+// 'slideshow' media doc with a slides[] array of {url, storagePath} JPEGs
 // -- so every existing slideshow-presenting code path (stage/projector,
 // split-screen, chart view, next/prev slide controls) picks this up with
 // zero changes on that side, and slide navigation is a real manual
@@ -792,10 +792,26 @@ exports.convertPptxToSlideshow = onCall({ timeoutSeconds: 300, memory: '512MiB' 
   try {
     const slides = [];
     for (let i = 0; i < slideBase64.length; i++) {
-      const slidePath = 'media/' + uid + '/images/' + mediaId + '-' + (i + 1) + '.png';
+      // JPEG, not PNG [2026-09-25] -- pptx-converter/server.js now renders
+      // pdftoppm output as JPEG (see that file's own comment on
+      // convertPptxToSlidePngs() for why: file size is the biggest lever
+      // on Jared's "laggy moving from one slide to another" report).
+      // cacheControl (nested under `metadata`, not top-level, per
+      // @google-cloud/storage's File#save() -- unlike `contentType`, which
+      // that SDK auto-promotes into metadata itself, `cacheControl` isn't)
+      // marks these objects as safe to cache for a full year: every
+      // slidePath below is unique per conversion (mediaId is freshly
+      // reserved above, never reused), so there's no "stale slide" risk --
+      // a browser/CDN that's already fetched a slide once never needs to
+      // ask again, which matters most for the SAME slide being revisited
+      // (a host backing up to repeat a chorus/point, or re-opening a room)
+      // and for storage.rules' allow-read-if-true meaning anyone who joins
+      // the room (congregant view, musician chart) fetches independently.
+      const slidePath = 'media/' + uid + '/images/' + mediaId + '-' + (i + 1) + '.jpg';
       await bucket.file(slidePath).save(Buffer.from(slideBase64[i], 'base64'), {
-        contentType: 'image/png',
-        resumable: false // a single small in-memory buffer, not a large streamed upload
+        contentType: 'image/jpeg',
+        resumable: false, // a single small in-memory buffer, not a large streamed upload
+        metadata: { cacheControl: 'public, max-age=31536000, immutable' }
       });
       uploadedPaths.push(slidePath);
       // Same token-less "alt=media" URL shape storage.rules' own public

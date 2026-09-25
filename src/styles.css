@@ -888,8 +888,21 @@
        the exact same `bottom` offset (plus a flat 40px buffer) on top of
        its own 100% height, so however tall --bottom-tabs-h/safe-area ever
        get, the hidden toast always lands at least 40px below the
-       viewport's bottom edge -- fully off-screen, not just approximately. */
-    position:fixed; bottom:calc(var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 14px); left:50%; transform:translateX(-50%) translateY(calc(100% + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 40px));
+       viewport's bottom edge -- fully off-screen, not just approximately.
+
+       --toast-lift [2026-09-25] -- 0px here, overridden further below only
+       while body.hosting-page is set (see that rule's own comment). Both
+       `bottom` AND this hidden-state `transform` add it, for the same
+       reason they both already add --bottom-tabs-h: whatever extra height
+       lifts the RESTING position off the tab bar has to ALSO get added to
+       the HIDDEN position's downward push, or the hidden toast once again
+       stops fully clearing the screen -- exactly the same class of bug as
+       the 2026-09-14 fix above, just re-introduced by the very next fix
+       below it (which only touched `bottom`, not this line). Routing both
+       through one shared variable instead of duplicating the hosting-page
+       lift in two places is what keeps them from drifting apart like that
+       again. */
+    position:fixed; bottom:calc(var(--toast-lift, 0px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 14px); left:50%; transform:translateX(-50%) translateY(calc(100% + var(--toast-lift, 0px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 40px));
     background:var(--pine); color:#fff; padding:14px 24px; border-radius:14px;
     font-weight:700; box-shadow:var(--shadow); transition:transform .25s ease; z-index:50;
     display:flex; align-items:center; gap:10px;
@@ -912,10 +925,28 @@
      the same var(--now-live-bar-h) this app already uses for the chat
      FAB/panel (see the comment above those two) whenever body.hosting-page
      is set (renderCurrentView(), app.js -- true only on session-host), so
-     it clears those controls instead of sitting on top of them. */
+     it clears those controls instead of sitting on top of them.
+
+     Bug found [2026-09-25] -- Jared: "the interface on mobile did not fit
+     the screen well," with a screenshot of the DEFAULT "Saved" pill (see
+     the 2026-09-14 comment above -- no showToast() call needed, it's
+     always in the DOM) sitting squarely on top of GO LIVE/PREV/NEXT and
+     the tab bar below it, while hosting. This rule used to override
+     `bottom` directly, lifting the RESTING position correctly -- but the
+     HIDDEN-state push-down above only ever accounted for --bottom-tabs-h,
+     never this bar's extra height, so the hidden toast landed exactly
+     --now-live-bar-h too high to actually be off-screen: on a real,
+     two-line "Your Controls" bar (~90-110px, comfortably more than the
+     toast's own ~48px), that's not a sliver poking up, it's the whole
+     pill sitting fully in view -- precisely what the screenshot showed,
+     because this is the toast's PERMANENT resting state, not a fired-and-
+     stuck animation. Now only sets --toast-lift (the shared variable the
+     base rule's `bottom` AND hidden-state `transform` both read), so
+     there's one lift value instead of two that can silently drift apart
+     again the next time either one gets touched on its own. */
   @media (max-width: 899px){
     body.hosting-page .toast{
-      bottom: calc(var(--now-live-bar-h, 72px) + var(--bottom-tabs-h) + env(safe-area-inset-bottom) + 14px);
+      --toast-lift: var(--now-live-bar-h, 72px);
     }
   }
 

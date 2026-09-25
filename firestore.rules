@@ -224,6 +224,23 @@ service cloud.firestore {
       return hasFullAccess() ||
         myRole() == 'editor' || myRole() == 'musicDirector' || myRole() == 'individualPremium';
     }
+    // Church roster management [2026-09-25] -- see users/{uid}'s own new
+    // "Church roster management" comment below and the churchRoster/{uid}
+    // block further down for the full design. These two are the exact
+    // enum this feature ever grants: the four leadership roles Jared named
+    // ("senior pastors and pastors, musical directors, editors") who can
+    // manage a church's roster, and the one additional non-leader role
+    // ("teams and members") that can be ON a roster without being able to
+    // manage it. 'individualPremium' is deliberately excluded from both --
+    // a personal paid plan, unrelated to church staffing, stays an
+    // Admin/billing-only assignment, never something a church leader can
+    // hand out or take away themselves.
+    function isChurchTeamLeaderRole(r) {
+      return r == 'seniorPastor' || r == 'pastor' || r == 'musicDirector' || r == 'editor';
+    }
+    function isChurchTeamMemberRole(r) {
+      return isChurchTeamLeaderRole(r) || r == 'musician';
+    }
     // Fellowship [2026-09-08] helpers -- see "FELLOWSHIP" below. blockedUidsOf
     // reads another uid's OWN block list (never mine) so a DM/message write
     // can check both directions: did I block them, or did they block me.
@@ -313,6 +330,61 @@ service cloud.firestore {
           request.auth.uid == uid &&
           !request.resource.data.diff(resource.data).affectedKeys()
             .hasAny(['role', 'churchId', 'pastorTitle', 'isBetaTester'])
+        ) ||
+        ( // [Church roster management, 2026-09-25] Jared: "a roster
+          // management list when churches have their own teams and
+          // members... visible to senior pastors and pastors, musical
+          // directors, editors" -- and, asked whether that should be
+          // view-only or let those four manage it themselves, his answer
+          // was self-service management: "build it along with other
+          // fixes and features pending." This is a real, narrow carve-out
+          // of the exact same four fields the privilege-escalation fix
+          // above otherwise locks to Admin-only -- deliberately shaped
+          // the same way that fix is, not loosened: a leader can ONLY
+          // ever touch role/churchId/pastorTitle (hasOnly below, same
+          // fields the self-branch's hasAny denies one level up, and
+          // isBetaTester is excluded from hasOnly entirely, so it can
+          // never ride along); can ONLY ever set churchId to their OWN
+          // church -- never move someone into, or touch anyone already
+          // in, a DIFFERENT church (the poaching guard on the last line);
+          // can only ever hand out one of the five church-team role
+          // values, never 'individualPremium' (Admin/billing-only, see
+          // isChurchTeamMemberRole() above) or anything outside that set;
+          // and can only ever act on someone who's CURRENTLY unaffiliated
+          // or already a member of that SAME church. A flat, equal
+          // permission across all four leader roles, matching how Jared
+          // described them ("senior pastors AND pastors, musical
+          // directors, editors") with no tiering between them -- worth
+          // revisiting if he ever wants e.g. only Senior Pastor able to
+          // remove another leader.
+          request.auth.uid != uid &&
+          isChurchTeamLeaderRole(myRole()) &&
+          myProfile().churchId != null &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'churchId', 'pastorTitle']) &&
+          (
+            ( // adding someone to the team, or changing an existing team
+              // member's role/title -- either way, ending up correctly
+              // placed in the LEADER'S OWN church with a valid role.
+              request.resource.data.get('churchId', null) == myProfile().churchId &&
+              isChurchTeamMemberRole(request.resource.data.get('role', null)) &&
+              (request.resource.data.get('role', null) == 'pastor' ||
+                request.resource.data.get('pastorTitle', null) == null) &&
+              (request.resource.data.get('pastorTitle', null) == null ||
+                (request.resource.data.pastorTitle is string && request.resource.data.pastorTitle.size() <= 200))
+            )
+            ||
+            ( // removing someone from the team entirely -- all three
+              // fields cleared together, never a partial state like "has
+              // a role but no church" or vice versa.
+              request.resource.data.get('churchId', null) == null &&
+              request.resource.data.get('role', null) == null &&
+              request.resource.data.get('pastorTitle', null) == null
+            )
+          ) &&
+          // Poaching guard: the target must currently belong to NO church,
+          // or already to this same leader's church -- never someone
+          // else's roster.
+          (resource.data.get('churchId', null) == null || resource.data.churchId == myProfile().churchId)
         )
       );
       allow delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
@@ -393,6 +465,69 @@ service cloud.firestore {
     match /churches/{churchId} {
       allow read: if true;
       allow write: if isAdmin(); // beta-phase direct write -- see "BETA PHASE" above
+    }
+
+    // ====================================================== CHURCH ROSTER
+    // [2026-09-25] Jared: "a roster management list when churches have
+    // their own teams and members... visible to senior pastors and
+    // pastors, musical directors, editors" (who can also manage it
+    // themselves -- see users/{uid}'s own "Church roster management"
+    // comment above for the full write-side reasoning; this block mirrors
+    // it field-for-field, since the two are always written together by
+    // saveProfile()). role/churchId live privately on users/{uid} --
+    // exactly right for an individual's own profile, but useless for
+    // "show me everyone in MY church," which needs a query (where
+    // churchId == mine), and there's no way to query a collection while
+    // keeping each document readable only by its own owner. This is a
+    // narrow index/mirror purely for that query: {uid, churchId, role,
+    // pastorTitle} ONLY, no displayName/photo at all -- the roster UI
+    // looks those up from the already-public directory/{uid} instead,
+    // exactly like renderHostManagePanel()'s co-host list already does
+    // for room co-hosting, so this collection never needs to duplicate
+    // (or go stale against) a display name or profile photo.
+    //
+    // Unlike directory, this is NOT public: role/church-leadership
+    // standing is a level more operationally sensitive than a display
+    // name, and nothing Jared asked for needs it world-readable. Read
+    // access is yourself, an Admin, or a fellow church-team leader of the
+    // SAME church -- exactly the query this collection exists to serve,
+    // and the standard Firestore pattern for it (a where(churchId==X)
+    // query combined with a rule checking resource.data.churchId against
+    // the requester's own churchId, both filtering on the same value).
+    match /churchRoster/{uid} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == uid ||
+        isAdmin() ||
+        (isChurchTeamLeaderRole(myRole()) && myProfile().churchId != null &&
+          resource.data.get('churchId', null) == myProfile().churchId)
+      );
+      allow create, update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          request.auth.uid != uid &&
+          isChurchTeamLeaderRole(myRole()) &&
+          myProfile().churchId != null &&
+          request.resource.data.uid == uid &&
+          (
+            (
+              request.resource.data.get('churchId', null) == myProfile().churchId &&
+              isChurchTeamMemberRole(request.resource.data.get('role', null))
+            )
+            ||
+            (
+              request.resource.data.get('churchId', null) == null &&
+              request.resource.data.get('role', null) == null
+            )
+          ) &&
+          (resource == null || resource.data.get('churchId', null) == null ||
+            resource.data.churchId == myProfile().churchId)
+        )
+      );
+      // No client-side delete path -- "remove from team" clears the fields
+      // above via an update instead (mirrors users/{uid}'s own
+      // delete-vs-clear split just above). A real document delete is
+      // Admin cleanup only.
+      allow delete: if isAdmin();
     }
 
     // ========================================================= SONG REQUESTS

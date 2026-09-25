@@ -320,6 +320,33 @@ export function watchDirectory(callback) {
   return () => { offProfiles(); offFollows(); };
 }
 
+// Church roster [2026-09-25] -- powers the new Church Team screen. The real
+// Firestore layer needs a dedicated churchRoster/{uid} mirror collection to
+// make "everyone in church X" queryable while keeping role/churchId private
+// on users/{uid} (see that file's saveProfile()/watchChurchRoster() and
+// firestore.rules' churchRoster/{uid} block for why) -- demo mode has no
+// such privacy boundary to begin with (same reasoning watchDirectory()'s own
+// comment gives, one function up), so this just re-scans the same local
+// profiles it already does and filters by churchId directly off role/
+// churchId, no separate mirror needed.
+export function watchChurchRoster(churchId, callback) {
+  const fire = () => {
+    if (!churchId) { callback([]); return; }
+    const list = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.indexOf(LS_PROFILE_PREFIX) === 0) {
+        const uid = key.slice(LS_PROFILE_PREFIX.length);
+        const p = readJSON(key, {});
+        if (p.churchId === churchId) list.push({ uid, churchId: p.churchId, role: p.role || null, pastorTitle: p.pastorTitle || null });
+      }
+    }
+    callback(list);
+  };
+  fire();
+  return onBroadcast('profiles', fire);
+}
+
 // ---------------------------------------------------------------------- Rooms
 function readRooms() { return readJSON(LS_ROOMS, {}); }
 function writeRooms(rooms) { writeJSON(LS_ROOMS, rooms); broadcast('rooms'); }

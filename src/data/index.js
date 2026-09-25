@@ -51,7 +51,7 @@ export const {
   createRoom, watchRoom, watchProjectorRoom, updateRoom, endRoom, watchPublicRooms, watchHostRooms, watchCoHostRooms, checkRoomPassword,
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   watchChurch, watchAllChurches, newChurchId, saveChurch, checkIsAdmin,
-  watchAllUsers, watchDirectory,
+  watchAllUsers, watchDirectory, watchChurchRoster,
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,

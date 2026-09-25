@@ -11,7 +11,7 @@ import {
   createRoom, watchRoom, watchProjectorRoom, updateRoom, endRoom, watchPublicRooms, watchHostRooms, watchCoHostRooms, checkRoomPassword,
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   checkIsAdmin, watchChurch, watchAllChurches, newChurchId, saveChurch,
-  watchAllUsers, watchDirectory,
+  watchAllUsers, watchDirectory, watchChurchRoster,
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,
@@ -140,6 +140,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     libraryView: 'public',   // 'public' | 'church' -- which the hymnal list is currently filtered by (see filteredResults())
     adminChurches: [],       // populated live by watchAllChurches() while state.view === 'admin'
     adminUsers: [],          // populated live by watchAllUsers() while state.view === 'admin' -- powers "find by name" search
+    churchRoster: [],        // populated live by watchChurchRoster(profile.churchId) while state.view === 'church-team' -- raw {uid,churchId,role,pastorTitle} rows; display info comes from state.directory (see startChurchRosterWatch())
     mySongRequests: [],      // populated live by watchMySongRequests() while state.view === 'song-request'
     pendingSongRequests: [], // populated live by watchPendingSongRequests() while state.view === 'song-request-queue'
     activeRoomCode: safeSessionGet('cv:activeRoomCode', null),
@@ -264,6 +265,30 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function canHost(){
     if(hasFullAccess() || state.isEditor) return true; // isEditor: legacy worship-team allowlist, untouched by the new roles
     return ['editor','musicDirector','individualPremium'].includes(myRole());
+  }
+
+  // Church Team roster [2026-09-25] -- Jared: "a roster management list
+  // when churches have their own teams and members. this should be
+  // visible to senior pastors and pastors, musical directors, editors" --
+  // and, per his follow-up, those same four can manage it themselves
+  // (add/remove members, assign roles), not just view it. This mirrors
+  // firestore.rules' isChurchTeamLeaderRole()/isChurchTeamMemberRole()
+  // exactly (same four leader roles, same fifth non-leader "musician"
+  // role that can be ON the roster without managing it) -- this client
+  // copy only ever gates which UI shows up; the rules functions are the
+  // real enforcement, same relationship as hasFullAccess()/canHost() and
+  // their own rules-side counterparts above.
+  const CHURCH_TEAM_LEADER_ROLES = ['seniorPastor','pastor','musicDirector','editor'];
+  const CHURCH_TEAM_MEMBER_ROLES = CHURCH_TEAM_LEADER_ROLES.concat(['musician']);
+  function isChurchTeamLeaderRole(r){ return CHURCH_TEAM_LEADER_ROLES.includes(r); }
+  // Deliberately NOT gated on hasFullAccess() the way canHost()/canAddSongs()
+  // are -- an Admin/beta tester has no special standing here unless they
+  // ALSO happen to hold one of the four leader roles on a real church of
+  // their own (Admin's cross-church role assignment already has its own
+  // screen, Admin Tools -- see renderAdmin()'s ROLE section -- this one is
+  // scoped to "my own church" specifically, per Jared's ask).
+  function canManageChurchTeam(){
+    return isChurchTeamLeaderRole(myRole()) && !!(state.profile && state.profile.churchId);
   }
 
   // Co-hosting [2026-09-05] -- Jared: "hosts can assign other hosts to their
@@ -1001,7 +1026,24 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // [2026-09-09, social redesign] shorts/explore/notifications joined
       // the same allowlist -- author names/photos and follower counts on
       // those screens all come from the same directory entries.
-      if(['sermons','programs','program-edit','fellowship','profile-view','profile-edit','messages','dm-thread','group-chat-thread','admin','shorts','explore','notifications','landing'].includes(state.view)) render();
+      if(['sermons','programs','program-edit','fellowship','profile-view','profile-edit','messages','dm-thread','group-chat-thread','admin','shorts','explore','notifications','landing','church-team'].includes(state.view)) render();
+    });
+  }
+  // Church Team roster [2026-09-25] -- only actually needed while the new
+  // Church Team screen is open, same "started/stopped there rather than
+  // alongside every sign-in-wide watch" reasoning as startDirectoryWatch()
+  // just above -- and that screen needs BOTH watches running together
+  // (this one for role/churchId, state.directory for name/photo), so every
+  // call site below starts/stops them as a pair.
+  let unsubChurchRoster = null;
+  function stopChurchRosterWatch(){ if(unsubChurchRoster){ unsubChurchRoster(); unsubChurchRoster = null; } }
+  function startChurchRosterWatch(){
+    stopChurchRosterWatch();
+    const churchId = state.profile && state.profile.churchId;
+    if(!churchId) { state.churchRoster = []; return; }
+    unsubChurchRoster = watchChurchRoster(churchId, function(list){
+      state.churchRoster = list;
+      if(state.view === 'church-team') render();
     });
   }
 
@@ -1093,6 +1135,50 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // shapes rather than assuming one.
   let unsubForegroundPush = null;
   function stopForegroundPushWatch(){ if(unsubForegroundPush){ unsubForegroundPush(); unsubForegroundPush = null; } }
+  // unsubMyDmThreads/unsubMyGroupChats declared here (rather than down by
+  // startMyDmThreadsWatch()/startMyGroupChatsWatch() further below, where
+  // they used to live) [2026-09-25, "test everything" pass] -- Playwright
+  // caught a real ReferenceError ("Cannot access 'unsubMyDmThreads' before
+  // initialization") firing on literally every fresh page load. Root cause:
+  // stopSocialWatches() (just below) is reached synchronously from
+  // watchAuth()'s very first, synchronous fire() -- i.e. while this file's
+  // OWN top-level script is still only partway through executing, long
+  // before the JS engine's execution pointer ever reaches those two `let`
+  // declarations further down the file (they were declared, TDZ-style,
+  // AFTER the point they're first actually needed). Every other unsub*
+  // var this same stopSocialWatches() touches was already safe because it
+  // happens to sit right here, above stopSocialWatches() -- these two just
+  // hadn't been moved up when the Fellowship DM/group-chat inbox watches
+  // were folded into stopSocialWatches() (see that function's own comment).
+  let unsubMyDmThreads = null;
+  let unsubMyGroupChats = null;
+  // TOUR_STEPS_GENERAL/TOUR_STEPS_HOST moved up here too, same
+  // "Cannot access before initialization" bug and same fix -- renderLanding()
+  // (called from the very first render() at the bottom of this file) calls
+  // maybeShowWelcomeTour() whenever a visitor isn't mid-profile-setup,
+  // reading TOUR_STEPS_GENERAL, which used to be declared thousands of
+  // lines further down than that first render() actually runs from.
+  const TOUR_STEPS_GENERAL = [
+    { icon:'book', title:'Welcome to iWorship', body:'Your church&rsquo;s home for hymns, live worship sessions, the Bible, and your community &mdash; all in one place. Here&rsquo;s a quick look around.' },
+    { icon:'search', title:'Browse &amp; Search the Hymnal', body:'Search by title, or browse by topic from the hymnal list. Tap any hymn to read the full lyrics, or switch to Play Mode for chords.' },
+    { icon:'heart', title:'Favorites &amp; Themes', body:'Tap the heart on any hymn to save it to your Favorites. Browse by Theme to find songs for a particular mood or occasion.' },
+    { icon:'book', title:'Bible &amp; Devotionals', body:'The full King James Bible and a daily devotional are both one tap away from Home &mdash; step through any day, or jump straight to today.' },
+    { icon:'users', title:'Join a Live Session', body:'When your church is hosting a live worship session, join with the room code (or scan the host&rsquo;s QR code) to follow along in real time.' }
+  ];
+  const TOUR_STEPS_HOST = [
+    { icon:'monitor', title:'You&rsquo;re Hosting', body:'This screen drives what your congregation sees live. Pick a song, sermon, Bible verse, or media clip from the tabs above, then stage it before it goes out.' },
+    { icon:'bolt', title:'Preview, Then Go Live', body:'Whatever you stage here only YOU see, in the PREVIEW column &mdash; tap GO LIVE (or double-tap Space/Enter) when you&rsquo;re ready for the congregation to see it too.' },
+    { icon:'link', title:'Room Code &amp; QR', body:'Share your room code, or let people scan the QR code under SHOW ROOM CODE, to join instantly &mdash; no typing needed.' },
+    { icon:'chat', title:'Chat &amp; Livestream Link', body:'The chat bubble opens a floating chat with your congregation. Paste your Facebook/YouTube Live link from STREAM LINK in the toolbar and it&rsquo;ll pin to the top of chat for everyone to find.' }
+  ];
+  let unsubDockMessages = null;
+  // The view as of the end of the LAST render() call -- see this var's
+  // original comment (still in place further down, where it's used) for
+  // the full "page-transition fade + real back/forward" design.
+  let lastRenderedView = null;
+  let lastPushedHistoryKey = null;
+  let historyNavInProgress = false;
+  let historySyncedOnce = false;
   function stopSocialWatches(){
     stopMyLikesWatch(); stopMySavedWatch(); stopMyFollowingWatch(); stopNotificationsWatch(); stopForegroundPushWatch();
     // [v36] DM/group-chat inbox watches folded in here too -- see
@@ -1157,6 +1243,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stopSharedMediaWatch();
     stopMyMediaFoldersWatch();
     stopDirectoryWatch();
+    stopChurchRosterWatch();
     stopSocialWatches();
     if(user){
       unsubProfile = watchProfile(user.uid, function(profile, meta){
@@ -1426,7 +1513,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // real, different value shows up.
   function syncColorThemeFromProfile(){
     if(!state.profile) return;
-    const wanted = state.profile.colorTheme || 'wine';
+    // Sanitize BEFORE comparing [2026-09-25 final sweep], not just inside
+    // applyColorTheme() -- state.profile.colorTheme is normally always one
+    // of COLOR_THEMES' own keys (the swatch UI can't write anything else),
+    // but if it were ever something else (direct devtools/SDK write bypassing
+    // the picker), comparing that raw value against currentColorTheme() --
+    // which is always already-sanitized -- would never match, calling
+    // applyColorTheme() (a setAttribute + localStorage write) on every single
+    // render from then on. Sanitizing wanted the same way applyColorTheme()
+    // itself does makes the comparison stable again after the first render.
+    const raw = state.profile.colorTheme || 'wine';
+    const wanted = isValidColorThemeKey(raw) ? raw : 'wine';
     if(wanted !== currentColorTheme()) applyColorTheme(wanted);
   }
   function renderColorThemeSwatches(){
@@ -1757,7 +1854,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // styles.css's ".chat-dock" rules) since the two can be on screen at
   // once (e.g. a host popped a Messages conversation while also running
   // the in-session live chat widget).
-  let unsubDockMessages = null;
+  // unsubDockMessages itself is declared up near the other unsub* vars
+  // (same "before initialization" bug/fix as unsubMyDmThreads there).
   function stopDockMessagesWatch(){ if(unsubDockMessages){ unsubDockMessages(); unsubDockMessages = null; } }
   function openChatDock(kind, id){
     if(!state.user || !id) return;
@@ -2015,6 +2113,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
         ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
+        (canManageChurchTeam() ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
         (state.isAdmin ? '<button type="button" class="hamburger-item" id="hbAdminBtn">ADMIN TOOLS</button>' : '') +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>' +
         '<button type="button" class="hamburger-item hamburger-item-danger" id="hbSignOutBtn">SIGN OUT</button>'
@@ -2042,6 +2141,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(hbPlans) hbPlans.addEventListener('click', function(){ goTo(function(){ state.view='plans'; render(); window.scrollTo(0,0); }); });
     const hbSongRequests = document.getElementById('hbSongRequestsBtn');
     if(hbSongRequests) hbSongRequests.addEventListener('click', function(){ goTo(function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); }); });
+    const hbChurchTeam = document.getElementById('hbChurchTeamBtn');
+    if(hbChurchTeam) hbChurchTeam.addEventListener('click', function(){ goTo(function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); }); });
     const hbAdmin = document.getElementById('hbAdminBtn');
     if(hbAdmin) hbAdmin.addEventListener('click', function(){ goTo(function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); }); });
     const hbSettings = document.getElementById('hbSettingsBtn');
@@ -2104,6 +2205,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
         '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
         ((state.isEditor || hasFullAccess()) ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
+        (canManageChurchTeam() ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
         (state.isAdmin ? ('<button type="button" class="sidebar-item" id="sideAdminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>Admin Tools</span></button>') : '') +
         '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
       '</div>' +
@@ -2119,6 +2221,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.getElementById('sidePlansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     const songReqBtn = document.getElementById('sideSongRequestsBtn');
     if(songReqBtn) songReqBtn.addEventListener('click', function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); });
+    const churchTeamBtn = document.getElementById('sideChurchTeamBtn');
+    if(churchTeamBtn) churchTeamBtn.addEventListener('click', function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); });
     const adminBtn = document.getElementById('sideAdminBtn');
     if(adminBtn) adminBtn.addEventListener('click', function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); });
     document.getElementById('sideSettingsBtn').addEventListener('click', function(){ state.view='settings'; render(); window.scrollTo(0,0); });
@@ -2525,12 +2629,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(idField && !state[idField]) return; // mid-transition -- don't persist a broken snapshot
     safeSessionSet('cv:lastView', JSON.stringify(idField ? { view: state.view, id: state[idField] } : { view: state.view }));
   }
-  // The view as of the end of the LAST render() call -- compared against
-  // state.view at the end of THIS one to tell "the screen actually
-  // navigated" apart from "render() fired again for some unrelated live-
-  // data reason." Powers both the page-transition fade and (a separate
-  // concern, see syncHistoryForView() below) real browser back/forward.
-  let lastRenderedView = null;
+  // lastRenderedView/lastPushedHistoryKey themselves are declared up near
+  // the other early state vars (same "before initialization" bug/fix as
+  // unsubMyDmThreads there) -- render() reads lastRenderedView on every
+  // single call, including the very first one at the bottom of this file.
 
   // Real back/forward [2026-09-24, Jared: "add buttons that give faster
   // back and forward"] -- until now state.view was a plain JS variable
@@ -2549,14 +2651,15 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // cv:lastView's ({view} or {view,id}) so the two features can share one
   // mental model even though they're solving different problems (surviving
   // a RELOAD vs. surviving a BACK tap).
-  let lastPushedHistoryKey = null;
   // Set for the duration of applying a popstate (or the very first
   // history.replaceState() call below) so syncHistoryForView() knows NOT
   // to push a brand-new entry for a navigation that's really just US
   // catching up to where the browser's history already pointed -- without
   // this, pressing Back would immediately push a fresh entry undoing the
-  // very navigation Back just performed.
-  let historyNavInProgress = false;
+  // very navigation Back just performed. (Declared up near the other early
+  // state vars now -- same "before initialization" bug/fix as
+  // unsubMyDmThreads there; syncHistoryForView() reads it from render(),
+  // which runs synchronously at boot, long before line 2658 here used to.)
   // The very FIRST time this fires (whatever screen the page happened to
   // load on -- landing, or a deep link), it REPLACES the initial, state-
   // less history entry the browser already created for the page load,
@@ -2564,8 +2667,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // Without this, the first real navigation's Back would land on that
   // duplicate, visually-identical-but-technically-different entry and
   // silently do nothing (correct, but confusingly so, on the very first
-  // press) -- replacing collapses that redundant step away.
-  let historySyncedOnce = false;
+  // press) -- replacing collapses that redundant step away. (Also moved up
+  // near the other early state vars -- same reasoning as historyNavInProgress
+  // just above.)
   function historyKeyFor(view, id){ return view + (id ? (':' + id) : ''); }
   function syncHistoryForView(){
     if(historyNavInProgress) return;
@@ -2795,6 +2899,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='admin') return renderAdmin();
     if(state.view==='song-request') return renderSongRequest();
     if(state.view==='song-request-queue') return renderSongRequestQueue();
+    if(state.view==='church-team') return renderChurchTeam();
     if(state.view==='bible') return renderBible();
     if(state.view==='devotionals') return renderDevotionals();
     if(state.view==='sermons') return renderSermons();
@@ -4133,6 +4238,185 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         assignBtn.disabled = false;
       }
     });
+  }
+
+  // ==================================================== CHURCH TEAM ROSTER
+  // [2026-09-25] Jared: "a roster management list when churches have their
+  // own teams and members. this should be visible to senior pastors and
+  // pastors, musical directors, editors" -- and, asked whether it should be
+  // view-only or let those four manage the roster themselves, his answer
+  // was self-service management, built alongside everything else pending
+  // deployment. A scoped, per-church counterpart to the Admin screen's own
+  // ROLE section just above -- same search-by-Account-ID/name/church box,
+  // same role dropdown, same setlist-items list markup (renderHostManagePanel()'s
+  // co-host panel uses the identical shape too) -- but reachable by any of
+  // the four church-team-leader roles for their OWN church, not Admin-only,
+  // and scoped to just that one church throughout. See firestore.rules'
+  // users/{uid} "Church roster management" comment and the churchRoster/
+  // {uid} block for the actual write-side enforcement this UI has to stay
+  // inside -- every write below goes through saveProfile(), same as the
+  // Admin form above, so it can never do anything the rules wouldn't have
+  // allowed an Admin-driven call to do either, just scoped narrower.
+  const CHURCH_TEAM_ROLE_OPTIONS = ADMIN_ROLES.filter(function(r){ return CHURCH_TEAM_MEMBER_ROLES.includes(r.id); });
+  let churchTeamQuery = '';
+  let churchTeamAddRole = 'musician';
+  let churchTeamAddPastorTitle = '';
+  let churchTeamRemoveConfirmUid = null;
+
+  function renderChurchTeamAddResults(query){
+    const raw = query.trim();
+    if(!raw) return '';
+    const q = raw.toLowerCase();
+    const onRoster = (state.churchRoster||[]).map(function(r){ return r.uid; });
+    const matches = state.directory.filter(function(u){
+      if(u.uid === (state.user && state.user.uid)) return false; // can't add yourself
+      if(onRoster.includes(u.uid)) return false; // already on the team
+      return u.uid === raw || (u.displayName||'').toLowerCase().includes(q) || (u.churchName||'').toLowerCase().includes(q);
+    }).slice(0,8);
+    if(!matches.length) return '<p class="hint">No matching accounts &mdash; try their exact Account ID.</p>';
+    return '<ul class="setlist-items">' + matches.map(function(u){
+      return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(u.displayName||'(no name set)')+
+        (u.churchName ? ' <span class="hint">&middot; '+escapeHtml(u.churchName)+'</span>' : '') + '</span>' +
+        '<span class="setlist-controls"><button type="button" class="icon-btn-sm" data-church-team-add="'+escapeAttr(u.uid)+'" aria-label="Add to team" style="width:auto;padding:0 8px;">ADD</button></span></li>';
+    }).join('') + '</ul>';
+  }
+  function renderChurchTeam(){
+    // Defensive snap-back, same pattern as renderSongRequestQueue()'s own
+    // guard just above -- role can change out from under this screen (e.g.
+    // another leader just removed this account from the team) while it's
+    // still on screen, and firestore.rules would reject every write here
+    // anyway once that happens.
+    if(!canManageChurchTeam()){ state.view='landing'; render(); return; }
+    const churchName = (state.church && state.church.name) || state.profile.churchName || 'your church';
+    const roster = (state.churchRoster||[]).slice().sort(function(a,b){
+      const an = directoryEntry(a.uid) ? (directoryEntry(a.uid).displayName||'') : '';
+      const bn = directoryEntry(b.uid) ? (directoryEntry(b.uid).displayName||'') : '';
+      return an.localeCompare(bn);
+    });
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="churchTeamBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Church Team</p>' +
+        '<p class="landing-sub">Everyone serving at '+escapeHtml(churchName)+'. Add or remove team members and change their roles &mdash; changes take effect immediately, no Admin needed.</p>' +
+      '</div>' +
+      '<div class="session-card">' +
+        '<p class="control-label uc" style="margin-bottom:10px;">Current Team</p>' +
+        (roster.length ? ('<ul class="setlist-items">' + roster.map(function(r){
+          const person = directoryEntry(r.uid);
+          const name = person ? (person.displayName||'(no name set)') : r.uid;
+          const confirming = churchTeamRemoveConfirmUid === r.uid;
+          return '<li class="setlist-item" style="flex-wrap:wrap;">' +
+            '<span class="setlist-title">'+escapeHtml(name)+'</span>' +
+            '<span class="setlist-controls" style="flex-wrap:wrap;gap:6px;">' +
+              (confirming ? (
+                '<span class="hint">Remove from the team?</span>' +
+                '<button type="button" class="icon-btn-sm" data-church-team-remove-yes="'+escapeAttr(r.uid)+'" style="width:auto;padding:0 8px;">YES, REMOVE</button>' +
+                '<button type="button" class="icon-btn-sm" data-church-team-remove-cancel="1" style="width:auto;padding:0 8px;">CANCEL</button>'
+              ) : (
+                '<select data-church-team-role="'+escapeAttr(r.uid)+'" style="width:auto;">' +
+                  CHURCH_TEAM_ROLE_OPTIONS.map(function(o){ return '<option value="'+escapeAttr(o.id)+'" '+(r.role===o.id?'selected':'')+'>'+escapeHtml(o.label)+'</option>'; }).join('') +
+                '</select>' +
+                (r.role === 'pastor' ? (
+                  '<input type="text" data-church-team-title="'+escapeAttr(r.uid)+'" placeholder="Pastor title (optional)" value="'+escapeAttr(r.pastorTitle||'')+'" style="width:160px;">' +
+                  '<button type="button" class="icon-btn-sm" data-church-team-save-title="'+escapeAttr(r.uid)+'" style="width:auto;padding:0 8px;">SAVE</button>'
+                ) : '') +
+                '<button type="button" class="icon-btn-sm" data-church-team-remove-ask="'+escapeAttr(r.uid)+'" aria-label="Remove from team" style="width:auto;padding:0 8px;">REMOVE</button>'
+              )) +
+            '</span></li>';
+        }).join('') + '</ul>') : '<p class="hint">No one on the team yet &mdash; add your first member below.</p>') +
+      '</div>' +
+      '<div class="session-card">' +
+        '<p class="control-label uc" style="margin-bottom:10px;">Add A Team Member</p>' +
+        '<div class="field"><label for="churchTeamRoleSelect">ROLE FOR NEW MEMBER</label><select id="churchTeamRoleSelect">' +
+          CHURCH_TEAM_ROLE_OPTIONS.map(function(o){ return '<option value="'+escapeAttr(o.id)+'" '+(churchTeamAddRole===o.id?'selected':'')+'>'+escapeHtml(o.label)+'</option>'; }).join('') +
+        '</select></div>' +
+        (churchTeamAddRole === 'pastor' ? ('<div class="field"><label for="churchTeamAddTitleInput">PASTOR TITLE <span style="text-transform:none;font-weight:400;">(optional, e.g. &ldquo;Youth Pastor&rdquo;)</span></label><input type="text" id="churchTeamAddTitleInput" value="'+escapeAttr(churchTeamAddPastorTitle)+'"></div>') : '') +
+        '<div class="field"><label for="churchTeamSearch">FIND BY ACCOUNT ID, NAME, OR CHURCH</label>' +
+          '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+          '<input type="text" id="churchTeamSearch" placeholder="Search&hellip;" value="'+escapeAttr(churchTeamQuery)+'" autocomplete="off"></div>' +
+        '</div>' +
+        '<p class="hint">They need an existing, free iWorship account first &mdash; find them by name/church above, or paste their exact Account ID.</p>' +
+        '<div id="churchTeamAddResults">' + renderChurchTeamAddResults(churchTeamQuery) + '</div>' +
+      '</div>';
+    attachChurchTeamHandlers();
+  }
+  function attachChurchTeamHandlers(){
+    document.getElementById('churchTeamBackBtn').addEventListener('click', function(){
+      stopChurchRosterWatch(); stopDirectoryWatch();
+      churchTeamQuery = ''; churchTeamRemoveConfirmUid = null;
+      state.view='landing'; render(); window.scrollTo(0,0);
+    });
+    function doAdd(uid){
+      const role = churchTeamAddRole;
+      const pastorTitle = role === 'pastor' ? (churchTeamAddPastorTitle.trim() || null) : null;
+      saveProfile(uid, { role: role, pastorTitle: pastorTitle, churchId: state.profile.churchId })
+        .then(function(){
+          showToast('Added to the team.');
+          churchTeamQuery = ''; churchTeamAddPastorTitle = '';
+          render();
+        })
+        .catch(function(){ showToast('Couldn&rsquo;t add that person &mdash; try again.'); render(); });
+    }
+    document.querySelectorAll('[data-church-team-add]').forEach(function(btn){
+      btn.addEventListener('click', function(){ btn.disabled = true; doAdd(btn.getAttribute('data-church-team-add')); });
+    });
+    document.querySelectorAll('[data-church-team-role]').forEach(function(sel){
+      sel.addEventListener('change', function(e){
+        const uid = sel.getAttribute('data-church-team-role');
+        const newRole = e.target.value;
+        const current = (state.churchRoster||[]).find(function(r){ return r.uid===uid; });
+        saveProfile(uid, {
+          role: newRole,
+          pastorTitle: newRole === 'pastor' ? ((current && current.pastorTitle) || null) : null,
+          churchId: state.profile.churchId
+        })
+          .then(function(){ showToast('Role updated.'); render(); })
+          .catch(function(){ showToast('Couldn&rsquo;t update that role &mdash; try again.'); render(); });
+      });
+    });
+    document.querySelectorAll('[data-church-team-save-title]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const uid = btn.getAttribute('data-church-team-save-title');
+        const titleInput = document.querySelector('[data-church-team-title="'+uid+'"]');
+        const title = titleInput ? titleInput.value.trim() : '';
+        btn.disabled = true;
+        saveProfile(uid, { role: 'pastor', pastorTitle: title || null, churchId: state.profile.churchId })
+          .then(function(){ showToast('Title saved.'); })
+          .catch(function(){ showToast('Couldn&rsquo;t save that title &mdash; try again.'); })
+          .finally(function(){ btn.disabled = false; });
+      });
+    });
+    document.querySelectorAll('[data-church-team-remove-ask]').forEach(function(btn){
+      btn.addEventListener('click', function(){ churchTeamRemoveConfirmUid = btn.getAttribute('data-church-team-remove-ask'); render(); });
+    });
+    document.querySelectorAll('[data-church-team-remove-cancel]').forEach(function(btn){
+      btn.addEventListener('click', function(){ churchTeamRemoveConfirmUid = null; render(); });
+    });
+    document.querySelectorAll('[data-church-team-remove-yes]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const uid = btn.getAttribute('data-church-team-remove-yes');
+        btn.disabled = true;
+        saveProfile(uid, { role: null, pastorTitle: null, churchId: null })
+          .then(function(){ showToast('Removed from the team.'); churchTeamRemoveConfirmUid = null; render(); })
+          .catch(function(){ showToast('Couldn&rsquo;t remove that person &mdash; try again.'); render(); });
+      });
+    });
+    const roleSelect = document.getElementById('churchTeamRoleSelect');
+    if(roleSelect) roleSelect.addEventListener('change', function(e){ churchTeamAddRole = e.target.value; render(); });
+    const addTitleInput = document.getElementById('churchTeamAddTitleInput');
+    if(addTitleInput) addTitleInput.addEventListener('input', function(e){ churchTeamAddPastorTitle = e.target.value; });
+    const searchEl = document.getElementById('churchTeamSearch');
+    if(searchEl && !searchEl.dataset.wired){
+      searchEl.dataset.wired = '1';
+      searchEl.addEventListener('input', function(e){
+        churchTeamQuery = e.target.value;
+        const holder = document.getElementById('churchTeamAddResults');
+        if(holder) holder.innerHTML = renderChurchTeamAddResults(churchTeamQuery);
+        document.querySelectorAll('[data-church-team-add]').forEach(function(btn){
+          btn.addEventListener('click', function(){ btn.disabled = true; doAdd(btn.getAttribute('data-church-team-add')); });
+        });
+      });
+    }
   }
 
   function renderAdminBetaForm(){
@@ -10306,15 +10590,28 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         // percentage readout plus -/+ steppers, clamped at
         // STAGE_FONT_SCALE_MIN/MAX (so the buttons visibly stop doing
         // anything rather than just silently capping).
-        '<div class="icon-tool-btn stage-font-control" aria-label="Projector text size">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('monitor')+'</svg>' +
-          '<span>TEXT SIZE</span>' +
-          '<span class="stage-font-steppers">' +
-            '<button type="button" class="stage-font-step-btn" id="stageFontDownBtn" aria-label="Decrease projector text size" title="Decrease projector text size">&minus;</button>' +
-            '<span class="stage-font-pct">'+Math.round(hostStageFontScale*100)+'%</span>' +
-            '<button type="button" class="stage-font-step-btn" id="stageFontUpBtn" aria-label="Increase projector text size" title="Increase projector text size">&plus;</button>' +
-          '</span>' +
-        '</div>' +
+        // Gated to iHaveControl [2026-09-25 final sweep] -- same reasoning
+        // as STREAM LINK right below: this writes straight to the room doc
+        // (see setStageFontScale()), which the rules only let the current
+        // controller do. Before this gate, a co-host WITHOUT control could
+        // tap +/-, see their own percentage change instantly (the local
+        // state updates before the network call even starts), then watch it
+        // silently snap back once the room's real value arrived, with a
+        // disconnected "try again" toast in between that was never
+        // actionable advice for them. Hiding the control entirely for a
+        // non-controller avoids the whole confusing sequence, same as it
+        // does for STREAM LINK.
+        (iHaveControl ? (
+          '<div class="icon-tool-btn stage-font-control" aria-label="Projector text size">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('monitor')+'</svg>' +
+            '<span>TEXT SIZE</span>' +
+            '<span class="stage-font-steppers">' +
+              '<button type="button" class="stage-font-step-btn" id="stageFontDownBtn" aria-label="Decrease projector text size" title="Decrease projector text size">&minus;</button>' +
+              '<span class="stage-font-pct">'+Math.round(hostStageFontScale*100)+'%</span>' +
+              '<button type="button" class="stage-font-step-btn" id="stageFontUpBtn" aria-label="Increase projector text size" title="Increase projector text size">&plus;</button>' +
+            '</span>' +
+          '</div>'
+        ) : '') +
         '<button type="button" class="icon-tool-btn" id="copyChartLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>CHART LINK</span><kbd class="icon-tool-kbd">L</kbd></button>' +
         // Livestream link [2026-09-24] -- see hostStreamLinkOpen's own
         // comment above. Gated to iHaveControl -- setting/clearing this is
@@ -10546,10 +10843,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       safeSet(SPLIT_VIEW_KEY, presenterSplitView ? '1' : '0');
       render();
     });
-    document.getElementById('stageFontDownBtn').addEventListener('click', function(){
+    // stageFontDownBtn/stageFontUpBtn are only rendered when iHaveControl
+    // (see presenterToolbar markup above) -- null-checked the same way
+    // manageHostsBtn/streamLinkBtn are just below, since this whole
+    // attach function runs for every host-view render regardless of who
+    // currently has control.
+    const stageFontDownBtn = document.getElementById('stageFontDownBtn');
+    if(stageFontDownBtn) stageFontDownBtn.addEventListener('click', function(){
       setStageFontScale(hostStageFontScale - STAGE_FONT_SCALE_STEP);
     });
-    document.getElementById('stageFontUpBtn').addEventListener('click', function(){
+    const stageFontUpBtn = document.getElementById('stageFontUpBtn');
+    if(stageFontUpBtn) stageFontUpBtn.addEventListener('click', function(){
       setStageFontScale(hostStageFontScale + STAGE_FONT_SCALE_STEP);
     });
     attachStageColResize();
@@ -12257,7 +12561,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
 
   // ---- DM threads (inbox) + one open thread's messages -------------------
-  let unsubMyDmThreads = null;
+  // unsubMyDmThreads itself is declared up near the other unsub* vars (see
+  // that declaration's own comment) -- kept it out of this spot on purpose.
   function stopMyDmThreadsWatch(){ if(unsubMyDmThreads){ unsubMyDmThreads(); unsubMyDmThreads = null; } }
   function startMyDmThreadsWatch(){
     stopMyDmThreadsWatch();
@@ -12295,7 +12600,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
 
   // ---- group chats (inbox) + one open group's messages -------------------
-  let unsubMyGroupChats = null;
+  // unsubMyGroupChats itself is declared up near the other unsub* vars (see
+  // unsubMyDmThreads' comment there) -- kept it out of this spot on purpose.
   function stopMyGroupChatsWatch(){ if(unsubMyGroupChats){ unsubMyGroupChats(); unsubMyGroupChats = null; } }
   function startMyGroupChatsWatch(){
     stopMyGroupChatsWatch();
@@ -14178,19 +14484,6 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // per-device localStorage flag rather than a synced profile field --
   // seeing it once on THIS device is enough, and this avoids a new
   // Firestore field/rules for something this low-stakes.
-  const TOUR_STEPS_GENERAL = [
-    { icon:'book', title:'Welcome to iWorship', body:'Your church&rsquo;s home for hymns, live worship sessions, the Bible, and your community &mdash; all in one place. Here&rsquo;s a quick look around.' },
-    { icon:'search', title:'Browse &amp; Search the Hymnal', body:'Search by title, or browse by topic from the hymnal list. Tap any hymn to read the full lyrics, or switch to Play Mode for chords.' },
-    { icon:'heart', title:'Favorites &amp; Themes', body:'Tap the heart on any hymn to save it to your Favorites. Browse by Theme to find songs for a particular mood or occasion.' },
-    { icon:'book', title:'Bible &amp; Devotionals', body:'The full King James Bible and a daily devotional are both one tap away from Home &mdash; step through any day, or jump straight to today.' },
-    { icon:'users', title:'Join a Live Session', body:'When your church is hosting a live worship session, join with the room code (or scan the host&rsquo;s QR code) to follow along in real time.' }
-  ];
-  const TOUR_STEPS_HOST = [
-    { icon:'monitor', title:'You&rsquo;re Hosting', body:'This screen drives what your congregation sees live. Pick a song, sermon, Bible verse, or media clip from the tabs above, then stage it before it goes out.' },
-    { icon:'bolt', title:'Preview, Then Go Live', body:'Whatever you stage here only YOU see, in the PREVIEW column &mdash; tap GO LIVE (or double-tap Space/Enter) when you&rsquo;re ready for the congregation to see it too.' },
-    { icon:'link', title:'Room Code &amp; QR', body:'Share your room code, or let people scan the QR code under SHOW ROOM CODE, to join instantly &mdash; no typing needed.' },
-    { icon:'chat', title:'Chat &amp; Livestream Link', body:'The chat bubble opens a floating chat with your congregation. Paste your Facebook/YouTube Live link from STREAM LINK in the toolbar and it&rsquo;ll pin to the top of chat for everyone to find.' }
-  ];
   function showTourOverlay(steps, storageKey){
     if(document.getElementById('appTourOverlay')) return; // one tour overlay on screen at a time
     if(safeGet(storageKey, null)) return; // already seen on this device

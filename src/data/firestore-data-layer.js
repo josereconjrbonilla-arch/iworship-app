@@ -404,6 +404,45 @@ export async function saveProfile(uid, patch) {
   if (Object.keys(directoryPatch).length) {
     await setDoc(doc(db, 'directory', uid), { uid, ...directoryPatch, updatedAt: serverTimestamp() }, { merge: true });
   }
+  // Church roster mirror [2026-09-25] -- see firestore.rules' churchRoster/
+  // {uid} block for the full design. role/churchId/pastorTitle stay
+  // private on this very users/{uid} doc, so a query like "everyone in
+  // church X" has nothing to run against -- this narrow, uid-keyed mirror
+  // (role/churchId/pastorTitle ONLY, no name/photo -- the roster UI reads
+  // those from the already-public directory/{uid} instead) is what makes
+  // that queryable. Every caller that can legally touch these three
+  // fields already funnels through THIS function -- the Admin screen's
+  // role-assignment form and the new church-leader roster screen both
+  // call saveProfile(uid, {role, pastorTitle, churchId}) exactly like
+  // this always has -- so mirroring here, once, covers both without
+  // either caller needing to know this collection exists. Same "only
+  // mirror what this call actually touched" shape as directoryPatch just
+  // above: a role-only edit (leaving churchId untouched) merges cleanly
+  // without disturbing the roster doc's existing churchId.
+  const rosterPatch = {};
+  if (patch.role !== undefined) rosterPatch.role = patch.role || null;
+  if (patch.churchId !== undefined) rosterPatch.churchId = patch.churchId || null;
+  if (patch.pastorTitle !== undefined) rosterPatch.pastorTitle = patch.pastorTitle || null;
+  if (Object.keys(rosterPatch).length) {
+    await setDoc(doc(db, 'churchRoster', uid), { uid, ...rosterPatch, updatedAt: serverTimestamp() }, { merge: true });
+  }
+}
+
+// Everyone currently on churchId's team roster -- powers the new Church
+// Team screen (see app.js's renderChurchTeam()). A plain where() query
+// against the narrow churchRoster mirror above, readable under
+// firestore.rules by any signed-in church-team-leader account whose OWN
+// churchId matches the one being queried (or by an Admin) -- see that
+// collection's own rules comment for why role/churchId needed this
+// separate mirror instead of querying users/{uid} directly. Returns raw
+// {uid, churchId, role, pastorTitle} rows; the screen itself cross-
+// references state.directory for displayName/photoURL, same as
+// renderHostManagePanel()'s co-host list already does.
+export function watchChurchRoster(churchId, callback) {
+  if (!churchId) { callback([]); return () => {}; }
+  return onSnapshot(query(collection(db, 'churchRoster'), where('churchId', '==', churchId)), (snap) => {
+    callback(snap.docs.map((d) => ({ uid: d.id, role: null, pastorTitle: null, ...d.data() })));
+  });
 }
 
 // Every signed-up profile, for the Admin screen's "find by name" search --

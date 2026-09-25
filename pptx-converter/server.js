@@ -57,6 +57,22 @@ function readBody(req) {
 // first paint AND every background preload (see preloadSlideshowImages()
 // in app.js, the other half of this fix). Text-only decks were never the
 // slow case; this targets the ones that actually were.
+//
+// -r 200 (was 150) [2026-09-25, same day, Jared: "for the quality of the
+// pptx images, do you think they'll look good on a huge tv screen and
+// projector screen?"] -- 150dpi renders a standard 13.33"x7.5" widescreen
+// slide at ~2000x1125px, just over a 1080p TV's own resolution but well
+// under a 4K projector/screen's 3840x2160, so on the biggest setups a
+// slide has to stretch a bit and can look a touch soft, mainly on fine
+// text or detailed photos. 200dpi lifts that to ~2667x1500 -- noticeably
+// sharper on a big 4K-class screen without reaching for full native 4K,
+// which would roughly double file sizes again (and reintroduce the exact
+// switching lag the JPEG change above was written to fix) for a sharpness
+// gain most sanctuary viewing distances wouldn't actually show. Left
+// `quality=85` alone rather than also raising it, so this stays a single,
+// deliberate knob -- resolution -- instead of compounding two size
+// increases into one change neither of us tested in isolation.
+
 async function convertPptxToSlidePngs(pptxBuffer) {
   const workDir = path.join(os.tmpdir(), 'convert-' + crypto.randomUUID());
   await fs.mkdir(workDir, { recursive: true });
@@ -72,7 +88,7 @@ async function convertPptxToSlidePngs(pptxBuffer) {
     await fs.access(pdfPath); // throws a clear error if LibreOffice silently didn't produce one (e.g. a corrupt/non-pptx upload)
 
     const pagePrefix = path.join(workDir, 'slide');
-    await execFileAsync('pdftoppm', ['-jpeg', '-jpegopt', 'quality=85', '-r', '150', pdfPath, pagePrefix], { timeout: 120000 });
+    await execFileAsync('pdftoppm', ['-jpeg', '-jpegopt', 'quality=85', '-r', '200', pdfPath, pagePrefix], { timeout: 120000 });
 
     // pdftoppm names output slide-1.jpg, slide-2.jpg, ... -- plain string
     // sort matches page order correctly up to 9999 slides (zero-padding

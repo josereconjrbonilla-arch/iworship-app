@@ -58,8 +58,41 @@
   }
 
   *{box-sizing:border-box;}
+  /* Horizontal-overflow guard [2026-09-25] -- Jared, on the mobile host-
+     controls screen every time: "if you will check the upper right corner,
+     it's off" -- confirmed from his screenshot: header.topbar's own wine/
+     pink background stops short of the real right edge, leaking the page's
+     dark --ground color through a gap in that top corner. Nothing in
+     header.topbar or its ancestors sets an explicit width or max-width
+     narrower than the viewport, and a plain static rebuild of that same
+     header renders full-width correctly -- so this isn't a normal CSS
+     sizing bug in the header itself. What DOES reproduce, testing this
+     same markup with even one real-content element wider than the phone
+     screen present anywhere on the page (a long unbroken string, in this
+     app's case most likely a long room/church name on the host screen --
+     see the room-info line in renderSessionHost()): some mobile browsers
+     respond to ANY unconstrained horizontal overflow by quietly widening
+     the whole layout viewport to fit it and zooming the visible page out
+     to compensate, rather than keeping the layout viewport pinned to
+     `width=device-width` (the meta viewport tag above) and simply clipping
+     the overflow -- which is exactly what should happen instead. Once that
+     happens every percentage-based box, header.topbar included, is sized
+     against the WIDENED viewport, not the physical screen, so it visually
+     falls short of the real right edge by however much extra room the
+     overflow demanded. `overflow-x:hidden` here is the standard fix: it
+     forces the browser to keep clipping horizontal overflow instead of
+     ever widening the viewport to accommodate it, so header.topbar (and
+     everything else sized as 100%/auto) stays pinned to the true device
+     width no matter what a specific room/church name or other dynamic text
+     happens to be that day. This doesn't fix whichever specific element is
+     overflowing -- if one shows up again it'll still be clipped rather
+     than causing a horizontal scrollbar -- but it removes this entire
+     class of "something somewhere is one pixel too wide" bug regardless
+     of which element is the culprit on any given screen. */
+  html{ overflow-x:hidden; }
   body{
     margin:0;
+    overflow-x:hidden;
     background:var(--ground);
     color:var(--ink);
     font-family:'Atkinson Hyperlegible', system-ui, -apple-system, Segoe UI, sans-serif;

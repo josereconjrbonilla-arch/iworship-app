@@ -45,7 +45,20 @@
     --ink:#F1E7D0;
     --ink-soft:#C9B99A;
     --border:#463A29;
-    --wine:#D9576B;
+    /* --wine #FAA9B6, not #D9576B [2026-09-25, app-wide sweep] -- every
+       other token in this manually-toggled dark-theme block is identical
+       to the OS-auto-dark block just above (@media prefers-color-scheme:
+       dark), so #D9576B here looks like a stray divergence, not a
+       deliberate choice, and it has a real cost: --gold-tint text
+       (#3A3018) on a --wine background is the standard combo for
+       .btn-primary, active tabs/chips, and the offline banner, and
+       #D9576B only gives that combo ~3.4:1 contrast (fails WCAG AA's
+       4.5:1) where #FAA9B6 -- already proven fine via the OS-auto block
+       -- gives ~7:1. Matching it fixes primary buttons/active tabs/the
+       offline banner being harder to read specifically for anyone who
+       manually picked Dark in Settings, without changing anything about
+       how OS-driven dark mode already looks. */
+    --wine:#FAA9B6;
     --wine-ink:#F0A2AE;
     --wine-tint:#3A1B21;
     --gold:#E1BD73;
@@ -1094,7 +1107,7 @@
      effect. Custom properties inherit AND can be overridden inline on the
      wrapper, so this is what actually lets the JS shrink the text. */
   .stage-lines{ --stage-font-size:clamp(2.2rem, 5vw, 4.2rem); }
-  .stage-lines p{ font-size:var(--stage-font-size); line-height:1.4; font-weight:700; color:var(--ink); margin:0 0 .4em; }
+  .stage-lines p{ font-size:var(--stage-font-size); line-height:1.4; font-weight:700; color:var(--ink); margin:0 0 .4em; overflow-wrap:break-word; }
   /* [2026-09-10] the auto-generated title slide (see songSectionsForPresenting()
      in app.js) gets its own, larger presence -- it's a title card, not a
      lyric line, so it earns a bit more scale and letter-spacing than the
@@ -1232,7 +1245,30 @@
      Preview alongside live [2026-09-08]: a third column (the staged PREVIEW,
      see app.js's renderSessionHost()) sits between controls and LIVE, so
      three equal-ish tracks fit here now instead of two. */
-  .host-split-grid{ display:grid; grid-template-columns:1.1fr 1fr 1fr; gap:24px; align-items:start; }
+  /* min-width/height:0 fix [2026-09-25] -- Jared, phone, split screen on:
+     "It doesn't scroll to the right anymore but now, the interface is
+     sliced." Root cause: a bare `1fr` grid track (here, and again in the
+     <900px override below) carries an IMPLICIT min-width:auto -- the exact
+     same automatic-minimum-size gotcha flex items have (see .brand-text's
+     own min-width:0 comment above for that version of it), just for grid
+     tracks instead of flex items. Whichever column held the widest bit of
+     content that day (a long unbroken title on the LIVE/PREVIEW stage
+     card at its biggest clamp() font size is the likeliest culprit, but
+     any of the three columns could in principle trigger this) could force
+     THAT column, and so this whole grid, wider than the viewport -- which
+     used to just make the page scroll sideways to reach it (clunky, but
+     everything was still reachable). Today's earlier fix for the mobile
+     header (html/body overflow-x:hidden, see that rule's own comment)
+     removed that sideways scroll page-wide, which was the right call for
+     the header itself, but it turned this grid's latent overflow from
+     "reachable by scrolling" into "silently clipped and gone" instead --
+     worse, not better. `minmax(0,__fr)` on every track (plus min-width:0
+     on the items themselves, below) lets each column actually shrink to
+     the space it's given, so long content wraps/scrolls WITHIN its own
+     card via .host-stage-col's existing overflow:auto (see that rule)
+     instead of forcing the grid itself wider than the phone screen. */
+  .host-split-grid{ display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr); gap:24px; align-items:start; }
+  .host-controls-col, .host-stage-col{ min-width:0; }
   /* .preview-badge mirrors .live-badge's pill shape but in the same gold/
      wine coloring as .preview-tag (the bottom bar's own "staged, not live
      yet" indicator) -- so at a glance, gold/wine reads as "preview" and the
@@ -1295,7 +1331,7 @@
      read-only LIVE column -- see app.js's renderSessionHost() -- so every
      rule here (and the narrow-viewport stacking below) applies to both. */
   @media (max-width: 900px){
-    .host-split-grid{ grid-template-columns:1fr; }
+    .host-split-grid{ grid-template-columns:minmax(0,1fr); }
     /* Media/AVP [2026-09-06]: position:relative, not the plain :static this
        used to be -- :static would stop this column from being the
        containing block for .stage-media-frame's position:absolute (see
@@ -2044,6 +2080,14 @@ body.stage-page .appfoot{ display:none; }
   }
   .chat-dock.minimized .chat-dock-header{ border-bottom:none; }
   .chat-dock-header span:first-child{
+    /* flex:1 1 auto + min-width:0 [2026-09-25, app-wide sweep] -- without
+       these, this flex child's ellipsis rule never actually engages (a
+       flex item won't shrink below its own content's width by default),
+       so a long DM contact/group-chat name pushes the minimize/close
+       buttons in .chat-dock-header-actions out of this floating dock's
+       fixed width instead of truncating. Same fix pattern already used
+       correctly elsewhere (e.g. .now-live-status, .upload-tray-item-body). */
+    flex:1 1 auto; min-width:0;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .chat-dock-header-actions{ display:flex; align-items:center; gap:2px; flex:none; }
@@ -2157,7 +2201,10 @@ body.stage-page .appfoot{ display:none; }
     font-weight:700; color:var(--ink); cursor:pointer;
   }
   .sidebar-profile-row:hover{ background:var(--surface-2); }
-  .sidebar-profile-row span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* min-width:0 [2026-09-25, app-wide sweep] -- same missing-shrink gap as
+     .chat-dock-header above: without it, a long display name won't
+     actually truncate against the fixed-width avatar next to it. */
+  .sidebar-profile-row span{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   /* Fellowship sub-nav -- Feed / Shorts / Explore / Messages tab row. */
   .fellowship-subnav{

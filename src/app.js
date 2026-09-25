@@ -4283,7 +4283,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
     main.innerHTML =
       '<div class="back-row"><button class="back-btn" id="backBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK TO HYMNAL</button></div>' +
-      '<div class="hymn-header"><p class="hymn-title">'+song.title+'</p><p class="hymn-author">'+song.author+' &middot; Hymn No. '+song.number+'</p>' +
+      '<div class="hymn-header"><p class="hymn-title">'+escapeHtml(song.title)+'</p><p class="hymn-author">'+escapeHtml(song.author)+' &middot; Hymn No. '+song.number+'</p>' +
         '<div class="badge-row">' +
           (song.tags||[]).map(function(t){return '<span class="pill">'+t.toUpperCase()+'</span>';}).join('') +
           (song.themes||[]).map(function(t){return '<span class="pill pill-pine">'+themeLabel(t).toUpperCase()+'</span>';}).join('') +
@@ -4295,7 +4295,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '<svg class="'+(isFavorite(song.id)?'filled':'')+'" viewBox="0 0 24 24" fill="'+(isFavorite(song.id)?'currentColor':'none')+'" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">'+icon('heart')+'</svg>' +
             (isFavorite(song.id)?'FAVORITED':'ADD TO FAVORITES') +
           '</button>' +
-          '<a class="btn btn-youtube" href="'+(song.youtube||youtubeSearchUrl(song.title))+'" target="_blank" rel="noopener">' +
+          '<a class="btn btn-youtube" href="'+escapeAttr(song.youtube||youtubeSearchUrl(song.title))+'" target="_blank" rel="noopener">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round">'+icon('play')+'</svg>LEARN ON YOUTUBE</a>' +
           (state.isEditor ? '<button class="btn btn-ghost" id="editSongBtn">EDIT SONG</button>' : '') +
         '</div>' +
@@ -4311,7 +4311,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           '<button id="keyDown" aria-label="Transpose down a half step">&minus;</button><span class="val">'+transposeKeyLabel(song.key, steps)+'</span><button id="keyUp" aria-label="Transpose up a half step">+</button></div></div>') : '') +
       '</div>' +
       '<div class="lyric-sheet '+(mode==='sing'?'sing hide-chords':'play')+'" style="--scale:'+state.scale+'">' +
-        song.sections.map(function(sec){
+        (song.sections||[]).map(function(sec){
           return '<div class="verse-block '+sec.type+'"><p class="section-label uc type-'+sec.type+'">'+sec.label+'</p>' +
             sec.lines.map(function(l){ return '<p class="lyric-line">'+renderChordLyricLine(l, steps)+'</p>'; }).join('') +
           '</div>';
@@ -10937,7 +10937,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '<p class="section-label uc type-'+content.section.type+'">'+content.section.label+'</p>' +
             content.section.lines.map(function(l){ return '<p class="lyric-line">'+escapeHtml(l.replace(/\[[^\]]*\]/g,''))+'</p>'; }).join('') +
           '</div>' +
-          '<p class="slide-progress">'+content.song.title+' &middot; Section '+(room.currentSectionIndex+1)+' of '+songSectionsForPresenting(content.song).length+'</p>'
+          '<p class="slide-progress">'+escapeHtml(content.song.title)+' &middot; Section '+(room.currentSectionIndex+1)+' of '+songSectionsForPresenting(content.song).length+'</p>'
         ) : '<div class="slide-card"><p class="lyric-line" style="color:var(--ink-soft);">Waiting for the host to choose a song&hellip;</p></div>'
       )) +
 
@@ -12583,7 +12583,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '</div>' +
           '</div>'
         ) : '') +
-        '<button type="button" class="icon-btn-sm" id="storyViewerCloseBtn" style="margin-left:'+(isMine?'8px':'auto')+';">&times;</button>' +
+        '<button type="button" class="icon-btn-sm" id="storyViewerCloseBtn" aria-label="Close" style="margin-left:'+(isMine?'8px':'auto')+';">&times;</button>' +
       '</div>' +
       '<div class="story-viewer-media">' +
         (story.mediaKind === 'video' ?
@@ -13651,7 +13651,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
               '<div class="room-list-meta" style="display:flex;align-items:center;gap:10px;flex:1;">' +
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:26px;height:26px;flex:none;color:var(--ink-soft);">'+icon('mic')+'</svg>' +
                 '<span><p class="room-name">'+escapeHtml(g.name||'Untitled Group')+'</p>' +
-                '<p class="room-sub">'+(g.memberUids||[]).length+' members'+(g.lastMessageText?(' &middot; '+escapeHtml(g.lastMessageText.slice(0,60))):'')+'</p></span>' +
+                '<p class="room-sub">'+(function(n){ return n+' member'+(n===1?'':'s'); })((g.memberUids||[]).length)+(g.lastMessageText?(' &middot; '+escapeHtml(g.lastMessageText.slice(0,60))):'')+'</p></span>' +
               '</div>' +
             '</div>';
           }).join('') : (groupChatCreateOpen ? '' : '<p class="hint">No group chats yet.</p>'))
@@ -13818,7 +13818,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '<div class="back-row"><button class="back-btn" id="groupBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
       '<div class="landing-hero" style="padding-bottom:10px;">' +
         '<p class="display landing-greeting">'+(group?escapeHtml(group.name||'Group Chat'):'Group Chat')+'</p>' +
-        '<p style="text-align:center;"><button type="button" class="link-btn" id="groupManageToggleBtn">'+(group?(group.memberUids||[]).length:0)+' MEMBERS</button></p>' +
+        '<p style="text-align:center;"><button type="button" class="link-btn" id="groupManageToggleBtn">'+(function(n){ return n+' MEMBER'+(n===1?'':'S'); })(group?(group.memberUids||[]).length:0)+'</button></p>' +
       '</div>' +
       (groupChatManageOpen && group ? (
         '<div class="session-card">' +
@@ -13970,6 +13970,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const bar = document.createElement('div');
     bar.className = 'update-banner offline-banner';
     bar.id = 'appOfflineBanner';
+    // role/aria-live [2026-09-25, app-wide sweep] -- matches the pattern
+    // already used on the #toast element in index.html; without it, a
+    // screen-reader user gets no announcement when the connection drops.
+    bar.setAttribute('role', 'status');
+    bar.setAttribute('aria-live', 'polite');
     bar.innerHTML = '<span>You&rsquo;re offline &mdash; iWorship will keep working and catch up once your connection is back.</span>';
     document.body.appendChild(bar);
   }

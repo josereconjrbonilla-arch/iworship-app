@@ -70,6 +70,105 @@
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.45);
   }
 
+  /* ============ COLOR THEMES [2026-09-25] ============ */
+  /* See app.js's COLOR_THEMES/applyColorTheme for the full design comment.
+     Each theme below only ever redefines --wine/--wine-ink/--wine-tint/
+     --gold/--gold-strong/--gold-tint -- never --ground/--surface/--ink/
+     --border/--pine/--pine-tint/--focus/--shadow, which stay exactly what
+     Light/Dark mode above already set them to. 'wine' itself needs no
+     block at all -- it's just whatever the tokens above already say, which
+     is why data-color-theme is only ever set to a NON-'wine' value (see
+     applyColorTheme()). Three selectors per theme, mirroring the three
+     Light/Dark contexts above exactly:
+       1. [data-color-theme="x"]            -- light mode (default, or an
+          explicit Light choice, or no Light/Dark choice made yet on a
+          light-mode OS)
+       2. @media (prefers-color-scheme:dark) -- OS-driven dark, unless the
+          person explicitly chose Light in Settings
+       3. [data-theme="dark"][data-color-theme="x"] -- an explicit manual
+          Dark choice in Settings, regardless of OS
+     Every value below was checked with a plain WCAG relative-luminance
+     contrast script (the same kind of check that caught the dark-mode
+     --wine bug earlier this sweep) against every pairing these tokens are
+     actually used in app-wide: the accent as plain body text on --ground/
+     --surface, --gold-tint as button text ON the accent, and --wine-ink as
+     badge text on --wine-tint -- every one of those clears 4.5:1 in both
+     modes, most well past it. */
+  :root[data-color-theme="navy"]{
+    --wine:#1D3358; --wine-ink:#142440; --wine-tint:#DCE4F0;
+    --gold:#8A6A22; --gold-strong:#5E4614; --gold-tint:#F1E3BE;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"])[data-color-theme="navy"]{
+      --wine:#8FB8F0; --wine-ink:#7FA8E8; --wine-tint:#1C2A40;
+      --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#142033;
+    }
+  }
+  :root[data-theme="dark"][data-color-theme="navy"]{
+    --wine:#8FB8F0; --wine-ink:#7FA8E8; --wine-tint:#1C2A40;
+    --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#142033;
+  }
+
+  :root[data-color-theme="earth"]{
+    --wine:#8B4321; --wine-ink:#6B330F; --wine-tint:#F0DCC8;
+    --gold:#9C7A28; --gold-strong:#5E4614; --gold-tint:#F6ECD9;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"])[data-color-theme="earth"]{
+      --wine:#E8A97C; --wine-ink:#DE9A68; --wine-tint:#3A2515;
+      --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#33200F;
+    }
+  }
+  :root[data-theme="dark"][data-color-theme="earth"]{
+    --wine:#E8A97C; --wine-ink:#DE9A68; --wine-tint:#3A2515;
+    --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#33200F;
+  }
+
+  :root[data-color-theme="purple"]{
+    --wine:#5B2A6E; --wine-ink:#43154F; --wine-tint:#E9DCF0;
+    --gold:#9C7A28; --gold-strong:#5E4614; --gold-tint:#F2E7C7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"])[data-color-theme="purple"]{
+      --wine:#D2A6E8; --wine-ink:#C592DE; --wine-tint:#2E1B38;
+      --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#2A1732;
+    }
+  }
+  :root[data-theme="dark"][data-color-theme="purple"]{
+    --wine:#D2A6E8; --wine-ink:#C592DE; --wine-tint:#2E1B38;
+    --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#2A1732;
+  }
+
+  :root[data-color-theme="slate"]{
+    --wine:#345272; --wine-ink:#233A54; --wine-tint:#DCE6EE;
+    --gold:#8A6A22; --gold-strong:#5E4614; --gold-tint:#F1E7D2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"])[data-color-theme="slate"]{
+      --wine:#9CC3E8; --wine-ink:#8AB4DE; --wine-tint:#1D2C3A;
+      --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#17232E;
+    }
+  }
+  :root[data-theme="dark"][data-color-theme="slate"]{
+    --wine:#9CC3E8; --wine-ink:#8AB4DE; --wine-tint:#1D2C3A;
+    --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#17232E;
+  }
+
+  :root[data-color-theme="charcoal"]{
+    --wine:#3A342C; --wine-ink:#241F1A; --wine-tint:#E7E1D4;
+    --gold:#9C7A28; --gold-strong:#5E4614; --gold-tint:#F1E3BE;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"])[data-color-theme="charcoal"]{
+      --wine:#D8CFBE; --wine-ink:#C9BFA9; --wine-tint:#332D24;
+      --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#2A2620;
+    }
+  }
+  :root[data-theme="dark"][data-color-theme="charcoal"]{
+    --wine:#D8CFBE; --wine-ink:#C9BFA9; --wine-tint:#332D24;
+    --gold:#E1BD73; --gold-strong:#F0D08F; --gold-tint:#2A2620;
+  }
+
   *{box-sizing:border-box;}
   /* Horizontal-overflow guard [2026-09-25] -- Jared, on the mobile host-
      controls screen every time: "if you will check the upper right corner,
@@ -2368,6 +2467,26 @@ body.stage-page .appfoot{ display:none; }
     letter-spacing:.04em; cursor:pointer;
   }
   .settings-theme-opt-active{ border-color:var(--wine); color:var(--wine); background:var(--wine-tint); }
+
+  /* Color theme swatches [2026-09-25] -- shared between Settings and the
+     "Almost There" sign-up card (see renderColorThemeSwatches() in app.js).
+     Each button's own background is set inline per-swatch (a fixed brand
+     color, deliberately NOT var(--wine) -- these need to show what EVERY
+     option looks like, not just whichever one happens to be active right
+     now). The active one gets a visible ring PLUS a checkmark, not just a
+     border-color change, so which one is selected never depends on being
+     able to distinguish a color difference alone. 44px matches this app's
+     other touch targets. */
+  .color-theme-row{ display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
+  .color-theme-swatch{
+    width:44px; height:44px; border-radius:50%; border:3px solid var(--border);
+    padding:0; cursor:pointer; position:relative; flex:0 0 auto;
+  }
+  .color-theme-swatch-active{ border-color:var(--ink); box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+  .color-theme-swatch-active::after{
+    content:'\2713'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:700; font-size:1.15rem; text-shadow:0 1px 3px rgba(0,0,0,.7);
+  }
 
   /* Default Presentation Background [2026-09-24] -- see presenterStageBg()'s
      comment in app.js. 16:9 to preview roughly how it'll actually crop

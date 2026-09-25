@@ -194,6 +194,9 @@ function profileKey(uid) { return LS_PROFILE_PREFIX + uid; }
 function defaultProfile() {
   return {
     displayName: '', churchName: '', mode: 'sing', scale: 1, theme: null, favorites: [],
+    // Color theme [2026-09-25] -- see app.js's COLOR_THEMES/applyColorTheme.
+    // null means "Wine & Gold", the app's original look.
+    colorTheme: null,
     // Monetization fields -- see interface.md. null/false until an Admin
     // sets them via the in-app Admin screen.
     role: null, churchId: null, pastorTitle: null, isBetaTester: false,

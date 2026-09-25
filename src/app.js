@@ -408,6 +408,22 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function applyRoomSnapshot(code, room, broadcast){
     state.roomLoading = false;
     state.room = room;
+    // Projector text size room-sync [2026-09-25] -- see setStageFontScale's
+    // own comment just above. Whenever a room snapshot carries a
+    // stageFontScale (set by whichever device last touched the +/- buttons
+    // -- could be this one, could be a co-host's phone, could be the
+    // computer actually driving the projector), adopt it as this device's
+    // own value too, the same way every other room-driven control already
+    // works -- this is what makes fitStageLines() (below) and the host
+    // toolbar's percentage readout correct on a device that DIDN'T
+    // originate the change, not just the one that did.
+    if(room && typeof room.stageFontScale === 'number'){
+      const roomScale = Math.max(STAGE_FONT_SCALE_MIN, Math.min(STAGE_FONT_SCALE_MAX, room.stageFontScale));
+      if(roomScale !== hostStageFontScale){
+        hostStageFontScale = roomScale;
+        safeSet(STAGE_FONT_SCALE_KEY, String(hostStageFontScale));
+      }
+    }
     ensureViewSermonWatch(room);
     ensureViewMediaWatch(room);
     ensureHostProgramWatch(room);
@@ -1338,6 +1354,108 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const pref = themePreference();
     if(pref === 'light' || pref === 'dark') document.documentElement.setAttribute('data-theme', pref);
   })();
+
+  /* ============ COLOR THEME ============ */
+  // Color themes [2026-09-25] -- Jared: "add an option where users can edit
+  // the color themes of the whole app from the settings and upon
+  // registering." Layered on top of the Light/Dark toggle just above
+  // (data-theme), never a replacement for it -- this only swaps the app's
+  // ACCENT colors (the --wine/--gold custom properties: primary buttons,
+  // active tabs/chips, links, badges), never --ground/--surface/--ink/
+  // --border, which Light/Dark already controls on its own. That matches
+  // the "one brand accent over a clean neutral base" approach church-
+  // website design guides consistently recommend, and mirrors how Planning
+  // Center's Church Center app -- the closest real-world equivalent to
+  // this feature -- lets a church pick one brand color rather than expose
+  // a full custom palette. --pine/--pine-tint (checkmarks, "refrain"
+  // labels, anything that means success/positive) deliberately stay green
+  // in every theme below -- that's a semantic color, not a branding one.
+  //
+  // 'wine' (the app's original burgundy-and-gold look) is the default and
+  // needs no data-color-theme attribute at all -- an account from before
+  // this feature existed, or anyone who never opens the picker, renders
+  // exactly as it always has, at zero extra CSS lookup cost. The other
+  // five were chosen from real church-branding research (traditional
+  // liturgical burgundy/navy/gold; "warm earth tones" explicitly called
+  // out as fitting contemporary Baptist congregations; a jewel-tone
+  // purple; a softer contemporary blue-gray; a neutral charcoal-and-gold)
+  // rather than picked arbitrarily, and every one of them was run through
+  // the same WCAG relative-luminance contrast math that caught the dark-
+  // mode --wine bug earlier this sweep for every text/background pairing
+  // these tokens are actually used in (accent-as-body-text, accent-as-
+  // button-fill against its own gold-tint text, wine-ink-on-wine-tint
+  // badges) -- see styles.css's [data-color-theme] blocks for the values.
+  const COLOR_THEMES = [
+    { key: 'wine', label: 'Wine & Gold', swatch: '#6B1220' },
+    { key: 'navy', label: 'Navy & Gold', swatch: '#1D3358' },
+    { key: 'earth', label: 'Warm Earth', swatch: '#8B4321' },
+    { key: 'purple', label: 'Royal Purple', swatch: '#5B2A6E' },
+    { key: 'slate', label: 'Slate & Sky', swatch: '#345272' },
+    { key: 'charcoal', label: 'Charcoal & Gold', swatch: '#3A342C' }
+  ];
+  const COLOR_THEME_KEY = 'iworship:local:colorTheme';
+  function isValidColorThemeKey(key){ return COLOR_THEMES.some(function(t){ return t.key === key; }); }
+  // Applies a theme to the DOM right away (so the picker itself feels
+  // instant, same as every other swatch/stepper in this app) and caches it
+  // in localStorage as a warm-start guess for the very next page load,
+  // before any signed-in profile has had a chance to arrive over the
+  // network -- see syncColorThemeFromProfile() below for how a signed-in
+  // account's REAL, cross-device value then takes over once it loads.
+  function applyColorTheme(key){
+    const valid = isValidColorThemeKey(key) ? key : 'wine';
+    if(valid === 'wine') document.documentElement.removeAttribute('data-color-theme');
+    else document.documentElement.setAttribute('data-color-theme', valid);
+    safeSet(COLOR_THEME_KEY, valid);
+    return valid;
+  }
+  function currentColorTheme(){
+    return document.documentElement.getAttribute('data-color-theme') || 'wine';
+  }
+  (function initColorTheme(){
+    applyColorTheme(safeGet(COLOR_THEME_KEY, 'wine'));
+  })();
+  // Keeps the DOM in sync with whichever signed-in profile is currently
+  // loaded, so a color theme picked on one device shows up correctly on
+  // another the moment its own profile snapshot arrives -- called from the
+  // top of render() (below), the same "stays correct no matter which
+  // watcher triggered this render" pattern already used there for other
+  // state. A no-op the vast majority of renders (one attribute read), and
+  // harmless for a signed-out visitor or one with no colorTheme saved yet
+  // (state.profile.colorTheme is null via defaultProfile() until they
+  // actually pick one) -- it only ever overrides the local guess once a
+  // real, different value shows up.
+  function syncColorThemeFromProfile(){
+    if(!state.profile) return;
+    const wanted = state.profile.colorTheme || 'wine';
+    if(wanted !== currentColorTheme()) applyColorTheme(wanted);
+  }
+  function renderColorThemeSwatches(){
+    const active = currentColorTheme();
+    return '<div class="color-theme-row">' +
+      COLOR_THEMES.map(function(t){
+        return '<button type="button" class="color-theme-swatch'+(active===t.key?' color-theme-swatch-active':'')+'" data-color-theme-pick="'+t.key+'" style="background:'+t.swatch+';" aria-label="'+escapeAttr(t.label)+'" title="'+escapeAttr(t.label)+'"></button>';
+      }).join('') +
+    '</div>';
+  }
+  // Shared by both places this picker appears (Settings -> Preferences, and
+  // the "Almost There" sign-up card) -- one tap both re-themes the app
+  // immediately and, for anyone already signed in, saves it to their
+  // profile so it follows them to any other device. A visitor who hasn't
+  // finished creating their profile yet (mid "Almost There") is still
+  // state.user-signed-in at that point (see needsProfileSetup), so this
+  // already reaches their account from their very first tap, before they
+  // even hit SAVE & CONTINUE.
+  function attachColorThemeSwatchHandlers(){
+    document.querySelectorAll('[data-color-theme-pick]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const key = applyColorTheme(btn.getAttribute('data-color-theme-pick'));
+        if(state.user){
+          saveProfile(state.user.uid, { colorTheme: key }).catch(function(){ showToast('Couldn&rsquo;t save your color theme &mdash; try again.'); });
+        }
+        render();
+      });
+    });
+  }
 
   document.getElementById('brandHome').addEventListener('click', function(){
     state.view='landing'; render(); window.scrollTo(0,0);
@@ -2501,6 +2619,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
 
   function render(){
+    // Color theme sync -- see syncColorThemeFromProfile()'s own comment
+    // near COLOR_THEMES. Cheap and idempotent, so it's safe to run on every
+    // single render() regardless of what triggered it.
+    syncColorThemeFromProfile();
     const focused = document.activeElement;
     const restoreFocus = (focused && focused.id && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA'))
       ? { id: focused.id, selStart: focused.selectionStart, selEnd: focused.selectionEnd }
@@ -2900,6 +3022,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           '<p>What should we call you, and which church is this for?</p>' +
           '<div class="field"><label for="nameInput">YOUR NAME</label><input type="text" id="nameInput" placeholder="e.g. Jared" value="'+escapeAttr((state.user && state.user.displayName) || '')+'" autofocus></div>' +
           '<div class="field"><label for="churchInput">YOUR CHURCH&rsquo;S NAME <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="churchInput" placeholder="e.g. Cedar Grove Baptist Church"></div>' +
+          '<div class="field"><label>COLOR THEME <span style="text-transform:none;font-weight:400;">(you can change this anytime in Settings)</span></label>' + renderColorThemeSwatches() + '</div>' +
           '<button class="btn btn-primary" id="saveProfileBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg>SAVE &amp; CONTINUE</button>' +
         '</div>'
       ) : '') +
@@ -3033,6 +3156,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       await saveProfile(state.user.uid, { displayName: val, churchName: churchVal || '' });
       // watchProfile's subscription re-renders once the write lands.
     });
+    attachColorThemeSwatchHandlers();
     const notifBannerDismissBtn = document.getElementById('notifBannerDismissBtn');
     if(notifBannerDismissBtn) notifBannerDismissBtn.addEventListener('click', function(){
       safeSet('iworship:notifBannerDismissed', '1'); render();
@@ -3199,6 +3323,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<div class="settings-theme-row">' + themeOption('system','SYSTEM') + themeOption('light','LIGHT') + themeOption('dark','DARK') + '</div>' +
       '</div>' +
 
+      '<div class="session-card">' +
+        '<h3>Color Theme</h3>' +
+        '<p class="hint" style="margin-top:-6px;">'+(signedIn ? 'Saved to your account, so it follows you to any device you sign into.' : 'Sign in to have this follow you to other devices &mdash; for now it&rsquo;s just remembered on this one.')+'</p>' +
+        renderColorThemeSwatches() +
+      '</div>' +
+
       (signedIn ? (
         '<div class="session-card">' +
           '<h3>Account</h3>' +
@@ -3304,6 +3434,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.querySelectorAll('[data-theme-pref]').forEach(function(btn){
       btn.addEventListener('click', function(){ setThemePreference(btn.getAttribute('data-theme-pref')); });
     });
+    attachColorThemeSwatchHandlers();
     const switchAccountBtn = document.getElementById('settingsSwitchAccountBtn');
     if(switchAccountBtn) switchAccountBtn.addEventListener('click', async function(){ await signOutUser(); state.view='landing'; render(); });
     const addPwToggleBtn = document.getElementById('settingsAddPasswordToggleBtn');
@@ -8024,6 +8155,27 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function setStageFontScale(next){
     hostStageFontScale = Math.max(STAGE_FONT_SCALE_MIN, Math.min(STAGE_FONT_SCALE_MAX, next));
     safeSet(STAGE_FONT_SCALE_KEY, String(hostStageFontScale));
+    // Room-synced [2026-09-25, Jared: "it works with same device controls,
+    // but doesn't work when I control it via phone"] -- this control used to
+    // ONLY ever reach an already-open Projector tab through the 'storage'
+    // event above, which fires exclusively between tabs of the SAME browser
+    // on the SAME device (see this constant's own comment further up). That
+    // quietly assumed the Host controls and the Projector display always
+    // sit on one machine -- true for a single laptop running both in two
+    // tabs, false the moment a phone is controlling the room while a
+    // SEPARATE computer actually drives the projector screen: the phone's
+    // tap never had any way to reach that other device at all. Writing it
+    // onto the room doc uses the exact same cross-device sync every other
+    // live control here already relies on (setlist, currentSectionIndex,
+    // etc.) -- whichever device is showing the Projector view picks this up
+    // the moment its own room listener sees the change (applyRoomSnapshot(),
+    // above), same machine or not. localStorage/the 'storage' event above
+    // are kept too, purely as an instant same-device fallback and a warm-
+    // start default before any room snapshot has arrived yet.
+    if(state.activeRoomCode){
+      updateRoom(state.activeRoomCode, { stageFontScale: hostStageFontScale })
+        .catch(function(){ showToast('Couldn&rsquo;t update the projector text size &mdash; try again.'); });
+    }
     if(state.view === 'session-projector') fitStageLines();
     render();
   }

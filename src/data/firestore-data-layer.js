@@ -242,6 +242,12 @@ export async function sendPasswordReset(email) {
 function defaultProfile() {
   return {
     displayName: '', churchName: '', mode: 'sing', scale: 1, theme: null, favorites: [],
+    // Color theme [2026-09-25] -- see app.js's COLOR_THEMES/applyColorTheme
+    // for the full design. null means "Wine & Gold", the app's original
+    // look -- deliberately not the string 'wine' itself, so an account
+    // that predates this feature (or never opens the picker) needs no
+    // migration and renders byte-for-byte the same as before.
+    colorTheme: null,
     // Monetization fields -- see interface.md for the full shape/notes.
     // null/false until an Admin sets them via the in-app Admin screen
     // (beta phase -- no Cloud Functions/payment flow yet).

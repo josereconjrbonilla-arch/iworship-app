@@ -269,7 +269,53 @@ service cloud.firestore {
       // query is denied outright, not silently trimmed to just their own
       // doc).
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow write: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      // [SECURITY FIX 2026-09-25, found in the "take more time" sweep] The
+      // old rule here was just `allow write: if isSignedIn() && (auth.uid
+      // == uid || isAdmin())` -- correct for every ordinary profile field
+      // (displayName, churchName, favorites, bio, photoURL, blockedUids,
+      // notifPrefs, defaultStageBg, presenterLogo -- see saveProfile()'s
+      // many call sites in app.js, none of which ever touch the four
+      // fields below), but it did NOT carve out role/churchId/
+      // pastorTitle/isBetaTester the way the "BETA PHASE" comment above
+      // describes. Those four are supposed to be Admin-only (set through
+      // the in-app Admin screen's saveProfile(otherUid, {...}) calls, see
+      // app.js ~3992 and ~4050) -- there is no self-service UI for them --
+      // but because request.auth.uid == uid alone was enough to allow
+      // ANY write, that was only ever a client-code convention, not
+      // something these rules actually enforced. Anyone signed in could
+      // open devtools and call the very same saveProfile() function
+      // already bundled into the page -- e.g.
+      // saveProfile(auth.currentUser.uid, {isBetaTester: true}) or
+      // {role: 'musicDirector'} -- against their OWN uid and grant
+      // themselves full paid access, a hosting/add-song role, or a
+      // pastor title, with no Admin and no payment involved at all. This
+      // splits create/update so a self-write can still touch every
+      // ordinary field freely, but can never introduce (create) or change
+      // (update) any of the four monetization/role fields on their OWN
+      // profile; an Admin is unaffected and can still set them on ANY
+      // profile exactly as before (the Admin screen's own writes are
+      // always updates -- a person must already have signed up, and so
+      // already have a users/{uid} doc, before an Admin can assign them a
+      // role or beta access).
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (
+          request.auth.uid == uid &&
+          !('role' in request.resource.data) &&
+          !('churchId' in request.resource.data) &&
+          !('pastorTitle' in request.resource.data) &&
+          !('isBetaTester' in request.resource.data)
+        )
+      );
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          request.auth.uid == uid &&
+          !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['role', 'churchId', 'pastorTitle', 'isBetaTester'])
+        )
+      );
+      allow delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
     }
 
     match /editors/{uid} {

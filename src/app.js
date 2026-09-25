@@ -4232,7 +4232,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button class="hymn-card-main" data-id="'+s.id+'">' +
           '<span class="hymn-num">'+s.number+'</span>' +
           '<span class="hymn-meta">' +
-            '<p class="hymn-title">'+s.title+'</p>' +
+            '<p class="hymn-title">'+escapeHtml(s.title)+'</p>' +
             '<span class="hymn-sub">' +
               (s.tags||[]).map(function(t){return '<span class="pill">'+t.toUpperCase()+'</span>';}).join('') +
               (s.themes||[]).map(function(t){return '<span class="pill pill-pine">'+themeLabel(t).toUpperCase()+'</span>';}).join('') +
@@ -4339,7 +4339,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         try{
           const themes = await suggestThemes(song.title, song.sections);
           await updateSong(song.id, { themes: themes });
-          showToast('Tagged &ldquo;'+song.title+'&rdquo;: ' + themes.map(themeLabel).join(', '));
+          showToast('Tagged &ldquo;'+escapeHtml(song.title)+'&rdquo;: ' + themes.map(themeLabel).join(', '));
         }catch(e){
           showToast(e.message || 'Couldn&rsquo;t get AI suggestions.');
           aiSuggestDetailBtn.disabled = false;
@@ -4554,7 +4554,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(saveBtn) saveBtn.disabled = true;
     try{
       await updateSong(song.id, patch);
-      showToast('Saved changes to &ldquo;'+title+'&rdquo;');
+      showToast('Saved changes to &ldquo;'+escapeHtml(title)+'&rdquo;');
       editDraft = null;
       state.view='detail'; render(); window.scrollTo(0,0);
     }catch(e){
@@ -4889,7 +4889,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           approvedNote = ' &mdash; request marked approved.';
         }catch(e){ /* song is saved either way; the request just stays pending for a retry */ }
       }
-      showToast('Saved &ldquo;'+title+'&rdquo; to your hymnal'+approvedNote);
+      showToast('Saved &ldquo;'+escapeHtml(title)+'&rdquo; to your hymnal'+approvedNote);
       state.view='detail'; state.songId = id; render(); window.scrollTo(0,0);
     }catch(e){
       showToast('Couldn&rsquo;t save that song &mdash; if you&rsquo;re not on the worship team&rsquo;s editor list yet, ask to be added.');
@@ -8352,7 +8352,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     };
   }
   function songSectionsForPresenting(song){
-    return song ? [titleSlideSection(song)].concat(song.sections) : [];
+    // ||[] guard [2026-09-25, "take more time" sweep] -- Array.concat treats
+    // a non-array argument as a single element rather than spreading it, so
+    // for any song document missing its `sections` field (predates the
+    // field, or it was stripped/null) this used to return
+    // [titleSlideSection(song), undefined] instead of just the title slide.
+    // Every live-presentation surface that consumes this (host "now live"
+    // panel, congregant view, projector/stage output, Musician Chart) reads
+    // .type/.label/.lines straight off each element with no null check, so
+    // that phantom undefined element crashed the render the moment a host
+    // advanced past the title slide (or opened a Musician Chart link) for
+    // such a song -- host, congregants, AND the projector all going blank
+    // mid-service at once, silently. Same defensive pattern already used
+    // for this exact "missing sections" case in the read-only Hymnal view
+    // (see (song.sections||[]).map(...) above).
+    return song ? [titleSlideSection(song)].concat(song.sections||[]) : [];
   }
 
   // Resolves whatever a room is CURRENTLY showing -- a song section, a
@@ -10290,6 +10304,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // shows whatever song/section was staged before. Only actually PICKING
     // a different item (chooseSong()/presentSermon()/presentVerse()) starts
     // a fresh draft for that item.
+    // Keep the active tab visible [2026-09-25] -- see .content-segmented's
+    // own mobile-width comment in styles.css: on a narrow phone this row
+    // now scrolls sideways instead of shrinking every label to an
+    // unreadable 2-letter abbreviation, so a keyboard shortcut (1-5,
+    // below) or a re-render triggered from elsewhere could otherwise leave
+    // the now-active tab scrolled out of view with no visible sign
+    // anything changed.
+    (function(){
+      const activeTab = document.querySelector('.content-segmented .segment-btn.active');
+      if(activeTab) activeTab.scrollIntoView({block:'nearest', inline:'nearest'});
+    })();
     document.getElementById('pickSongBtn').addEventListener('click', function(){
       hostSermonPickerOpen = false; hostVersePickerOpen = false; hostVerseMultiSelect = []; hostVerseSelectMode = false; hostMediaPickerOpen = false; hostMediaUploadOpen = false; hostPickerOpen = !hostPickerOpen;
       hostContentTab = 'song'; // tab-highlight fix [2026-09-06]
@@ -10484,7 +10509,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function renderHostPickerList(results){
     return '<ul class="hymn-list">' + (results.length ? results.map(function(s){
       return '<li><div class="hymn-card"><button class="hymn-card-main" data-pick-id="'+s.id+'">' +
-        '<span class="hymn-num">'+s.number+'</span><span class="hymn-meta"><p class="hymn-title">'+s.title+'</p></span>' +
+        '<span class="hymn-num">'+s.number+'</span><span class="hymn-meta"><p class="hymn-title">'+escapeHtml(s.title)+'</p></span>' +
         '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg>' +
       '</button></div></li>';
     }).join('') : '<li class="sections-empty">No songs match &ldquo;'+escapeHtml(hostPickerQuery)+'&rdquo;.</li>') + '</ul>';

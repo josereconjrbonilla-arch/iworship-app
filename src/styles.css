@@ -2069,6 +2069,45 @@ body.stage-page .appfoot{ display:none; }
     .devotional-reader-text{ font-size:1.05rem; }
   }
 
+  /* About iWorship (renderAbout() in app.js) [2026-09-26] -- the in-app
+     home for the same Hymnals/Host/Fellowship/Spiritual-Growth feature
+     copy as the marketing deck/one-pager. Reuses .content-segmented/
+     .segment-btn (the Bible/Devotionals tab pattern) for the four-way
+     switcher, and the same wine-badge treatment as .devotional-icon for
+     each section's header medallion, so this reads as one family of
+     screens rather than a one-off. */
+  .about-section-card{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:20px;
+    padding:28px 26px; text-align:center; max-width:68ch; margin:0 auto;
+  }
+  .about-section-card .devotional-icon{ margin:0 auto 14px; }
+  .about-section-title{
+    font-family:'EB Garamond',serif; font-weight:700; font-size:1.4rem; color:var(--wine); margin:0 0 2px;
+  }
+  .about-section-tagline{
+    font-size:.78rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--gold-strong); margin:0 0 14px;
+  }
+  .about-section-intro{
+    font-size:1rem; line-height:1.65; color:var(--ink-soft); text-align:left; margin:0 0 18px;
+  }
+  .about-feature-list{ display:flex; flex-direction:column; gap:14px; text-align:left; }
+  .about-feature-item{ display:flex; align-items:flex-start; gap:10px; }
+  .about-feature-item p{ margin:0; line-height:1.55; color:var(--ink); }
+  .about-feature-item strong{ color:var(--wine); }
+  .about-feature-check{
+    flex:none; width:22px; height:22px; border-radius:50%; margin-top:2px;
+    background:var(--pine-tint); color:var(--pine); display:flex; align-items:center; justify-content:center;
+  }
+  .about-feature-check svg{ width:13px; height:13px; }
+  .about-section-teaser-badge{
+    display:inline-block; padding:6px 16px; border-radius:999px; background:var(--wine);
+    color:var(--gold-tint); font-size:.75rem; font-weight:800; letter-spacing:.06em;
+  }
+  @media (max-width:560px){
+    .about-section-card{ padding:22px 18px; }
+  }
+
   /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============
      Jared: "make the fellowship part look like an actual social media
      feed... a hamburger menu... profile pic next to the logo... Shorts...

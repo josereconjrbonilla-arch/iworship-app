@@ -61,5 +61,8 @@ export const ICONS = {
     // itself) rather than as an outline, on purpose, so it visually reads
     // as "this fills the whole screen with a solid color" at a glance,
     // distinct from every stroke-only glyph around it.
-    blackout:'<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" stroke="none"/>'
+    blackout:'<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" stroke="none"/>',
+    // About iWorship [2026-09-26] -- a plain "i" info-circle glyph, the one
+    // icon this set didn't already have a use for.
+    info:'<circle cx="12" cy="12" r="9.5"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r="0.9" fill="currentColor" stroke="none"/>'
   };

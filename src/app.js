@@ -1130,7 +1130,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // the extra plumbing for two low-traffic, host/admin-only screens; a
   // refresh there just falls back to Home like it always has.
   const RESUMABLE_VIEWS = {
-    'bible': null, 'devotionals': null, 'plans': null, 'list': null,
+    'bible': null, 'devotionals': null, 'about': null, 'plans': null, 'list': null,
     'settings': null, 'host-hub': null,
     'detail': 'songId',
     'sermons': null, 'programs': null, 'fellowship': null, 'shorts': null, 'explore': null,
@@ -1138,7 +1138,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     'dm-thread': 'activeDmThreadId', 'group-chat-thread': 'activeGroupChatId',
     'profile-view': 'viewProfileUid'
   };
-  const RESUME_NO_DEPENDENCY = ['bible','devotionals','plans','list','settings','host-hub'];
+  const RESUME_NO_DEPENDENCY = ['bible','devotionals','about','plans','list','settings','host-hub'];
   const RESUME_LIBRARY_DEPENDENT = ['detail'];
 
   // ---- social watches [2026-09-09] -- app-wide the moment someone signs
@@ -2142,12 +2142,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
         ((canManageChurchTeam() || canManageAnyChurchTeam()) ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
         (state.isAdmin ? '<button type="button" class="hamburger-item" id="hbAdminBtn">ADMIN TOOLS</button>' : '') +
+        '<button type="button" class="hamburger-item" id="hbAboutBtn">ABOUT IWORSHIP</button>' +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>' +
         '<button type="button" class="hamburger-item hamburger-item-danger" id="hbSignOutBtn">SIGN OUT</button>'
       ) : (
         '<button type="button" class="hamburger-item" id="hbHomeBtn">HOME</button>' +
         '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
+        '<button type="button" class="hamburger-item" id="hbAboutBtn">ABOUT IWORSHIP</button>' +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>'
       )) +
       '</div>';
@@ -2166,6 +2168,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(hbExplore) hbExplore.addEventListener('click', function(){ goTo(openExplore); });
     const hbPlans = document.getElementById('hbPlansBtn');
     if(hbPlans) hbPlans.addEventListener('click', function(){ goTo(function(){ state.view='plans'; render(); window.scrollTo(0,0); }); });
+    const hbAbout = document.getElementById('hbAboutBtn');
+    if(hbAbout) hbAbout.addEventListener('click', function(){ goTo(function(){ state.view='about'; render(); window.scrollTo(0,0); }); });
     const hbSongRequests = document.getElementById('hbSongRequestsBtn');
     if(hbSongRequests) hbSongRequests.addEventListener('click', function(){ goTo(function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); }); });
     const hbChurchTeam = document.getElementById('hbChurchTeamBtn');
@@ -2199,12 +2203,15 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<div class="sidebar-section">' +
           '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
           '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
+          '<button type="button" class="sidebar-item" id="sideAboutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('info')+'</svg><span>About iWorship</span></button>' +
           '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
         '</div>';
       const devotionalsBtn0 = document.getElementById('sideDevotionalsBtn');
       if(devotionalsBtn0) devotionalsBtn0.addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
       const plansBtn = document.getElementById('sidePlansBtn');
       if(plansBtn) plansBtn.addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
+      const aboutBtn0 = document.getElementById('sideAboutBtn');
+      if(aboutBtn0) aboutBtn0.addEventListener('click', function(){ state.view='about'; render(); window.scrollTo(0,0); });
       const settingsBtn = document.getElementById('sideSettingsBtn');
       if(settingsBtn) settingsBtn.addEventListener('click', function(){ state.view='settings'; render(); window.scrollTo(0,0); });
       return;
@@ -2234,6 +2241,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         ((state.isEditor || hasFullAccess()) ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
         ((canManageChurchTeam() || canManageAnyChurchTeam()) ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
         (state.isAdmin ? ('<button type="button" class="sidebar-item" id="sideAdminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>Admin Tools</span></button>') : '') +
+        '<button type="button" class="sidebar-item" id="sideAboutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('info')+'</svg><span>About iWorship</span></button>' +
         '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
       '</div>' +
       '<div class="sidebar-divider"></div>' +
@@ -2252,6 +2260,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(churchTeamBtn) churchTeamBtn.addEventListener('click', function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); if(canManageAnyChurchTeam()) startAdminChurchesWatch(); });
     const adminBtn = document.getElementById('sideAdminBtn');
     if(adminBtn) adminBtn.addEventListener('click', function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); });
+    document.getElementById('sideAboutBtn').addEventListener('click', function(){ state.view='about'; render(); window.scrollTo(0,0); });
     document.getElementById('sideSettingsBtn').addEventListener('click', function(){ state.view='settings'; render(); window.scrollTo(0,0); });
     document.getElementById('sideSignOutBtn').addEventListener('click', async function(){ await signOutUser(); state.view='landing'; render(); });
   }
@@ -2929,6 +2938,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='church-team') return renderChurchTeam();
     if(state.view==='bible') return renderBible();
     if(state.view==='devotionals') return renderDevotionals();
+    if(state.view==='about') return renderAbout();
     if(state.view==='sermons') return renderSermons();
     if(state.view==='sermon-edit') return renderSermonEdit();
     if(state.view==='shared-sermon-link') return renderSharedSermonLink();
@@ -3175,7 +3185,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // Bible (which has no tab of its own) and the smaller utility links.
       renderLandingFellowshipSection(signedIn) +
 
-      '<button class="btn btn-ghost btn-lg btn-block" id="openBibleBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>OPEN THE BIBLE (KJV)</button>' +
+      '<button class="btn btn-ghost btn-lg btn-block" id="openBibleBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>OPEN THE BIBLE (KJV / TAGALOG)</button>' +
       '<button class="btn btn-ghost btn-lg btn-block" id="openDevotionalsBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>DAILY DEVOTIONALS</button>' +
       // Media Library, promoted to its own Home button [2026-09-24, Jared:
       // "let's add it as a separate section as well just like devotionals
@@ -3560,9 +3570,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '</div>'
       ) : '') +
 
+      '<p style="text-align:center;margin-top:6px;"><button type="button" class="switch-account" id="settingsAboutBtn">ABOUT IWORSHIP</button></p>' +
       '<p class="hint" style="text-align:center;margin-top:6px;">iWorship &mdash; worship &amp; fellowship for your congregation: hymns, live sessions, sermons, Bible, and community.</p>';
 
     document.getElementById('settingsBackBtn').addEventListener('click', function(){ state.view='landing'; render(); window.scrollTo(0,0); });
+    document.getElementById('settingsAboutBtn').addEventListener('click', function(){ state.view='about'; render(); window.scrollTo(0,0); });
     document.querySelectorAll('[data-theme-pref]').forEach(function(btn){
       btn.addEventListener('click', function(){ setThemePreference(btn.getAttribute('data-theme-pref')); });
     });
@@ -5585,23 +5597,62 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   let bibleChapter = null;
   let bibleQuery = '';
 
+  /* ============ TAGALOG BIBLE (Ang Dating Biblia, 1905) [2026-09-26] ============
+     Jared: "Look for a public domain Tagalog bible like ADB. Add it in the
+     Bible interface in both separate bible navigation and hosting. Make
+     sure it's completely accessible and easy to switch languages anytime."
+     Ang Dating Biblia (Philippines Bible Society, 1905) is confirmed public
+     domain -- see claude/architecture-and-decisions.md's Tagalog Bible
+     section for the full licensing writeup and sources. Digitized text via
+     https://github.com/seven1m/open-bibles (tgl-tagalog.osis.xml, itself
+     marked "This Bible is now Public Domain" in its own OSIS header),
+     reshaped by scripts/build-tagalog-bible.mjs into
+     src/content/tagalog-bible.json -- the EXACT same {books, text} shape as
+     kjv.json, keyed by the SAME 66 English book names/order (verified
+     byte-for-byte chapter/verse parity against kjv.json: identical chapter
+     counts per book and identical verse counts per chapter, zero
+     mismatches) -- plus a `bookNamesTagalog` map (English name -> Tagalog
+     display name) for the language switcher's UI. Keying both datasets by
+     the same English book-name strings/order means every existing
+     book/chapter/verse-scoped helper below (bibleChapterNumbers,
+     bibleVerseEntries, bibleSearch, parseVerseRef, and every screen that
+     calls them) works for either translation completely unchanged -- only
+     WHICH dataset they read from switches, via activeBibleData() below. */
+  let tagalogData = null;
+  let tagalogLoading = false;
+  let bibleTranslation = safeGet('bibleTranslation', 'kjv'); // 'kjv' | 'tl' -- per-device, like the color theme/split-screen prefs
+  if(bibleTranslation !== 'kjv' && bibleTranslation !== 'tl') bibleTranslation = 'kjv';
+
+  function activeBibleData(){
+    return bibleTranslation === 'tl' ? tagalogData : kjvData;
+  }
+  function activeBibleLoading(){
+    return bibleTranslation === 'tl' ? tagalogLoading : kjvLoading;
+  }
+  function bibleDisplayBookName(book){
+    if(bibleTranslation === 'tl' && tagalogData && tagalogData.bookNamesTagalog && tagalogData.bookNamesTagalog[book]){
+      return tagalogData.bookNamesTagalog[book];
+    }
+    return book;
+  }
+
   // Whether the CURRENT screen has any Bible-dependent UI on it worth
-  // repainting once the (lazy, one-time) KJV import resolves -- the Bible
+  // repainting once the (lazy, one-time) Bible-text import resolves -- the Bible
   // screen itself, the sermon-slide editor's "Bible Verse Slide" verse
   // lookup, and (2026-09-04) the host's ad hoc "Present a Bible Verse"
   // picker, which can be opened before the import has finished and would
-  // otherwise sit stuck on "Loading the KJV text..." forever once it does.
+  // otherwise sit stuck on "Loading..." forever once it does.
   // Presentation builder [2026-09-08]: 'sermon-edit' USED to be listed here
-  // too, on the theory that ADD VERSE (KJV) needed a rerender once the data
+  // too, on the theory that ADD VERSE needed a rerender once the data
   // arrived. It doesn't -- renderSermonSlidesList()'s verse-insert-row never
-  // reads kjvData while painting itself, only the data-insert-verse click
+  // reads the Bible data while painting itself, only the data-insert-verse click
   // handler does (and that already has its own "still loading, try again"
-  // toast + retry for the rare case someone clicks INSERT before the KJV
-  // import resolves, which only takes a moment). Leaving it listed meant a
+  // toast + retry for the rare case someone clicks INSERT before the import
+  // resolves, which only takes a moment). Leaving it listed meant a
   // full renderSermonEdit() could fire out from under someone mid-keystroke
   // in the title field or a slide's text block the instant that background
   // load finished, silently eating whatever they'd just typed. Bible and
-  // the host's verse picker both genuinely paint KJV-dependent content
+  // the host's verse picker both genuinely paint Bible-dependent content
   // (book/chapter listings, search results) and still need this.
   function viewNeedsKjvRerender(){
     return state.view === 'bible' ||
@@ -5618,6 +5669,39 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       kjvLoading = false;
       if(viewNeedsKjvRerender()) render();
     });
+  }
+  function loadTagalogData(){
+    if(tagalogData || tagalogLoading) return;
+    tagalogLoading = true;
+    import('./content/tagalog-bible.json').then(function(mod){
+      tagalogData = mod.default || mod;
+      tagalogLoading = false;
+      if(viewNeedsKjvRerender()) render();
+    }).catch(function(){
+      tagalogLoading = false;
+      if(viewNeedsKjvRerender()) render();
+    });
+  }
+  // Loads whichever translation is currently active (or both, once each has
+  // ever been opened) -- call this anywhere the old code called
+  // loadKjvData() alone, so switching languages never needs its own special
+  // first-load handling.
+  function loadActiveBibleData(){
+    if(bibleTranslation === 'tl') loadTagalogData(); else loadKjvData();
+  }
+  // Switches the app-wide translation (persisted per-device) and makes sure
+  // the newly-selected translation's data is loading/loaded. bibleBook/
+  // bibleChapter/hostVerseBrowseBook/hostVerseBrowseChapter are all still
+  // valid after a switch -- both datasets share identical English book-name
+  // keys and chapter/verse numbering (verified at build time), so a reader
+  // stays on the exact same passage when they switch languages mid-read.
+  function setBibleTranslation(t){
+    if(t !== 'kjv' && t !== 'tl') return;
+    if(bibleTranslation === t) return;
+    bibleTranslation = t;
+    safeSet('bibleTranslation', t);
+    loadActiveBibleData();
+    render();
   }
 
   /* ============ DEVOTIONALS ============
@@ -5743,12 +5827,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
 
   function bibleChapterNumbers(book){
-    if(!kjvData || !kjvData.text[book]) return [];
-    return Object.keys(kjvData.text[book]).map(Number).sort(function(a,b){ return a-b; });
+    const data = activeBibleData();
+    if(!data || !data.text[book]) return [];
+    return Object.keys(data.text[book]).map(Number).sort(function(a,b){ return a-b; });
   }
   function bibleVerseEntries(book, chapter){
-    if(!kjvData || !kjvData.text[book] || !kjvData.text[book][String(chapter)]) return [];
-    const ch = kjvData.text[book][String(chapter)];
+    const data = activeBibleData();
+    if(!data || !data.text[book] || !data.text[book][String(chapter)]) return [];
+    const ch = data.text[book][String(chapter)];
     return Object.keys(ch).map(Number).sort(function(a,b){ return a-b; }).map(function(v){
       return { verse:v, text:ch[String(v)] };
     });
@@ -5763,13 +5849,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return raw.replace(/^#\s*/, '').replace(/\[|\]/g, '');
   }
   function bibleSearch(query){
-    if(!kjvData) return [];
+    const data = activeBibleData();
+    if(!data) return [];
     const q = query.trim().toLowerCase();
     if(q.length < 3) return [];
     const results = [];
-    for(let bi=0; bi<kjvData.books.length; bi++){
-      const book = kjvData.books[bi];
-      const chapters = kjvData.text[book];
+    for(let bi=0; bi<data.books.length; bi++){
+      const book = data.books[bi];
+      const chapters = data.text[book];
       for(const chapKey in chapters){
         const verses = chapters[chapKey];
         for(const verseKey in verses){
@@ -5784,16 +5871,37 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return results;
   }
 
+  // Language switcher markup shared by the standalone Bible screen and the
+  // host's ad hoc Bible tab (renderVersePickerBody() below) -- a plain
+  // two-way segmented control, same `.segment-btn` styling the SONGS/
+  // SERMON/BIBLE/MEDIA content-source picker already uses. `idPrefix` keeps
+  // the two call sites' button ids distinct so one screen's click handler
+  // never mistakenly matches the other's markup.
+  function bibleTranslationSwitcher(idPrefix){
+    return '<div class="content-segmented" style="margin-bottom:14px;">' +
+      '<button type="button" class="segment-btn'+(bibleTranslation!=='tl'?' active':'')+'" id="'+idPrefix+'TransKjvBtn">KJV (ENGLISH)</button>' +
+      '<button type="button" class="segment-btn'+(bibleTranslation==='tl'?' active':'')+'" id="'+idPrefix+'TransTlBtn">TAGALOG (ADB)</button>' +
+    '</div>';
+  }
+  function attachBibleTranslationSwitcherHandlers(idPrefix, container){
+    const kjvBtn = document.getElementById(idPrefix+'TransKjvBtn');
+    const tlBtn = document.getElementById(idPrefix+'TransTlBtn');
+    if(kjvBtn) kjvBtn.addEventListener('click', function(){ setBibleTranslation('kjv'); });
+    if(tlBtn) tlBtn.addEventListener('click', function(){ setBibleTranslation('tl'); });
+  }
+
   function renderBible(){
-    if(!kjvData) loadKjvData();
+    if(!activeBibleData()) loadActiveBibleData();
+    const data = activeBibleData();
     main.innerHTML =
       '<div class="back-row"><button class="back-btn" id="bibleBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
       '<div class="landing-hero">' +
         '<p class="display landing-greeting">Bible</p>' +
-        '<p class="landing-sub">King James Version (1769) &mdash; public domain, built in.</p>' +
+        '<p class="landing-sub">'+(bibleTranslation==='tl' ? 'Ang Dating Biblia (1905) &mdash; public domain Tagalog translation, built in.' : 'King James Version (1769) &mdash; public domain, built in.')+'</p>' +
       '</div>' +
-      (!kjvData ?
-        '<p class="hint" style="text-align:center;">'+(kjvLoading ? 'Loading the KJV text&hellip;' : 'Couldn&rsquo;t load the Bible text. Please try again.')+'</p>'
+      bibleTranslationSwitcher('bible') +
+      (!data ?
+        '<p class="hint" style="text-align:center;">'+(activeBibleLoading() ? 'Loading the Bible text&hellip;' : 'Couldn&rsquo;t load the Bible text. Please try again.')+'</p>'
         :
         ('<div class="field"><label for="bibleSearchInput">SEARCH THE WHOLE BIBLE</label><input type="text" id="bibleSearchInput" placeholder="e.g. faith, shepherd, John 3" value="'+escapeAttr(bibleQuery)+'"></div>' +
         '<div id="bibleBody">' + renderBibleBody() + '</div>')
@@ -5805,8 +5913,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       if(bibleBook){ bibleBook=null; render(); window.scrollTo(0,0); return; }
       state.view='landing'; render(); window.scrollTo(0,0);
     });
+    attachBibleTranslationSwitcherHandlers('bible');
 
-    if(!kjvData) return;
+    if(!data) return;
 
     const searchInput = document.getElementById('bibleSearchInput');
     searchInput.addEventListener('input', function(e){
@@ -5856,7 +5965,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       if(found){
         return '<div class="verse-block" style="margin-bottom:14px;"><p class="section-label uc">'+escapeHtml(found.refLabel)+'</p>' +
             '<p class="lyric-line">'+escapeHtml(found.text)+'</p></div>' +
-          '<button type="button" class="btn btn-primary btn-block" data-goto-book="'+escapeAttr(found.book)+'" data-goto-chapter="'+found.chapter+'">READ '+escapeHtml(found.book)+' '+found.chapter+' IN FULL</button>';
+          '<button type="button" class="btn btn-primary btn-block" data-goto-book="'+escapeAttr(found.book)+'" data-goto-chapter="'+found.chapter+'">READ '+escapeHtml(bibleDisplayBookName(found.book))+' '+found.chapter+' IN FULL</button>';
       }
       // [Bug found 2026-09-10] this screen used to try bibleSearch() at 2
       // characters, but bibleSearch() itself silently returns [] under 3
@@ -5872,7 +5981,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       return '<p class="hint" style="margin-bottom:10px;">'+results.length+' match'+(results.length===1?'':'es')+(results.length>=60?' (showing the first 60)':'')+'</p>' +
         (results.length ? results.map(function(r){
           return '<button type="button" class="bible-search-result" data-goto-book="'+escapeAttr(r.book)+'" data-goto-chapter="'+r.chapter+'">' +
-            '<span class="hymn-title" style="font-size:1rem;">'+escapeHtml(r.book)+' '+r.chapter+':'+r.verse+'</span>' +
+            '<span class="hymn-title" style="font-size:1rem;">'+escapeHtml(bibleDisplayBookName(r.book))+' '+r.chapter+':'+r.verse+'</span>' +
             '<p class="hint">'+escapeHtml(r.text)+'</p>' +
           '</button>';
         }).join('') : '<p class="hint">No matches. Try a shorter word, a full reference (&ldquo;John 3:16&rdquo;), or a book name to browse instead.</p>');
@@ -5883,8 +5992,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       const idx = chapters.indexOf(bibleChapter);
       const prevCh = idx > 0 ? chapters[idx-1] : null;
       const nextCh = idx < chapters.length-1 ? chapters[idx+1] : null;
-      return '<p class="bible-crumb">'+escapeHtml(bibleBook)+'</p>' +
-        '<h2 style="margin:0 0 16px;">'+escapeHtml(bibleBook)+' '+bibleChapter+'</h2>' +
+      return '<p class="bible-crumb">'+escapeHtml(bibleDisplayBookName(bibleBook))+'</p>' +
+        '<h2 style="margin:0 0 16px;">'+escapeHtml(bibleDisplayBookName(bibleBook))+' '+bibleChapter+'</h2>' +
         '<div class="lyric-sheet">' + verses.map(function(v){
           return '<p class="bible-verse-p"><span class="bible-verse-num">'+v.verse+'</span>'+escapeHtml(cleanVerseText(v.text))+'</p>';
         }).join('') + '</div>' +
@@ -5895,7 +6004,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     }
     if(bibleBook){
       const chapters = bibleChapterNumbers(bibleBook);
-      return '<p class="bible-crumb">'+escapeHtml(bibleBook)+' &mdash; choose a chapter</p>' +
+      return '<p class="bible-crumb">'+escapeHtml(bibleDisplayBookName(bibleBook))+' &mdash; choose a chapter</p>' +
         '<div class="filter-row">' + chapters.map(function(c){
           return '<button type="button" class="chip" data-open-chapter="'+c+'">'+c+'</button>';
         }).join('') + '</div>';
@@ -5903,12 +6012,18 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // Book picker, grouped Old/New Testament -- this data's canonical order
     // is Genesis..Malachi (39 books) then Matthew..Revelation (27 books),
     // the standard KJV book count and split, so a plain slice(0,39)/slice(39)
-    // is all grouping needs (no separate lookup table to keep in sync).
-    const otBooks = kjvData.books.slice(0, 39);
-    const ntBooks = kjvData.books.slice(39);
+    // is all grouping needs (no separate lookup table to keep in sync). Both
+    // translations share this exact same book order/keys (see the Tagalog
+    // Bible section above), so this slice works unchanged for either one --
+    // only the CHIP LABEL swaps to the Tagalog display name via
+    // bibleDisplayBookName(), the data-open-book value (the lookup key)
+    // never changes.
+    const activeData = activeBibleData();
+    const otBooks = activeData.books.slice(0, 39);
+    const ntBooks = activeData.books.slice(39);
     function bookChips(list){
       return '<div class="filter-row">' + list.map(function(b){
-        return '<button type="button" class="chip" data-open-book="'+escapeAttr(b)+'">'+escapeHtml(b)+'</button>';
+        return '<button type="button" class="chip" data-open-book="'+escapeAttr(b)+'">'+escapeHtml(bibleDisplayBookName(b))+'</button>';
       }).join('') + '</div>';
     }
     return '<div class="section-heading"><h2 class="uc">Old Testament</h2></div>' + bookChips(otBooks) +
@@ -6018,6 +6133,112 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         showToast('Devotional shared to Fellowship.');
       }catch(e){ showToast('Couldn&rsquo;t share &mdash; try again.'); }
       shareBtn.disabled = false;
+    });
+  }
+
+  /* ============ ABOUT IWORSHIP [2026-09-26] ============
+     Jared: build "a complete presentation and one-pager for all the
+     features of iworship... make sure it's easy to read, properly
+     organized. Any person, even non-christians, will be able to understand
+     what the app is about... make sure it can be uploaded to iworship as
+     well." The pptx/pdf marketing pieces (see architecture-and-decisions.md,
+     "Marketing deck + one-pager") are for sharing outside the app; this is
+     that same content, condensed, living INSIDE the app itself, reachable
+     any time from Settings or the hamburger/sidebar nav -- "uploaded to
+     iworship" read as "belongs in the product," not literally importing the
+     deck file. Deliberately kept as short, scannable bullets rather than the
+     deck's fuller slide text -- someone opening this mid-app wants a quick
+     orientation, not a re-read of the whole presentation. Works fully
+     signed out, same as Devotionals/Plans -- a visitor deciding whether to
+     sign up should be able to read this first. */
+  const ABOUT_SECTIONS = [
+    { key:'hymnals', label:'Hymnals', icon:'book', tagline:'The song library at the center of it all',
+      intro:'Every church using iWorship sings from the same, always-growing shared hymnal -- no walls between congregations, no duplicate photocopies to keep track of.',
+      features:[
+        { title:'One shared library', desc:'Add a song once and every church on iWorship can find and sing it -- a hymnal that keeps growing on its own.' },
+        { title:'Two ways to add a song', desc:'Paste in lyrics and let iWorship auto-detect verses/choruses, or build a song section by section by hand. CSV and ChordPro files import in bulk too.' },
+        { title:'Sing Mode & Play Mode', desc:'Huge, simple lyrics for the congregation to follow along with; a musician’s view with live chords and tap-to-transpose for any key.' },
+        { title:'Scripture built right in', desc:'A complete Bible in English (King James Version) and Tagalog (Ang Dating Biblia, 1905) -- switch languages any time, in the Bible tab or live on stage.' },
+        { title:'Daily Devotionals', desc:'A fresh Spurgeon "Morning and Evening" reading posts automatically every day, or browse any day of the year.' },
+        { title:'Built for a real church team', desc:'A self-service Church Team Roster, role-based access from Senior Pastor down to Musician, and a Song Requests queue for anyone to suggest a hymn.' },
+        { title:'Wherever you meet', desc:'Installable right onto an Android phone, works mid-service even with no signal, and fits any screen from a phone to a church PC.' }
+      ] },
+    { key:'host', label:'Host', icon:'monitor', tagline:'Running the live service, start to finish',
+      intro:'A whole worship or preaching service, run from one screen -- songs, sermons, and Bible verses, all switched live, with a real second screen built just for the projector.',
+      features:[
+        { title:'A true projector view', desc:'A second, chrome-less screen made for a TV or projector -- nothing but huge, legible text, exactly what the congregation should see.' },
+        { title:'Split screen for hosts', desc:'Controls, a staged Preview of what’s coming next, and the real Live display, all together on one screen.' },
+        { title:'Everything you might project', desc:'Songs, sermon slides, and Bible verses -- switch between any of them live, from the same host screen.' },
+        { title:'A real sermon builder', desc:'Drag-and-drop text and image blocks, custom backgrounds, and a built-in Bible verse lookup while building a slide.' },
+        { title:'Media & AVP, one stop shop', desc:'Photos, video, slideshows, a direct PowerPoint upload, or a live Google Slides/Canva embed -- whatever the service needs.' },
+        { title:'A room that adapts', desc:'A QR code to join instantly, co-hosting, a private musician-only chart view, and the session recovers cleanly if a host’s connection drops.' },
+        { title:'In-service chat & links', desc:'A floating chat with its own musicians-only channel, plus a livestream link pinned at the top for anyone who needs to open it.' }
+      ] },
+    { key:'fellowship', label:'Fellowship', icon:'users', tagline:'A community, not just a service',
+      intro:'A church family’s own social feed -- profiles, posts, stories, and real conversations, alongside everything else iWorship already does.',
+      features:[
+        { title:'A feed for the church family', desc:'A profile with a bio, photo, and favorite hymns; post text, photos, or video for the congregation to see.' },
+        { title:'Full engagement', desc:'Like, comment, repost, and save any post -- plus a trending and suggested-people rail to discover more of the church family.' },
+        { title:'Stories & Shorts', desc:'24-hour Stories and a swipeable, vertical Shorts feed for quick clips and testimonies.' },
+        { title:'Real conversations', desc:'Direct messages and group chats, with read receipts and real push notifications -- even while the app is closed.' },
+        { title:'A familiar inbox', desc:'A Messenger-style dropdown and dock make finding a conversation effortless, on desktop or mobile.' },
+        { title:'Safe from day one', desc:'Block and report are built in, backed by a real Admin moderation queue.' },
+        { title:'Desktop & mobile', desc:'Each screen size gets its own design -- a real layout for a wide screen, and one built for a thumb.' }
+      ] },
+    { key:'spiritual-growth', label:'Spiritual Growth', icon:'heart', tagline:'Coming soon',
+      intro:'A gentle, guided path for anyone new to faith -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a personal journal for reflecting day by day. Still being written and reviewed before it ships -- nothing here is live yet.',
+      features:[] }
+  ];
+  let aboutTab = 'hymnals';
+  function renderAbout(){
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="aboutBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">About iWorship</p>' +
+        '<p class="landing-sub">Your congregation’s hymnal, worship host, and fellowship &mdash; all in one app.</p>' +
+      '</div>' +
+      '<div id="aboutBody">' + renderAboutBody() + '</div>';
+    document.getElementById('aboutBackBtn').addEventListener('click', function(){
+      state.view='landing'; render(); window.scrollTo(0,0);
+    });
+    attachAboutBodyHandlers();
+  }
+  function renderAboutBody(){
+    const section = ABOUT_SECTIONS.find(function(s){ return s.key === aboutTab; }) || ABOUT_SECTIONS[0];
+    return (
+      '<div class="content-segmented" style="margin-bottom:18px;">' +
+        ABOUT_SECTIONS.map(function(s){
+          return '<button type="button" class="segment-btn'+(aboutTab===s.key?' active':'')+'" data-about-tab="'+s.key+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon(s.icon)+'</svg><span>'+escapeHtml(s.label)+'</span></button>';
+        }).join('') +
+      '</div>' +
+      '<div class="about-section-card">' +
+        '<span class="devotional-icon" aria-hidden="true" style="width:52px;height:52px;">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:26px;height:26px;">'+icon(section.icon)+'</svg>' +
+        '</span>' +
+        '<p class="about-section-title">'+escapeHtml(section.label)+'</p>' +
+        '<p class="about-section-tagline">'+escapeHtml(section.tagline)+'</p>' +
+        '<p class="about-section-intro">'+escapeHtml(section.intro)+'</p>' +
+        (section.features.length ?
+          '<div class="about-feature-list">' + section.features.map(function(f){
+            return '<div class="about-feature-item">' +
+              '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg></span>' +
+              '<p><strong>'+escapeHtml(f.title)+'</strong> &mdash; '+escapeHtml(f.desc)+'</p>' +
+            '</div>';
+          }).join('') + '</div>'
+        : '<p class="about-section-teaser-badge">COMING SOON</p>') +
+      '</div>'
+    );
+  }
+  function attachAboutBodyHandlers(){
+    const body = document.getElementById('aboutBody');
+    if(!body) return;
+    document.querySelectorAll('[data-about-tab]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        aboutTab = btn.getAttribute('data-about-tab');
+        body.innerHTML = renderAboutBody();
+        attachAboutBodyHandlers();
+        body.scrollIntoView({block:'nearest'});
+      });
     });
   }
 
@@ -6210,7 +6431,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     sermonEditSelectedBlock = null;
     sermonEditVerseRowOpenIdx = null;
     sermonEditReturnView = returnView || 'sermons';
-    loadKjvData(); // so ADD VERSE (KJV)'s lookup is ready without a wasted first click
+    loadActiveBibleData(); // so ADD VERSE's lookup is ready without a wasted first click
     state.view = 'sermon-edit';
     render(); window.scrollTo(0,0);
   }
@@ -6236,11 +6457,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // "Book Chapter:Verse" or "Book Chapter:Verse-Verse" string callers
   // should store/display instead of hand-assembling it from parts.
   function parseVerseRef(ref){
-    if(!kjvData) return null;
+    const data = activeBibleData();
+    if(!data) return null;
     const m = ref.trim().match(/^(.+?)\s+(\d+):(\d+)(?:-(\d+))?$/);
     if(!m) return null;
     const bookInput = m[1].trim().toLowerCase();
-    const book = kjvData.books.find(function(b){ return b.toLowerCase() === bookInput; });
+    // Matches against either translation's book name -- the typed English
+    // name (works for both, since both datasets share the same English
+    // keys) or, when Tagalog is active, its Tagalog display name too, so
+    // typing "Juan 3:16" while reading in Tagalog resolves correctly.
+    const book = data.books.find(function(b){
+      if(b.toLowerCase() === bookInput) return true;
+      const tlName = data.bookNamesTagalog && data.bookNamesTagalog[b];
+      return tlName && tlName.toLowerCase() === bookInput;
+    });
     if(!book) return null;
     const chapter = Number(m[2]);
     const verseStart = Number(m[3]);
@@ -6254,7 +6484,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const text = entries.length === 1
       ? cleanVerseText(entries[0].text)
       : entries.map(function(e){ return e.verse + ' ' + cleanVerseText(e.text); }).join(' ');
-    const refLabel = book + ' ' + chapter + ':' + verseStart + (verseEnd > verseStart ? ('-' + verseEnd) : '');
+    const displayBook = bibleDisplayBookName(book);
+    const refLabel = displayBook + ' ' + chapter + ':' + verseStart + (verseEnd > verseStart ? ('-' + verseEnd) : '');
     return { book: book, chapter: chapter, verse: verseStart, verseStart: verseStart, verseEnd: verseEnd, text: text, refLabel: refLabel };
   }
 
@@ -7922,7 +8153,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           '<button type="button" class="btn btn-ghost btn-sm" data-add-block="body" data-slide-idx="'+i+'">ADD TEXT</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" data-add-block="bullets" data-slide-idx="'+i+'">ADD BULLET LIST</button>' +
           '<label class="btn btn-ghost btn-sm" style="cursor:pointer;">ADD IMAGE<input type="file" accept="image/*" data-add-image="'+i+'" style="display:none;"></label>' +
-          '<button type="button" class="btn btn-ghost btn-sm" data-toggle-verse-row="'+i+'">ADD VERSE (KJV)</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-toggle-verse-row="'+i+'">ADD VERSE ('+(bibleTranslation==='tl'?'TAGALOG':'KJV')+')</button>' +
         '</div>' +
         (sermonEditVerseRowOpenIdx === i ?
           ('<div class="verse-insert-row">' +
@@ -8006,9 +8237,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.querySelectorAll('[data-insert-verse]').forEach(function(btn){
       btn.addEventListener('click', function(){
         const i = +btn.getAttribute('data-insert-verse');
-        if(!kjvData){
-          showToast('Still loading the KJV text&hellip; try again in a moment.');
-          loadKjvData();
+        if(!activeBibleData()){
+          showToast('Still loading the Bible text&hellip; try again in a moment.');
+          loadActiveBibleData();
           return;
         }
         const input = document.querySelector('[data-verse-ref-input="'+i+'"]');
@@ -9309,12 +9540,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // can't be reused as-is since it requires the whole string to match one
   // single verse/range and rejects a comma list or a second group.
   function recentVerseBrowseLocation(ref){
-    if(!kjvData) return null;
+    const data = activeBibleData();
+    if(!data) return null;
     const firstGroup = ref.split(' · ')[0]; // matches presentSelectedVerses()'s ' &middot; ' join
     const m = firstGroup.trim().match(/^(.+?)\s+(\d+):/);
     if(!m) return null;
     const bookInput = m[1].trim().toLowerCase();
-    const book = kjvData.books.find(function(b){ return b.toLowerCase() === bookInput; });
+    const book = data.books.find(function(b){
+      if(b.toLowerCase() === bookInput) return true;
+      const tlName = data.bookNamesTagalog && data.bookNamesTagalog[b];
+      return tlName && tlName.toLowerCase() === bookInput;
+    });
     if(!book) return null;
     return { book: book, chapter: Number(m[2]) };
   }
@@ -9785,15 +10021,15 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
 
   // Mirrors renderSermonPicker() above, but a lookup/browse rather than a
-  // list -- reuses parseVerseRef()/kjvData/bibleChapterNumbers()/
-  // bibleVerseEntries()/bibleSearch(), the same KJV lookup and drill-down
+  // list -- reuses parseVerseRef()/activeBibleData()/bibleChapterNumbers()/
+  // bibleVerseEntries()/bibleSearch(), the same Bible lookup and drill-down
   // logic the standalone Bible tab (renderBible()/renderBibleBody() above)
-  // and the sermon-slide "Bible Verse Slide" editor already use. loadKjvData()
-  // is triggered from the OPEN button below rather than on every render,
-  // same reasoning as openSermonEditor()'s call to it. Also shows a
-  // "RECENTLY SHOWN" row of one-tap chips (room.recentVerses, see
-  // pushRecentVerse()/presentVerse()) above everything else, for whatever
-  // verses this room already presented earlier in the service.
+  // and the sermon-slide "Bible Verse Slide" editor already use.
+  // loadActiveBibleData() is triggered from the OPEN button below rather
+  // than on every render, same reasoning as openSermonEditor()'s call to
+  // it. Also shows a "RECENTLY SHOWN" row of one-tap chips (room.recentVerses,
+  // see pushRecentVerse()/presentVerse()) above everything else, for
+  // whatever verses this room already presented earlier in the service.
   //
   // Easier interface [2026-09-06] -- Jared: "give it an easier interface
   // apart from searching, give it an option to pick from a set of books,
@@ -9807,15 +10043,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // autocomplete into, and matching verse TEXT (via bibleSearch(), the same
   // whole-Bible substring search the Bible tab's own search box uses) so a
   // remembered phrase still finds the verse without knowing its reference.
+  //
+  // Tagalog Bible [2026-09-26] -- same bibleTranslationSwitcher() toggle the
+  // standalone Bible tab uses (see renderBible()'s own comment), so a host
+  // can flip languages mid-service too -- "fully switchable at any time...
+  // in both separate bible navigation and hosting."
   function renderVersePicker(){
-    if(!kjvData){
+    if(!activeBibleData()){
       return '<div class="session-card"><p class="control-label uc" style="margin-bottom:10px;">Present a Bible Verse</p>' +
-        '<p class="hint">'+(kjvLoading ? 'Loading the KJV text&hellip;' : 'Couldn&rsquo;t load the Bible text. Please try again.')+'</p></div>';
+        '<p class="hint">'+(activeBibleLoading() ? 'Loading the Bible text&hellip;' : 'Couldn&rsquo;t load the Bible text. Please try again.')+'</p></div>';
     }
     const room = state.room;
     const recentVerses = (room && room.recentVerses) || [];
     return '<div class="session-card">' +
       '<p class="control-label uc" style="margin-bottom:10px;">Present a Bible Verse</p>' +
+      bibleTranslationSwitcher('hostVerse') +
       (recentVerses.length ?
         ('<p class="hint" style="margin:0 0 8px;">RECENTLY SHOWN</p>' +
           '<div class="now-live-jump-row" style="margin-bottom:14px;">' +
@@ -9855,7 +10097,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // select mode to add more, or just present what they already have.
       return '<p class="bible-crumb">' +
           '<button type="button" class="link-btn" data-verse-browse-all-books="1">All books</button> &rsaquo; ' +
-          '<button type="button" class="link-btn" data-verse-browse-book="'+escapeAttr(hostVerseBrowseBook)+'">'+escapeHtml(hostVerseBrowseBook)+'</button> &rsaquo; Chapter '+hostVerseBrowseChapter +
+          '<button type="button" class="link-btn" data-verse-browse-book="'+escapeAttr(hostVerseBrowseBook)+'">'+escapeHtml(bibleDisplayBookName(hostVerseBrowseBook))+'</button> &rsaquo; Chapter '+hostVerseBrowseChapter +
         '</p>' +
         '<div class="now-live-jump-row" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;">' +
           '<button type="button" class="btn btn-ghost" id="verseSelectModeToggleBtn" style="padding:8px 14px;">'+(hostVerseSelectMode?'DONE SELECTING':'SELECT MULTIPLE VERSES')+'</button>' +
@@ -9872,7 +10114,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           return '<button type="button" class="bible-search-result'+(selected?' bible-search-result-selected':'')+'" data-present-browse-verse="'+v.verse+'">' +
             '<span class="hymn-title" style="font-size:.95rem;display:flex;align-items:center;">' +
               (hostVerseSelectMode ? '<span class="verse-checkbox'+(selected?' checked':'')+'" aria-hidden="true"></span>' : '') +
-              escapeHtml(hostVerseBrowseBook)+' '+hostVerseBrowseChapter+':'+v.verse+
+              escapeHtml(bibleDisplayBookName(hostVerseBrowseBook))+' '+hostVerseBrowseChapter+':'+v.verse+
             '</span>' +
             '<p class="hint">'+escapeHtml(cleanVerseText(v.text))+'</p>' +
           '</button>';
@@ -9884,16 +10126,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     }
     if(hostVerseBrowseBook){
       const chapters = bibleChapterNumbers(hostVerseBrowseBook);
-      return '<p class="bible-crumb"><button type="button" class="link-btn" data-verse-browse-all-books="1">All books</button> &rsaquo; '+escapeHtml(hostVerseBrowseBook)+' &mdash; choose a chapter</p>' +
+      return '<p class="bible-crumb"><button type="button" class="link-btn" data-verse-browse-all-books="1">All books</button> &rsaquo; '+escapeHtml(bibleDisplayBookName(hostVerseBrowseBook))+' &mdash; choose a chapter</p>' +
         '<div class="filter-row">' + chapters.map(function(c){
           return '<button type="button" class="chip" data-verse-browse-chapter="'+c+'">'+c+'</button>';
         }).join('') + '</div>';
     }
-    const otBooks = kjvData.books.slice(0, 39);
-    const ntBooks = kjvData.books.slice(39);
+    const activeData = activeBibleData();
+    const otBooks = activeData.books.slice(0, 39);
+    const ntBooks = activeData.books.slice(39);
     function bookChips(list){
       return '<div class="filter-row">' + list.map(function(b){
-        return '<button type="button" class="chip" data-verse-browse-book="'+escapeAttr(b)+'">'+escapeHtml(b)+'</button>';
+        return '<button type="button" class="chip" data-verse-browse-book="'+escapeAttr(b)+'">'+escapeHtml(bibleDisplayBookName(b))+'</button>';
       }).join('') + '</div>';
     }
     return '<p class="hint" style="margin:0 0 8px;">OLD TESTAMENT</p>' + bookChips(otBooks) +
@@ -9911,11 +10154,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     let suggestionsHtml = '';
     if(raw.trim() && !found){
       const q = raw.trim().toLowerCase();
-      const bookMatches = kjvData.books.filter(function(b){ return b.toLowerCase().indexOf(q) !== -1; }).slice(0, 8);
+      const bookMatches = activeBibleData().books.filter(function(b){ return b.toLowerCase().indexOf(q) !== -1 || bibleDisplayBookName(b).toLowerCase().indexOf(q) !== -1; }).slice(0, 8);
       if(bookMatches.length){
         suggestionsHtml += '<p class="hint" style="margin:10px 0 6px;">DID YOU MEAN&hellip;</p>' +
           '<div class="filter-row">' + bookMatches.map(function(b){
-            return '<button type="button" class="chip" data-verse-suggest-book="'+escapeAttr(b)+'">'+escapeHtml(b)+'</button>';
+            return '<button type="button" class="chip" data-verse-suggest-book="'+escapeAttr(b)+'">'+escapeHtml(bibleDisplayBookName(b))+'</button>';
           }).join('') + '</div>';
       }
       if(q.length >= 3){
@@ -9924,7 +10167,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           suggestionsHtml += '<p class="hint" style="margin:14px 0 6px;">MATCHING VERSES</p>' +
             textMatches.map(function(r){
               return '<button type="button" class="bible-search-result" data-suggest-verse-book="'+escapeAttr(r.book)+'" data-suggest-verse-chapter="'+r.chapter+'" data-suggest-verse-verse="'+r.verse+'">' +
-                '<span class="hymn-title" style="font-size:.95rem;">'+escapeHtml(r.book)+' '+r.chapter+':'+r.verse+'</span>' +
+                '<span class="hymn-title" style="font-size:.95rem;">'+escapeHtml(bibleDisplayBookName(r.book))+' '+r.chapter+':'+r.verse+'</span>' +
                 '<p class="hint">'+escapeHtml(r.text)+'</p>' +
               '</button>';
             }).join('');
@@ -9944,6 +10187,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
 
   function attachVersePickerHandlers(){
+    attachBibleTranslationSwitcherHandlers('hostVerse');
     const input = document.getElementById('hostVerseRefInput');
     if(input) input.addEventListener('input', function(e){
       hostVerseRefInput = e.target.value;
@@ -10859,7 +11103,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       hostVersePickerOpen = !hostVersePickerOpen;
       hostContentTab = 'verse'; // tab-highlight fix [2026-09-06]
       hostSetlistEditorOpen = false; // setlist-default-view fix [2026-09-06]
-      if(hostVersePickerOpen) loadKjvData();
+      if(hostVersePickerOpen) loadActiveBibleData();
       render();
     });
     // Media/AVP [2026-09-06]: exact mirror of the SERMON tab handler above.
@@ -14818,5 +15062,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
     if(conn && (conn.saveData || /^(slow-2g|2g)$/.test(conn.effectiveType || ''))) return;
     const schedule = window.requestIdleCallback || function(fn){ return setTimeout(fn, 2500); };
-    schedule(function(){ loadKjvData(); }, { timeout: 8000 });
+    // Tagalog Bible [2026-09-26]: preload whichever translation this device
+    // last used (bibleTranslation, persisted via safeGet/safeSet) rather
+    // than always KJV, so the warm-cache win described above still applies
+    // after someone switches their default to Tagalog.
+    schedule(function(){ loadActiveBibleData(); }, { timeout: 8000 });
   })();

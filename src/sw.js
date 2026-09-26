@@ -39,6 +39,22 @@ registerRoute(
   })
 );
 
+// Tagalog Bible [2026-09-26] -- Jared: "Add it in the Bible interface...
+// Make sure it's completely accessible." Same reasoning and same rule as
+// the KJV one right above: src/content/tagalog-bible.json (~5MB, see
+// scripts/build-tagalog-bible.mjs) is its own lazy-loaded chunk, excluded
+// from the precache list (see vite.config.js's globIgnores) so most opens
+// never pay for it. The first time someone opens Bible with Tagalog
+// selected (or switches to it), this catches that fetch and caches it for
+// a year, same as KJV.
+registerRoute(
+  /\/assets\/tagalog-bible-.*\.js$/,
+  new CacheFirst({
+    cacheName: 'tagalog-bible-text',
+    plugins: [new ExpirationPlugin({ maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 365 })]
+  })
+);
+
 self.skipWaiting();
 // no clientsClaim() here -- registerType stays 'prompt' (see vite.config.js
 // and app.js's registerSW() call): a new worker installs and WAITS rather

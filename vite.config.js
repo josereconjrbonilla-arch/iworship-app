@@ -74,7 +74,12 @@ export default defineConfig({
       // of the old globPatterns/globIgnores pair.
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        globIgnores: ['**/kjv-*.js']
+        // tagalog-bible-*.js [2026-09-26]: same reasoning as kjv-*.js right
+        // below -- src/content/tagalog-bible.json (~5MB) is its own
+        // lazy-loaded chunk, and the default precache size limit (2MiB)
+        // fails the build if it's left in the precache list. See src/sw.js
+        // for the matching CacheFirst runtime-caching rule.
+        globIgnores: ['**/kjv-*.js', '**/tagalog-bible-*.js']
       }
     })
   ],

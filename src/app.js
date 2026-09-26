@@ -286,10 +286,28 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // ALSO happen to hold one of the four leader roles on a real church of
   // their own (Admin's cross-church role assignment already has its own
   // screen, Admin Tools -- see renderAdmin()'s ROLE section -- this one is
-  // scoped to "my own church" specifically, per Jared's ask).
+  // scoped to "my own church" specifically, per Jared's ask). See
+  // canManageAnyChurchTeam() just below for the separate, Admin-wide path
+  // onto this SAME screen against a church of the Admin's choosing.
   function canManageChurchTeam(){
     return isChurchTeamLeaderRole(myRole()) && !!(state.profile && state.profile.churchId);
   }
+  // Admin cross-church access [2026-09-25, Jared: "give me full access to
+  // all church rosters so when pastors ask me to edit them, I can do so
+  // remotely"] -- deliberately a separate function rather than an isAdmin()
+  // clause folded into canManageChurchTeam() above: that one answers "does
+  // MY OWN role+church make me a leader of MY OWN church," which stays
+  // false for an Admin with no role/church of their own, while this one
+  // just gates whether the Church Team screen is reachable at all -- once
+  // in, an Admin picks WHICH church to manage from a dropdown (see
+  // renderChurchTeam()'s isAdminPicking branch and churchTeamTargetChurchId()
+  // down by the rest of this screen's state) rather than being implied by
+  // their own profile. No rules change was needed for this: firestore.rules'
+  // users/{uid} and churchRoster/{uid} blocks already grant isAdmin() an
+  // unconditional read/write on role/churchId/pastorTitle for ANY uid --
+  // this is purely the client-side UI gate to match what the rules already
+  // allow.
+  function canManageAnyChurchTeam(){ return !!state.isAdmin; }
 
   // Co-hosting [2026-09-05] -- Jared: "hosts can assign other hosts to their
   // session and grant controls to one person at a time." isRoomOwner() is
@@ -869,7 +887,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stopAdminChurchesWatch();
     unsubAdminChurches = watchAllChurches(function(churches){
       state.adminChurches = churches;
-      if(state.view === 'admin') render();
+      // Also re-render on 'church-team' [2026-09-25] -- an Admin managing
+      // someone else's church roster (see canManageAnyChurchTeam()) needs
+      // this same list for its CHURCH picker dropdown, and this watch is
+      // now started from that screen too, not just 'admin'.
+      if(state.view === 'admin' || state.view === 'church-team') render();
     });
   }
   // Same TDZ reasoning as unsubAdminChurches just above -- declared here,
@@ -1039,7 +1061,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function stopChurchRosterWatch(){ if(unsubChurchRoster){ unsubChurchRoster(); unsubChurchRoster = null; } }
   function startChurchRosterWatch(){
     stopChurchRosterWatch();
-    const churchId = state.profile && state.profile.churchId;
+    // churchTeamTargetChurchId() (declared down by the rest of the Church
+    // Team screen's state, a `function` so hoisting makes this safe to
+    // call from up here regardless of source order -- see its own comment)
+    // -- an Admin managing another church remotely overrides this to
+    // whichever church they picked; everyone else just gets their own.
+    const churchId = churchTeamTargetChurchId();
     if(!churchId) { state.churchRoster = []; return; }
     unsubChurchRoster = watchChurchRoster(churchId, function(list){
       state.churchRoster = list;
@@ -2113,7 +2140,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
         ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
-        (canManageChurchTeam() ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
+        ((canManageChurchTeam() || canManageAnyChurchTeam()) ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
         (state.isAdmin ? '<button type="button" class="hamburger-item" id="hbAdminBtn">ADMIN TOOLS</button>' : '') +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>' +
         '<button type="button" class="hamburger-item hamburger-item-danger" id="hbSignOutBtn">SIGN OUT</button>'
@@ -2142,7 +2169,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const hbSongRequests = document.getElementById('hbSongRequestsBtn');
     if(hbSongRequests) hbSongRequests.addEventListener('click', function(){ goTo(function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); }); });
     const hbChurchTeam = document.getElementById('hbChurchTeamBtn');
-    if(hbChurchTeam) hbChurchTeam.addEventListener('click', function(){ goTo(function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); }); });
+    if(hbChurchTeam) hbChurchTeam.addEventListener('click', function(){ goTo(function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); if(canManageAnyChurchTeam()) startAdminChurchesWatch(); }); });
     const hbAdmin = document.getElementById('hbAdminBtn');
     if(hbAdmin) hbAdmin.addEventListener('click', function(){ goTo(function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); }); });
     const hbSettings = document.getElementById('hbSettingsBtn');
@@ -2205,7 +2232,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
         '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
         ((state.isEditor || hasFullAccess()) ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
-        (canManageChurchTeam() ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
+        ((canManageChurchTeam() || canManageAnyChurchTeam()) ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
         (state.isAdmin ? ('<button type="button" class="sidebar-item" id="sideAdminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>Admin Tools</span></button>') : '') +
         '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
       '</div>' +
@@ -2222,7 +2249,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const songReqBtn = document.getElementById('sideSongRequestsBtn');
     if(songReqBtn) songReqBtn.addEventListener('click', function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); });
     const churchTeamBtn = document.getElementById('sideChurchTeamBtn');
-    if(churchTeamBtn) churchTeamBtn.addEventListener('click', function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); });
+    if(churchTeamBtn) churchTeamBtn.addEventListener('click', function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); if(canManageAnyChurchTeam()) startAdminChurchesWatch(); });
     const adminBtn = document.getElementById('sideAdminBtn');
     if(adminBtn) adminBtn.addEventListener('click', function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); });
     document.getElementById('sideSettingsBtn').addEventListener('click', function(){ state.view='settings'; render(); window.scrollTo(0,0); });
@@ -4262,6 +4289,27 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   let churchTeamAddRole = 'musician';
   let churchTeamAddPastorTitle = '';
   let churchTeamRemoveConfirmUid = null;
+  // Admin's picked church [2026-09-25, see canManageAnyChurchTeam() up by
+  // canManageChurchTeam() for the full "why a separate function" reasoning]
+  // -- '' means "nothing picked yet," which falls back to the Admin's OWN
+  // churchId below (so an Admin who's also a real leader still lands on
+  // their own church by default, same as before this feature existed);
+  // reset to '' on leaving the screen (see churchTeamBackBtn's handler)
+  // rather than left sticky, so a later visit never silently reopens
+  // whichever other church was last picked.
+  let adminChurchTeamChurchId = '';
+  // Safe to declare/call this as a plain `function` (not `let`) regardless
+  // of where it sits in the file -- function declarations hoist fully, no
+  // TDZ -- and it's only ever CALLED from click handlers or from inside
+  // renderChurchTeam()/startChurchRosterWatch(), all reachable only once
+  // state.view is already 'church-team', i.e. always well after this
+  // script's own top-to-bottom execution has finished and adminChurchTeamChurchId
+  // above is long since initialized. (See this same file's TDZ bug fixes
+  // from the 2026-09-25 "test everything" pass for why that distinction
+  // matters here.)
+  function churchTeamTargetChurchId(){
+    return (state.isAdmin && adminChurchTeamChurchId) ? adminChurchTeamChurchId : (state.profile && state.profile.churchId);
+  }
 
   function renderChurchTeamAddResults(query){
     const raw = query.trim();
@@ -4285,9 +4333,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // guard just above -- role can change out from under this screen (e.g.
     // another leader just removed this account from the team) while it's
     // still on screen, and firestore.rules would reject every write here
-    // anyway once that happens.
-    if(!canManageChurchTeam()){ state.view='landing'; render(); return; }
-    const churchName = (state.church && state.church.name) || state.profile.churchName || 'your church';
+    // anyway once that happens. canManageAnyChurchTeam() (an Admin, see its
+    // own comment above) keeps this screen reachable even when the Admin
+    // holds no leader role/church of their own.
+    if(!canManageChurchTeam() && !canManageAnyChurchTeam()){ state.view='landing'; render(); return; }
+    const isAdminPicking = canManageAnyChurchTeam();
+    const targetChurchId = churchTeamTargetChurchId();
+    // An Admin managing someone ELSE's church has no watchChurch() result
+    // for it (that watch only ever tracks the SIGNED-IN account's own
+    // profile.churchId, see syncChurchWatch()) -- state.adminChurches (the
+    // same public list the Admin ROLE section's CHURCH dropdown uses) is
+    // what actually has that church's name in this case.
+    const pickedChurch = isAdminPicking ? (state.adminChurches||[]).find(function(c){ return c.id===targetChurchId; }) : null;
+    const churchName = pickedChurch ? (pickedChurch.name || '(unnamed church)') : ((state.church && state.church.name) || state.profile.churchName || 'your church');
     const roster = (state.churchRoster||[]).slice().sort(function(a,b){
       const an = directoryEntry(a.uid) ? (directoryEntry(a.uid).displayName||'') : '';
       const bn = directoryEntry(b.uid) ? (directoryEntry(b.uid).displayName||'') : '';
@@ -4297,11 +4355,22 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '<div class="back-row"><button class="back-btn" id="churchTeamBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
       '<div class="landing-hero">' +
         '<p class="display landing-greeting">Church Team</p>' +
-        '<p class="landing-sub">Everyone serving at '+escapeHtml(churchName)+'. Add or remove team members and change their roles &mdash; changes take effect immediately, no Admin needed.</p>' +
+        '<p class="landing-sub">'+(targetChurchId ? ('Everyone serving at '+escapeHtml(churchName)+'. Add or remove team members and change their roles &mdash; changes take effect immediately, no Admin needed.') : 'Pick a church below to view and manage its team remotely.')+'</p>' +
       '</div>' +
+      (isAdminPicking ? (
+        '<div class="session-card">' +
+          '<div class="field"><label for="churchTeamChurchSelect">CHURCH <span style="text-transform:none;font-weight:400;">(Admin &mdash; pick any church to manage its team remotely)</span></label><select id="churchTeamChurchSelect">' +
+            '<option value="">(choose a church)</option>' +
+            (state.adminChurches||[]).slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).map(function(c){
+              return '<option value="'+escapeAttr(c.id)+'" '+(targetChurchId===c.id?'selected':'')+'>'+escapeHtml(c.name||'(unnamed)')+'</option>';
+            }).join('') +
+          '</select></div>' +
+        '</div>'
+      ) : '') +
       '<div class="session-card">' +
         '<p class="control-label uc" style="margin-bottom:10px;">Current Team</p>' +
-        (roster.length ? ('<ul class="setlist-items">' + roster.map(function(r){
+        (!targetChurchId ? '<p class="hint">Pick a church above to view and manage its team.</p>' :
+        roster.length ? ('<ul class="setlist-items">' + roster.map(function(r){
           const person = directoryEntry(r.uid);
           const name = person ? (person.displayName||'(no name set)') : r.uid;
           const confirming = churchTeamRemoveConfirmUid === r.uid;
@@ -4325,31 +4394,40 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '</span></li>';
         }).join('') + '</ul>') : '<p class="hint">No one on the team yet &mdash; add your first member below.</p>') +
       '</div>' +
-      '<div class="session-card">' +
-        '<p class="control-label uc" style="margin-bottom:10px;">Add A Team Member</p>' +
-        '<div class="field"><label for="churchTeamRoleSelect">ROLE FOR NEW MEMBER</label><select id="churchTeamRoleSelect">' +
-          CHURCH_TEAM_ROLE_OPTIONS.map(function(o){ return '<option value="'+escapeAttr(o.id)+'" '+(churchTeamAddRole===o.id?'selected':'')+'>'+escapeHtml(o.label)+'</option>'; }).join('') +
-        '</select></div>' +
-        (churchTeamAddRole === 'pastor' ? ('<div class="field"><label for="churchTeamAddTitleInput">PASTOR TITLE <span style="text-transform:none;font-weight:400;">(optional, e.g. &ldquo;Youth Pastor&rdquo;)</span></label><input type="text" id="churchTeamAddTitleInput" value="'+escapeAttr(churchTeamAddPastorTitle)+'"></div>') : '') +
-        '<div class="field"><label for="churchTeamSearch">FIND BY ACCOUNT ID, NAME, OR CHURCH</label>' +
-          '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
-          '<input type="text" id="churchTeamSearch" placeholder="Search&hellip;" value="'+escapeAttr(churchTeamQuery)+'" autocomplete="off"></div>' +
-        '</div>' +
-        '<p class="hint">They need an existing, free iWorship account first &mdash; find them by name/church above, or paste their exact Account ID.</p>' +
-        '<div id="churchTeamAddResults">' + renderChurchTeamAddResults(churchTeamQuery) + '</div>' +
-      '</div>';
+      (targetChurchId ? (
+        '<div class="session-card">' +
+          '<p class="control-label uc" style="margin-bottom:10px;">Add A Team Member</p>' +
+          '<div class="field"><label for="churchTeamRoleSelect">ROLE FOR NEW MEMBER</label><select id="churchTeamRoleSelect">' +
+            CHURCH_TEAM_ROLE_OPTIONS.map(function(o){ return '<option value="'+escapeAttr(o.id)+'" '+(churchTeamAddRole===o.id?'selected':'')+'>'+escapeHtml(o.label)+'</option>'; }).join('') +
+          '</select></div>' +
+          (churchTeamAddRole === 'pastor' ? ('<div class="field"><label for="churchTeamAddTitleInput">PASTOR TITLE <span style="text-transform:none;font-weight:400;">(optional, e.g. &ldquo;Youth Pastor&rdquo;)</span></label><input type="text" id="churchTeamAddTitleInput" value="'+escapeAttr(churchTeamAddPastorTitle)+'"></div>') : '') +
+          '<div class="field"><label for="churchTeamSearch">FIND BY ACCOUNT ID, NAME, OR CHURCH</label>' +
+            '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+            '<input type="text" id="churchTeamSearch" placeholder="Search&hellip;" value="'+escapeAttr(churchTeamQuery)+'" autocomplete="off"></div>' +
+          '</div>' +
+          '<p class="hint">They need an existing, free iWorship account first &mdash; find them by name/church above, or paste their exact Account ID.</p>' +
+          '<div id="churchTeamAddResults">' + renderChurchTeamAddResults(churchTeamQuery) + '</div>' +
+        '</div>'
+      ) : '');
     attachChurchTeamHandlers();
   }
   function attachChurchTeamHandlers(){
     document.getElementById('churchTeamBackBtn').addEventListener('click', function(){
-      stopChurchRosterWatch(); stopDirectoryWatch();
-      churchTeamQuery = ''; churchTeamRemoveConfirmUid = null;
+      stopChurchRosterWatch(); stopDirectoryWatch(); stopAdminChurchesWatch();
+      churchTeamQuery = ''; churchTeamRemoveConfirmUid = null; adminChurchTeamChurchId = '';
       state.view='landing'; render(); window.scrollTo(0,0);
+    });
+    const churchSelect = document.getElementById('churchTeamChurchSelect');
+    if(churchSelect) churchSelect.addEventListener('change', function(e){
+      adminChurchTeamChurchId = e.target.value;
+      churchTeamQuery = ''; churchTeamRemoveConfirmUid = null;
+      startChurchRosterWatch();
+      render();
     });
     function doAdd(uid){
       const role = churchTeamAddRole;
       const pastorTitle = role === 'pastor' ? (churchTeamAddPastorTitle.trim() || null) : null;
-      saveProfile(uid, { role: role, pastorTitle: pastorTitle, churchId: state.profile.churchId })
+      saveProfile(uid, { role: role, pastorTitle: pastorTitle, churchId: churchTeamTargetChurchId() })
         .then(function(){
           showToast('Added to the team.');
           churchTeamQuery = ''; churchTeamAddPastorTitle = '';
@@ -4368,7 +4446,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         saveProfile(uid, {
           role: newRole,
           pastorTitle: newRole === 'pastor' ? ((current && current.pastorTitle) || null) : null,
-          churchId: state.profile.churchId
+          churchId: churchTeamTargetChurchId()
         })
           .then(function(){ showToast('Role updated.'); render(); })
           .catch(function(){ showToast('Couldn&rsquo;t update that role &mdash; try again.'); render(); });
@@ -4380,7 +4458,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         const titleInput = document.querySelector('[data-church-team-title="'+uid+'"]');
         const title = titleInput ? titleInput.value.trim() : '';
         btn.disabled = true;
-        saveProfile(uid, { role: 'pastor', pastorTitle: title || null, churchId: state.profile.churchId })
+        saveProfile(uid, { role: 'pastor', pastorTitle: title || null, churchId: churchTeamTargetChurchId() })
           .then(function(){ showToast('Title saved.'); })
           .catch(function(){ showToast('Couldn&rsquo;t save that title &mdash; try again.'); })
           .finally(function(){ btn.disabled = false; });

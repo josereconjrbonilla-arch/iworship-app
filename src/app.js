@@ -12,6 +12,8 @@ import {
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   checkIsAdmin, watchChurch, watchAllChurches, newChurchId, saveChurch,
   watchAllUsers, watchDirectory, watchChurchRoster,
+  watchSpiritualGrowth, recordSalvationDecision, setMilestoneComplete,
+  watchJournalEntries, addJournalEntry, deleteJournalEntry,
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,

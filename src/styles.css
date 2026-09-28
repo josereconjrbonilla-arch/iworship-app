@@ -2108,6 +2108,25 @@ body.stage-page .appfoot{ display:none; }
     .about-section-card{ padding:22px 18px; }
   }
 
+  /* Spiritual Growth (renderSpiritualGrowth() in app.js) [2026-09-28] --
+     the only two genuinely new classes this feature needed; everything
+     else (.about-section-card, .devotional-icon, .about-feature-list,
+     .devotional-reader-text, .field, .hint) is reused as-is from About/
+     Devotionals/Add-Song so this reads as one family of screens, not a
+     one-off. .sg-label is a small subheading inside a topic's reading
+     (e.g. "The Problem", "Reading God's Word"); .sg-verse sets a quoted
+     Scripture passage apart from the surrounding commentary. */
+  .sg-label{
+    font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--gold-strong); margin:18px 0 8px;
+  }
+  .sg-verse{
+    margin:0 0 14px; padding:2px 0 2px 16px; border-left:3px solid var(--gold-strong);
+    font-family:'EB Garamond',serif; font-style:italic; font-size:1.1rem; line-height:1.7; color:var(--ink);
+  }
+  .sg-verse p{ margin:0 0 4px; }
+  .sg-verse cite{ display:block; font-style:normal; font-weight:700; font-size:.82rem; color:var(--wine); }
+
   /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============
      Jared: "make the fellowship part look like an actual social media
      feed... a hamburger menu... profile pic next to the logo... Shorts...

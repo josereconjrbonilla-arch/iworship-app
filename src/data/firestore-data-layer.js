@@ -445,6 +445,59 @@ export function watchChurchRoster(churchId, callback) {
   });
 }
 
+// =================================================== SPIRITUAL GROWTH
+// [2026-09-28] Gospel invitation -> confirmation -> discipleship milestones
+// -> personal journal -- see docs/spiritual-growth-draft-copy.md for the
+// full copy and the decisions Jared confirmed before this was built (most
+// importantly: a profession of faith IS recorded, but kept fully private to
+// that user, never visible to an admin/pastor -- see firestore.rules'
+// spiritualGrowth/{uid} block, which has zero isAdmin() bypass anywhere in
+// it, the one collection in this whole app that's strictly owner-only, full
+// stop). Two pieces: a single per-user doc (professedAt + a milestones map,
+// keyed by the topic keys in app.js's SPIRITUAL_GROWTH_TOPICS) and a
+// journal subcollection underneath it.
+export function watchSpiritualGrowth(uid, callback) {
+  return onSnapshot(doc(db, 'spiritualGrowth', uid), (snap) => {
+    callback(snap.exists() ? snap.data() : { professedAt: null, milestones: {} });
+  });
+}
+// Idempotent on purpose -- "I've already trusted Christ" can be tapped more
+// than once (a reload, a second visit) without ever overwriting an earlier,
+// real professedAt with a later timestamp. merge:true also means this never
+// touches the milestones map alongside it.
+export async function recordSalvationDecision(uid) {
+  const snap = await getDoc(doc(db, 'spiritualGrowth', uid));
+  if (snap.exists() && snap.data().professedAt) return; // already recorded -- leave the original timestamp alone
+  await setDoc(doc(db, 'spiritualGrowth', uid), { professedAt: serverTimestamp() }, { merge: true });
+}
+// Setting milestoneKey to null (rather than deleteField()) when un-checking
+// a topic is deliberate, not an oversight -- app.js only ever reads this
+// map for truthiness ("is this topic done"), so null and "field absent"
+// behave identically to every caller, and a plain nested-object setDoc with
+// merge:true is enough to touch just this one key without disturbing any
+// other topic's own completedAt.
+export async function setMilestoneComplete(uid, milestoneKey, completed) {
+  await setDoc(doc(db, 'spiritualGrowth', uid), {
+    milestones: { [milestoneKey]: completed ? { completedAt: serverTimestamp() } : null }
+  }, { merge: true });
+}
+export function watchJournalEntries(uid, callback) {
+  const q = query(collection(db, 'spiritualGrowth', uid, 'journal'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  });
+}
+export async function addJournalEntry(uid, text, milestoneKey) {
+  await addDoc(collection(db, 'spiritualGrowth', uid, 'journal'), {
+    text: text,
+    milestoneKey: milestoneKey || null,
+    createdAt: serverTimestamp()
+  });
+}
+export async function deleteJournalEntry(uid, entryId) {
+  await deleteDoc(doc(db, 'spiritualGrowth', uid, 'journal', entryId));
+}
+
 // Every signed-up profile, for the Admin screen's "find by name" search --
 // so an Admin can assign a role/beta access without already having the
 // person's Account ID in hand. Safe to list unfiltered under firestore.rules'

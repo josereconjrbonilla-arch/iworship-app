@@ -141,6 +141,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     adminChurches: [],       // populated live by watchAllChurches() while state.view === 'admin'
     adminUsers: [],          // populated live by watchAllUsers() while state.view === 'admin' -- powers "find by name" search
     churchRoster: [],        // populated live by watchChurchRoster(profile.churchId) while state.view === 'church-team' -- raw {uid,churchId,role,pastorTitle} rows; display info comes from state.directory (see startChurchRosterWatch())
+    spiritualGrowth: null,   // populated live by watchSpiritualGrowth(uid) while state.view === 'spiritual-growth' -- {professedAt, milestones} for the signed-in person's own account only (see startSpiritualGrowthWatch())
+    journalEntries: [],      // populated live by watchJournalEntries(uid) while state.view === 'spiritual-growth' -- this person's own private journal, newest first (see startJournalWatch())
     mySongRequests: [],      // populated live by watchMySongRequests() while state.view === 'song-request'
     pendingSongRequests: [], // populated live by watchPendingSongRequests() while state.view === 'song-request-queue'
     activeRoomCode: safeSessionGet('cv:activeRoomCode', null),
@@ -1074,6 +1076,33 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
   }
 
+  // Spiritual Growth [2026-09-28] -- same "started/stopped only while that
+  // screen is open" reasoning as Church Team's watches just above, and the
+  // same "run as a pair" call-site pattern (see openSpiritualGrowth() and
+  // restoreLastViewIfNeeded()'s 'spiritual-growth' case below) since the
+  // Path screen needs milestone state and the Journal screen needs entries,
+  // and either one can be reached from the other without a full re-nav.
+  let unsubSpiritualGrowth = null;
+  function stopSpiritualGrowthWatch(){ if(unsubSpiritualGrowth){ unsubSpiritualGrowth(); unsubSpiritualGrowth = null; } }
+  function startSpiritualGrowthWatch(){
+    stopSpiritualGrowthWatch();
+    if(!state.user) { state.spiritualGrowth = null; return; }
+    unsubSpiritualGrowth = watchSpiritualGrowth(state.user.uid, function(doc){
+      state.spiritualGrowth = doc;
+      if(state.view === 'spiritual-growth') render();
+    });
+  }
+  let unsubJournal = null;
+  function stopJournalWatch(){ if(unsubJournal){ unsubJournal(); unsubJournal = null; } }
+  function startJournalWatch(){
+    stopJournalWatch();
+    if(!state.user) { state.journalEntries = []; return; }
+    unsubJournal = watchJournalEntries(state.user.uid, function(list){
+      state.journalEntries = list;
+      if(state.view === 'spiritual-growth') render();
+    });
+  }
+
   // Bottom-tab / hamburger view-membership lists [2026-09-10] -- declared
   // here (not down by renderBottomTabs()/inFellowshipMode() themselves,
   // where they read more naturally) because they're `const`, and watchAuth()
@@ -1136,7 +1165,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     'sermons': null, 'programs': null, 'fellowship': null, 'shorts': null, 'explore': null,
     'notifications': null, 'messages': null, 'my-sessions': null, 'profile-edit': null,
     'dm-thread': 'activeDmThreadId', 'group-chat-thread': 'activeGroupChatId',
-    'profile-view': 'viewProfileUid'
+    'profile-view': 'viewProfileUid', 'spiritual-growth': null
   };
   const RESUME_NO_DEPENDENCY = ['bible','devotionals','about','plans','list','settings','host-hub'];
   const RESUME_LIBRARY_DEPENDENT = ['detail'];
@@ -1271,6 +1300,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stopMyMediaFoldersWatch();
     stopDirectoryWatch();
     stopChurchRosterWatch();
+    stopSpiritualGrowthWatch();
+    stopJournalWatch();
     stopSocialWatches();
     if(user){
       unsubProfile = watchProfile(user.uid, function(profile, meta){
@@ -2136,6 +2167,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       (signedIn ? (
         '<button type="button" class="hamburger-item" id="hbMyProfileBtn">MY PROFILE</button>' +
         '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
+        '<button type="button" class="hamburger-item" id="hbSpiritualGrowthBtn">SPIRITUAL GROWTH</button>' +
         (canHost() ? '<button type="button" class="hamburger-item" id="hbMediaLibraryBtn">MEDIA LIBRARY</button>' : '') +
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
@@ -2162,6 +2194,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(hbProfile) hbProfile.addEventListener('click', function(){ goTo(openProfileEdit); });
     const hbDevotionals = document.getElementById('hbDevotionalsBtn');
     if(hbDevotionals) hbDevotionals.addEventListener('click', function(){ goTo(function(){ state.view='devotionals'; render(); window.scrollTo(0,0); }); });
+    const hbSpiritualGrowth = document.getElementById('hbSpiritualGrowthBtn');
+    if(hbSpiritualGrowth) hbSpiritualGrowth.addEventListener('click', function(){ goTo(openSpiritualGrowth); });
     const hbMediaLibrary = document.getElementById('hbMediaLibraryBtn');
     if(hbMediaLibrary) hbMediaLibrary.addEventListener('click', function(){ goTo(function(){ openMediaLibrary('landing'); }); });
     const hbExplore = document.getElementById('hbExploreBtn');
@@ -2235,6 +2269,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '<div class="sidebar-section">' +
         '<button type="button" class="sidebar-item" id="sideMessagesBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('messenger')+'</svg><span>Messages</span>'+(unreadMsgs?(' <span class="notif-badge-inline">'+(unreadMsgs>99?'99+':unreadMsgs)+'</span>'):'')+'</button>' +
         '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
+        '<button type="button" class="sidebar-item" id="sideSpiritualGrowthBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('heart')+'</svg><span>Spiritual Growth</span></button>' +
         (canHost() ? ('<button type="button" class="sidebar-item" id="sideMediaLibraryBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>Media Library</span></button>') : '') +
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
         '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
@@ -2250,6 +2285,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.getElementById('sideProfileBtn').addEventListener('click', openProfileEdit);
     document.getElementById('sideMessagesBtn').addEventListener('click', openMessages);
     document.getElementById('sideDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
+    document.getElementById('sideSpiritualGrowthBtn').addEventListener('click', openSpiritualGrowth);
     const sideMediaLibraryBtn = document.getElementById('sideMediaLibraryBtn');
     if(sideMediaLibraryBtn) sideMediaLibraryBtn.addEventListener('click', function(){ openMediaLibrary('landing'); });
     document.getElementById('sideExploreBtn').addEventListener('click', openExplore);
@@ -2939,6 +2975,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='bible') return renderBible();
     if(state.view==='devotionals') return renderDevotionals();
     if(state.view==='about') return renderAbout();
+    if(state.view==='spiritual-growth') return renderSpiritualGrowth();
     if(state.view==='sermons') return renderSermons();
     if(state.view==='sermon-edit') return renderSermonEdit();
     if(state.view==='shared-sermon-link') return renderSharedSermonLink();
@@ -6185,9 +6222,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         { title:'Safe from day one', desc:'Block and report are built in, backed by a real Admin moderation queue.' },
         { title:'Desktop & mobile', desc:'Each screen size gets its own design -- a real layout for a wide screen, and one built for a thumb.' }
       ] },
-    { key:'spiritual-growth', label:'Spiritual Growth', icon:'heart', tagline:'Coming soon',
-      intro:'A gentle, guided path for anyone new to faith -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a personal journal for reflecting day by day. Still being written and reviewed before it ships -- nothing here is live yet.',
-      features:[] }
+    { key:'spiritual-growth', label:'Spiritual Growth', icon:'heart', tagline:'A guided path for anyone new to faith',
+      intro:'A gentle, guided path for anyone new to faith -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a personal journal for reflecting day by day. Reachable from the menu once signed in.',
+      features:[
+        { title:'The Gospel Invitation', desc:'A stand-alone tract screen, always one tap away from the menu.' },
+        { title:'You Can Be Sure', desc:'A short assurance screen for anyone who just professed faith -- or wants to revisit why they can be sure.' },
+        { title:'A milestone-by-milestone Discipleship Path', desc:'Nine short topics, most-foundational first, each markable as read at your own pace.' },
+        { title:'A fully private journal', desc:'Reflections tied to a topic, or written freely anytime -- never visible to anyone else, not even a pastor or Admin.' }
+      ] }
   ];
   let aboutTab = 'hymnals';
   function renderAbout(){
@@ -6238,6 +6280,368 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         body.innerHTML = renderAboutBody();
         attachAboutBodyHandlers();
         body.scrollIntoView({block:'nearest'});
+      });
+    });
+  }
+
+  /* ============ SPIRITUAL GROWTH ============
+     [2026-09-28] Jared: "you can start working on spiritual growth now" --
+     see docs/spiritual-growth-draft-copy.md for the full reviewed copy this
+     screen ports (and the six decisions Jared confirmed before this was
+     built), and interface.md's "Spiritual Growth" section for the data
+     shape. One deliberate departure from that draft: section 0 describes
+     the Gospel Invitation as reachable "any time, by anyone, signed in or
+     not," but this whole feature is wired signed-in-only (see
+     openSpiritualGrowth()'s guard, and RESUMABLE_VIEWS' entry for
+     'spiritual-growth' having no RESUME_NO_DEPENDENCY counterpart) --
+     recording a milestone or a journal entry inherently needs a uid, and
+     supporting an anonymous-then-merge-on-signin flow was judged out of
+     scope for this pass, same call as everything else in interface.md's
+     "not built in this pass, on purpose" list.
+
+     Screens (spiritualGrowthScreen): 'home' (four-card nav) ->
+     'invitation' / 'confirmation' / 'path' / 'topic' / 'journal'. Every
+     screen's own BACK button (rendered once by renderSpiritualGrowth()
+     itself, not per-screen) returns all the way to 'landing', matching
+     every other top-level screen in this app (About, Devotionals, etc.);
+     movement BETWEEN these five screens is a set of in-content buttons/
+     links instead (goToSgScreen()), same as About's own segmented tabs
+     just above. */
+  let spiritualGrowthScreen = 'home'; // 'home' | 'invitation' | 'confirmation' | 'path' | 'topic' | 'journal' -- set by openSpiritualGrowth()/goToSgScreen(), read by renderSpiritualGrowthBody()
+  let spiritualGrowthActiveTopicKey = null; // which SPIRITUAL_GROWTH_TOPICS[].key is open on the 'topic' screen
+  let spiritualGrowthJournalDraft = ''; // shared textarea value for whichever journal composer is currently on screen
+  let spiritualGrowthJournalDraftTopicKey = null; // null while the draft belongs to the Journal tab's own open box; a topic key while it belongs to that topic's "add a reflection" box -- keeps the two composers from clobbering each other's typed-but-unsaved text on re-render
+
+  const SPIRITUAL_GROWTH_INVITATION = {
+    title: 'Would You Like to Know God Personally?',
+    blocks: [
+      { type:'p', text:'Every person, everywhere, was made to know God — not just to know about Him, but to actually know Him, the way you know a friend. If that sounds distant or out of reach, you’re not alone. Here’s what the Bible says about why, and what God has already done about it.' },
+      { type:'label', text:'The Problem' },
+      { type:'verse', ref:'Romans 3:23', text:'For all have sinned, and come short of the glory of God.' },
+      { type:'p', text:'Sin isn’t only the big, obvious wrongs — it’s every way, small or large, that we’ve fallen short of God’s perfect standard. That includes every person who has ever lived. And sin carries a real cost:' },
+      { type:'verse', ref:'Romans 6:23', text:'For the wages of sin is death.' },
+      { type:'p', text:'Separation from God, both now and forever. Left there, no amount of good behavior, religion, or effort can close that gap. It’s a debt we owe and cannot pay.' },
+      { type:'label', text:'The Solution' },
+      { type:'verse', ref:'Romans 5:8', text:'But God commendeth his love toward us, in that, while we were yet sinners, Christ died for us.' },
+      { type:'p', text:'That same passage doesn’t stop at the bad news:' },
+      { type:'verse', ref:'Romans 6:23', text:'…but the gift of God is eternal life through Jesus Christ our Lord.' },
+      { type:'p', text:'Jesus Christ — fully God and fully man, living the perfect life none of us could live — took the punishment for sin on the cross in our place, and rose from the dead three days later, proving He had defeated sin and death for good. This is a finished work. It cannot be added to.' },
+      { type:'label', text:'The Response' },
+      { type:'verse', ref:'Ephesians 2:8-9', text:'For by grace are ye saved through faith; and that not of yourselves: it is the gift of God: not of works, lest any man should boast.' },
+      { type:'p', text:'This isn’t something you earn — it’s something you receive. It comes by turning away from trying to save yourself (repentance) and trusting completely in what Jesus already did (faith). Not a leap in the dark: a decision to believe what God has already proven true.' },
+      { type:'verse', ref:'Romans 10:9', text:'That if thou shalt confess with thy mouth the Lord Jesus, and shalt believe in thine heart that God hath raised him from the dead, thou shalt be saved.' },
+      { type:'label', text:'A Prayer, If You’re Ready' },
+      { type:'p', text:'This prayer doesn’t save anyone by itself — it’s simply one honest way to put into words what you’re already trusting God for. Pray it in your own words if you’d rather; God is looking at your heart, not a script.' },
+      { type:'prayer', text:'Lord Jesus, I know I’ve fallen short and I can’t save myself. I believe You died for my sin and rose again. I’m turning away from trying to earn this, and I’m putting my trust in You alone. Thank You for the free gift of eternal life. Amen.' }
+    ]
+  };
+  const SPIRITUAL_GROWTH_CONFIRMATION = {
+    title: 'You Can Be Sure',
+    blocks: [
+      { type:'p', text:'If you just prayed that prayer — or you’re trusting Christ some other way — welcome. Not into a club or a checklist, but into God’s own family. And you don’t have to wonder whether it "worked."' },
+      { type:'verse', ref:'1 John 5:13', text:'These things have I written unto you that believe on the name of the Son of God; that ye may know that ye have eternal life.' },
+      { type:'p', text:'That word know is the point. Assurance isn’t based on how you feel today — feelings change day to day. It’s based on God’s own promise, and God does not break His promises.' },
+      { type:'verse', ref:'John 10:27-28', text:'My sheep hear my voice, and I know them, and they follow me: and I give unto them eternal life; and they shall never perish, neither shall any man pluck them out of my hand.' }
+    ]
+  };
+  const SPIRITUAL_GROWTH_TOPICS = [
+    { key:'assurance', title:'Assurance of Salvation', blocks:[
+      { type:'p', text:'Doubt doesn’t mean something went wrong. Even people who’ve walked with God for decades have moments of doubt — it’s part of being human, not a sign of a failed salvation. When doubt comes, the answer isn’t to try harder to feel saved. It’s to go back to what God actually promised.' },
+      { type:'verse', ref:'John 3:36', text:'He that believeth on the Son hath everlasting life.' },
+      { type:'p', text:'Present tense, not a someday-maybe. If you’ve trusted Christ, that verse is describing you right now. Assurance grows the more you get to know the God who gave you this promise — which is exactly what the rest of this path, and the Bible itself, is for.' }
+    ] },
+    { key:'security-of-believer', title:'The Security of the Believer', blocks:[
+      { type:'p', text:'If salvation depended on our own effort to keep it, none of us could ever be sure of anything — we’d be back to earning it all over again, one day at a time. But salvation was never our doing to begin with, so it isn’t ours to lose by failing.' },
+      { type:'verse', ref:'John 10:28', text:'I give unto them eternal life; and they shall never perish.' },
+      { type:'p', text:'Being kept secure doesn’t mean sin stops mattering — it still grieves God and still has real consequences in this life. It means a true believer’s standing with God rests on Christ’s finished work, not on a daily performance review. That’s not a license to stop caring how you live — it’s the secure foundation that makes real growth possible instead of anxious.' }
+    ] },
+    { key:'baptism', title:'Water Baptism', blocks:[
+      { type:'p', text:'Baptism doesn’t save anyone — it’s a public picture of something that already happened on the inside. Going under the water pictures Christ’s death and burial; coming back up pictures His resurrection, and your own new life in Him.' },
+      { type:'verse', ref:'Acts 2:41', text:'Then they that gladly received his word were baptized.' },
+      { type:'p', text:'In the New Testament, baptism follows belief, not the other way around, and it’s for believers old enough to understand what they’re professing. If you’ve trusted Christ and haven’t been baptized yet, it’s the very next step: a simple, public "yes, I belong to Him now," done once, in front of your church family.' }
+    ] },
+    { key:'obedience', title:'Obedience', blocks:[
+      { type:'p', text:'Following Christ isn’t only a one-time decision — it’s a direction for daily life. Obedience isn’t how you get saved; it’s how a saved person naturally responds to being loved that much.' },
+      { type:'verse', ref:'John 14:15', text:'If ye love me, keep my commandments.' },
+      { type:'p', text:'Obedience starts small and ordinary: being honest when it costs you something, being patient with people who are hard to be patient with, saying no to what you know is wrong even when no one would ever find out. It’s less about a list of rules and more about a relationship where you actually want to please the One who saved you.' }
+    ] },
+    { key:'joining-a-congregation', title:'Joining a Congregation', blocks:[
+      { type:'p', text:'God never designed the Christian life to be lived alone. From the very first church, believers were expected to belong somewhere specific, not just "believe in general."' },
+      { type:'verse', ref:'Acts 2:42', text:'And they continued stedfastly in the apostles’ doctrine and fellowship, and in breaking of bread, and in prayers.' },
+      { type:'p', text:'A local congregation is where you’re taught the Bible consistently, where other believers notice if you’re struggling, where your own gifts get used to serve others, and where baptism and communion actually happen. If you don’t have a church home yet, that’s the next real step — and iWorship’s Fellowship tab is here to support that, not replace it.' }
+    ] },
+    { key:'christian-living', title:'Christian Living', blocks:[
+      { type:'p', text:'Growing as a believer isn’t complicated, even if it takes a lifetime. Four simple habits carry almost all of it:' },
+      { type:'label', text:'Reading God’s Word' },
+      { type:'p', text:'Not to check a box, but because "man shall not live by bread alone, but by every word that proceedeth out of the mouth of God" (Matthew 4:4). The Bible tab in this app is built for exactly this.' },
+      { type:'label', text:'Prayer' },
+      { type:'p', text:'Simply talking to God, honestly, about everything (Philippians 4:6).' },
+      { type:'label', text:'Worship' },
+      { type:'p', text:'Both privately and gathered with others — which is the whole reason this app exists.' },
+      { type:'label', text:'Telling Others' },
+      { type:'p', text:'Not as a performance, but as the natural overflow of something genuinely good that happened to you.' },
+      { type:'p', text:'None of these are graded. They’re simply how a relationship with God gets deeper over time, the same way any relationship does — through actually spending time in it.' }
+    ] },
+    { key:'christian-liberty', title:'Christian Liberty', blocks:[
+      { type:'p', text:'Not everything in the Christian life is a clear command — plenty of things are matters of personal conviction, culture, or wisdom, where Scripture gives freedom rather than a rule. This is sometimes called "soul liberty," and it’s actually one of the oldest Baptist convictions: every believer answers to God directly for their own conscience, and no church or person can force a conviction onto someone else where the Bible itself hasn’t spoken plainly.' },
+      { type:'verse', ref:'Romans 14:5', text:'Let every man be fully persuaded in his own mind.' },
+      { type:'p', text:'That freedom comes with real responsibility, though — liberty is never an excuse to cause a weaker believer to stumble, and it’s never a loophole around what Scripture does say plainly. Where the Bible is silent, be gracious — toward others and toward yourself.' }
+    ] },
+    { key:'sharing-your-faith', title:'Sharing Your Faith', blocks:[
+      { type:'p', text:'You don’t need a theology degree to tell someone what God has done for you — you already have everything you need: your own story, and the same gospel from the Gospel Invitation.' },
+      { type:'verse', ref:'John 4:29', text:'Come and see a man, which told me all things that ever I did: is not this the Christ?' },
+      { type:'p', text:'One of the very first "evangelists" in the Bible was a brand-new believer with one afternoon of experience, telling her neighbors what had just happened to her. That’s still the most natural way this spreads.' }
+    ] },
+    { key:'holy-spirit-and-the-christian', title:'The Holy Spirit and the Christian', blocks:[
+      { type:'p', text:'The moment you trusted Christ, God didn’t leave you to figure the rest out alone — He placed His own Spirit inside you, permanently.' },
+      { type:'verse', ref:'Ephesians 1:13', text:'In whom ye also trusted, after that ye heard the word of truth… ye were sealed with that holy Spirit of promise.' },
+      { type:'p', text:'The Spirit is who makes God’s Word make sense to you, who convicts you when something’s wrong, and who grows real change in you from the inside — not by your own willpower alone.' }
+    ] }
+  ];
+
+  function renderSgBlocks(blocks){
+    return blocks.map(function(b){
+      if(b.type === 'label') return '<p class="sg-label">'+escapeHtml(b.text)+'</p>';
+      if(b.type === 'verse') return '<blockquote class="sg-verse"><p>“'+escapeHtml(b.text)+'”</p><cite>'+escapeHtml(b.ref)+'</cite></blockquote>';
+      if(b.type === 'prayer') return '<blockquote class="sg-verse" style="text-align:center;"><p>'+escapeHtml(b.text)+'</p></blockquote>';
+      return '<p class="devotional-reader-text">'+escapeHtml(b.text)+'</p>';
+    }).join('');
+  }
+
+  function openSpiritualGrowth(){
+    if(!state.user){ showToast('Sign in first to use Spiritual Growth.'); return; }
+    spiritualGrowthScreen = 'home';
+    spiritualGrowthActiveTopicKey = null;
+    spiritualGrowthJournalDraft = '';
+    spiritualGrowthJournalDraftTopicKey = null;
+    startSpiritualGrowthWatch();
+    startJournalWatch();
+    state.view = 'spiritual-growth'; render(); window.scrollTo(0,0);
+  }
+  function goToSgScreen(screen, topicKey){
+    spiritualGrowthScreen = screen;
+    spiritualGrowthActiveTopicKey = topicKey || null;
+    spiritualGrowthJournalDraft = '';
+    spiritualGrowthJournalDraftTopicKey = null;
+    render(); window.scrollTo(0,0);
+  }
+  function renderSpiritualGrowth(){
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="sgBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Spiritual Growth</p>' +
+        '<p class="landing-sub">A gentle, guided path &mdash; from a first gospel invitation to a lifetime of walking with God.</p>' +
+      '</div>' +
+      '<div id="sgBody">' + renderSpiritualGrowthBody() + '</div>';
+    document.getElementById('sgBackBtn').addEventListener('click', function(){
+      state.view='landing'; render(); window.scrollTo(0,0);
+    });
+    attachSpiritualGrowthBodyHandlers();
+  }
+  function renderSpiritualGrowthBody(){
+    if(spiritualGrowthScreen === 'invitation') return renderSpiritualGrowthInvitation();
+    if(spiritualGrowthScreen === 'confirmation') return renderSpiritualGrowthConfirmation();
+    if(spiritualGrowthScreen === 'path') return renderSpiritualGrowthPath();
+    if(spiritualGrowthScreen === 'topic') return renderSpiritualGrowthTopic();
+    if(spiritualGrowthScreen === 'journal') return renderSpiritualGrowthJournal();
+    return renderSpiritualGrowthHome();
+  }
+  function renderSpiritualGrowthHome(){
+    const NAV = [
+      { screen:'invitation', title:'The Gospel Invitation', desc:'Would you like to know God personally?' },
+      { screen:'confirmation', title:'You Can Be Sure', desc:'What just happened, and why you can be sure of it.' },
+      { screen:'path', title:'Discipleship Path', desc:'Milestone topics for a new believer, at your own pace.' },
+      { screen:'journal', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' }
+    ];
+    return (
+      '<div class="about-section-card">' +
+        '<span class="devotional-icon" aria-hidden="true" style="width:52px;height:52px;">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:26px;height:26px;">'+icon('heart')+'</svg>' +
+        '</span>' +
+        '<p class="about-section-title">Walking With God</p>' +
+        '<p class="about-section-intro">Four simple stages, at your own pace -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a private journal for reflecting day by day.</p>' +
+        '<div class="about-feature-list">' +
+          NAV.map(function(n){
+            return '<button type="button" class="about-feature-item" data-sg-nav="'+n.screen+'" style="width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer;">' +
+              '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span>' +
+              '<p><strong>'+escapeHtml(n.title)+'</strong> &mdash; '+escapeHtml(n.desc)+'</p>' +
+            '</button>';
+          }).join('') +
+        '</div>' +
+        '<p class="hint" style="margin-top:16px;">Private to you. No one else -- not even a pastor or admin -- can see your journal or your progress here unless you choose to share it yourself.</p>' +
+      '</div>'
+    );
+  }
+  function renderSpiritualGrowthInvitation(){
+    return (
+      '<div class="about-section-card">' +
+        '<span class="devotional-icon" aria-hidden="true" style="width:52px;height:52px;">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:26px;height:26px;">'+icon('heart')+'</svg>' +
+        '</span>' +
+        '<p class="about-section-title">'+escapeHtml(SPIRITUAL_GROWTH_INVITATION.title)+'</p>' +
+        renderSgBlocks(SPIRITUAL_GROWTH_INVITATION.blocks) +
+        '<div style="margin-top:22px;display:flex;flex-direction:column;gap:10px;align-items:center;">' +
+          '<button type="button" class="btn btn-primary" id="sgProfessBtn" style="width:100%;max-width:360px;">I JUST PRAYED THIS / I&rsquo;VE ALREADY TRUSTED CHRIST</button>' +
+          '<button type="button" class="switch-account" id="sgKeepLearningBtn">Not ready yet &mdash; but I&rsquo;d like to keep learning &rarr;</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+  function renderSpiritualGrowthConfirmation(){
+    return (
+      '<div class="about-section-card">' +
+        '<span class="devotional-icon" aria-hidden="true" style="width:52px;height:52px;">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:26px;height:26px;">'+icon('check')+'</svg>' +
+        '</span>' +
+        '<p class="about-section-title">'+escapeHtml(SPIRITUAL_GROWTH_CONFIRMATION.title)+'</p>' +
+        renderSgBlocks(SPIRITUAL_GROWTH_CONFIRMATION.blocks) +
+        '<button type="button" class="btn btn-primary" id="sgToPathBtn" style="margin-top:22px;width:100%;max-width:360px;">CONTINUE TO THE DISCIPLESHIP PATH</button>' +
+      '</div>'
+    );
+  }
+  function renderSpiritualGrowthPath(){
+    const milestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
+    return (
+      '<div class="about-section-card">' +
+        '<p class="about-section-title">Discipleship Path</p>' +
+        '<p class="about-section-intro">Short topics, most-foundational first -- read them in any order, at your own pace. Tap one to begin.</p>' +
+        '<div class="about-feature-list">' +
+          SPIRITUAL_GROWTH_TOPICS.map(function(t){
+            const done = !!(milestones[t.key] && milestones[t.key].completedAt);
+            return '<button type="button" class="about-feature-item" data-sg-topic="'+t.key+'" style="width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer;">' +
+              '<span class="about-feature-check" aria-hidden="true" style="'+(done?'':'background:var(--border);color:var(--ink-soft);')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg></span>' +
+              '<p><strong>'+escapeHtml(t.title)+'</strong>'+(done?' &mdash; completed':'')+'</p>' +
+            '</button>';
+          }).join('') +
+        '</div>' +
+      '</div>'
+    );
+  }
+  function renderSpiritualGrowthTopic(){
+    const topic = SPIRITUAL_GROWTH_TOPICS.find(function(t){ return t.key === spiritualGrowthActiveTopicKey; }) || SPIRITUAL_GROWTH_TOPICS[0];
+    const milestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
+    const done = !!(milestones[topic.key] && milestones[topic.key].completedAt);
+    return (
+      '<p class="hint" style="text-align:center;margin-bottom:10px;"><a href="#" id="sgToPathCrumb">&larr; Discipleship Path</a></p>' +
+      '<div class="about-section-card">' +
+        '<p class="about-section-title">'+escapeHtml(topic.title)+'</p>' +
+        renderSgBlocks(topic.blocks) +
+        '<button type="button" class="btn'+(done?'':' btn-primary')+'" id="sgMarkDoneBtn" style="margin-top:22px;width:100%;max-width:360px;">'+(done?'COMPLETED ✓ (tap to un-mark)':'MARK AS READ')+'</button>' +
+        '<div class="field" style="margin-top:20px;text-align:left;max-width:520px;margin-left:auto;margin-right:auto;">' +
+          '<label for="sgReflectionInput">ADD A REFLECTION (OPTIONAL)</label>' +
+          '<textarea id="sgReflectionInput" rows="3" placeholder="Anything on your mind about this one? Saved privately to your journal.">'+escapeHtml(spiritualGrowthJournalDraftTopicKey===topic.key?spiritualGrowthJournalDraft:'')+'</textarea>' +
+          '<button type="button" class="switch-account" id="sgSaveReflectionBtn" style="margin-top:8px;">SAVE TO JOURNAL</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+  function renderSpiritualGrowthJournal(){
+    const entries = state.journalEntries || [];
+    return (
+      '<div class="about-section-card">' +
+        '<p class="about-section-title">My Journal</p>' +
+        '<p class="about-section-intro">Private to you -- write anytime, or revisit a reflection from a topic above.</p>' +
+        '<div class="field" style="text-align:left;">' +
+          '<label for="sgJournalInput">NEW ENTRY</label>' +
+          '<textarea id="sgJournalInput" rows="3" placeholder="What&rsquo;s on your heart today?">'+escapeHtml(spiritualGrowthJournalDraftTopicKey===null?spiritualGrowthJournalDraft:'')+'</textarea>' +
+          '<button type="button" class="btn btn-primary" id="sgAddJournalBtn" style="margin-top:8px;">SAVE</button>' +
+        '</div>' +
+        (entries.length ?
+          '<div class="about-feature-list" style="margin-top:22px;">' +
+            entries.map(function(e){
+              const topic = e.milestoneKey ? SPIRITUAL_GROWTH_TOPICS.find(function(t){ return t.key === e.milestoneKey; }) : null;
+              return '<div class="about-feature-item" style="align-items:flex-start;">' +
+                '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('heart')+'</svg></span>' +
+                '<div style="flex:1;min-width:0;">' +
+                  '<p class="devotional-reader-text" style="margin:0;">'+escapeHtml(e.text)+'</p>' +
+                  '<p class="hint" style="margin:6px 0 0;">'+(topic?('From: '+escapeHtml(topic.title)+' &middot; '):'')+timeAgo(toMillis(e.createdAt))+'</p>' +
+                '</div>' +
+                '<button type="button" class="switch-account" data-sg-delete-entry="'+escapeAttr(e.id)+'" style="flex:none;">DELETE</button>' +
+              '</div>';
+            }).join('') +
+          '</div>'
+        : '<p class="hint" style="margin-top:18px;">Nothing here yet -- your first entry will show up right below the box above.</p>') +
+      '</div>'
+    );
+  }
+  function attachSpiritualGrowthBodyHandlers(){
+    document.querySelectorAll('[data-sg-nav]').forEach(function(btn){
+      btn.addEventListener('click', function(){ goToSgScreen(btn.getAttribute('data-sg-nav')); });
+    });
+    if(spiritualGrowthScreen === 'invitation') attachSpiritualGrowthInvitationHandlers();
+    else if(spiritualGrowthScreen === 'confirmation') attachSpiritualGrowthConfirmationHandlers();
+    else if(spiritualGrowthScreen === 'path') attachSpiritualGrowthPathHandlers();
+    else if(spiritualGrowthScreen === 'topic') attachSpiritualGrowthTopicHandlers();
+    else if(spiritualGrowthScreen === 'journal') attachSpiritualGrowthJournalHandlers();
+  }
+  function attachSpiritualGrowthInvitationHandlers(){
+    const professBtn = document.getElementById('sgProfessBtn');
+    if(professBtn) professBtn.addEventListener('click', function(){
+      professBtn.disabled = true;
+      recordSalvationDecision(state.user.uid).catch(function(){ /* best effort -- the live watch keeps state.spiritualGrowth in sync regardless */ }).then(function(){
+        goToSgScreen('confirmation');
+      });
+    });
+    const keepLearningBtn = document.getElementById('sgKeepLearningBtn');
+    if(keepLearningBtn) keepLearningBtn.addEventListener('click', function(){ goToSgScreen('path'); });
+  }
+  function attachSpiritualGrowthConfirmationHandlers(){
+    const toPathBtn = document.getElementById('sgToPathBtn');
+    if(toPathBtn) toPathBtn.addEventListener('click', function(){ goToSgScreen('path'); });
+  }
+  function attachSpiritualGrowthPathHandlers(){
+    document.querySelectorAll('[data-sg-topic]').forEach(function(btn){
+      btn.addEventListener('click', function(){ goToSgScreen('topic', btn.getAttribute('data-sg-topic')); });
+    });
+  }
+  function attachSpiritualGrowthTopicHandlers(){
+    const crumb = document.getElementById('sgToPathCrumb');
+    if(crumb) crumb.addEventListener('click', function(e){ e.preventDefault(); goToSgScreen('path'); });
+    const markBtn = document.getElementById('sgMarkDoneBtn');
+    if(markBtn) markBtn.addEventListener('click', function(){
+      const topic = SPIRITUAL_GROWTH_TOPICS.find(function(t){ return t.key === spiritualGrowthActiveTopicKey; });
+      if(!topic) return;
+      const milestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
+      const done = !!(milestones[topic.key] && milestones[topic.key].completedAt);
+      markBtn.disabled = true;
+      setMilestoneComplete(state.user.uid, topic.key, !done).catch(function(){}).then(function(){ markBtn.disabled = false; });
+    });
+    const input = document.getElementById('sgReflectionInput');
+    if(input) input.addEventListener('input', function(){
+      spiritualGrowthJournalDraft = input.value;
+      spiritualGrowthJournalDraftTopicKey = spiritualGrowthActiveTopicKey;
+    });
+    const saveBtn = document.getElementById('sgSaveReflectionBtn');
+    if(saveBtn) saveBtn.addEventListener('click', function(){
+      const text = (spiritualGrowthJournalDraft || '').trim();
+      if(!text) return;
+      saveBtn.disabled = true;
+      addJournalEntry(state.user.uid, text, spiritualGrowthActiveTopicKey).catch(function(){}).then(function(){
+        spiritualGrowthJournalDraft = ''; spiritualGrowthJournalDraftTopicKey = null;
+        render();
+        showToast('Saved to your journal.');
+      });
+    });
+  }
+  function attachSpiritualGrowthJournalHandlers(){
+    const input = document.getElementById('sgJournalInput');
+    if(input) input.addEventListener('input', function(){
+      spiritualGrowthJournalDraft = input.value;
+      spiritualGrowthJournalDraftTopicKey = null;
+    });
+    const addBtn = document.getElementById('sgAddJournalBtn');
+    if(addBtn) addBtn.addEventListener('click', function(){
+      const text = (spiritualGrowthJournalDraft || '').trim();
+      if(!text) return;
+      addBtn.disabled = true;
+      addJournalEntry(state.user.uid, text, null).catch(function(){}).then(function(){
+        spiritualGrowthJournalDraft = ''; spiritualGrowthJournalDraftTopicKey = null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-sg-delete-entry]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        deleteJournalEntry(state.user.uid, btn.getAttribute('data-sg-delete-entry')).catch(function(){});
       });
     });
   }
@@ -13183,6 +13587,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       case 'profile-view':
         if(target.id) openProfileView(target.id);
         break;
+      case 'spiritual-growth': openSpiritualGrowth(); break;
     }
   }
 

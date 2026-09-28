@@ -530,6 +530,31 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // =================================================== SPIRITUAL GROWTH
+    // [2026-09-28] Gospel invitation -> confirmation -> discipleship
+    // milestones -> personal journal (see docs/spiritual-growth-draft-copy.md
+    // for the full copy, and the decisions Jared confirmed before this was
+    // built -- notably: a profession of faith is recorded, but kept fully
+    // private to that user rather than visible to an admin/pastor). This is
+    // deliberately the single most private collection in the whole app:
+    // unlike almost every other match block above, there is NO isAdmin()
+    // bypass anywhere in here, on purpose. A profession of faith and a
+    // personal journal are about as sensitive as app data gets -- strictly
+    // owner-only, full stop, not even an Admin can read someone else's.
+    match /spiritualGrowth/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+
+      // Personal Journal -- milestone-linked reflections and open freeform
+      // entries alike, nested under the same per-user doc they belong to (a
+      // subcollection needs its own match block regardless, same as
+      // users/{uid}/saved/{savedId} above). Owner-only, matching the parent
+      // doc exactly -- see this block's header comment for why this is the
+      // one collection in the whole app with zero Admin visibility.
+      match /journal/{entryId} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+    }
+
     // ========================================================= SONG REQUESTS
     // [2026-09-04] The free-access path for someone who can't add songs
     // directly (see canAddSongsRole() above) to still suggest a hymn: they

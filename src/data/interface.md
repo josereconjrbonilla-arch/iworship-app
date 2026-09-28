@@ -965,3 +965,40 @@ clears `programId`/`programCurrentItemId` but never touches `setlist` -- the syn
 No `firestore.rules` change was needed for any of the room-integration or setlist-sync fields
 above -- they're just more fields on `rooms/{code}`'s already wide-open per-field update rule,
 the same story as every other room-doc addition documented throughout this file.
+
+## Spiritual Growth [2026-09-28]
+
+Gospel invitation -> confirmation -> discipleship path -> personal journal. Full copy (and the six
+decisions Jared confirmed before this was built) lives in `docs/spiritual-growth-draft-copy.md` --
+this section is the data shape only. Deliberately the most private data this app stores: a
+profession of faith and a personal journal are about as sensitive as app data gets, so
+`spiritualGrowth/{uid}` (and its `journal` subcollection) is the one collection in the whole app
+with **zero Admin visibility anywhere in `firestore.rules`** -- strictly owner-only, full stop, not
+even an Admin bypass. See that file's own header comment on the block.
+
+`SpiritualGrowth` doc (`spiritualGrowth/{uid}`) shape: `{ professedAt: Timestamp|null, milestones: {
+[topicKey]: {completedAt: Timestamp}|null } }`. `professedAt` is set once, idempotently, by
+`recordSalvationDecision(uid)` -- called when someone taps "I've already trusted Christ" on the
+Gospel Invitation screen (`renderSpiritualGrowthInvitation()` in `app.js`); tapping it again (a
+reload, a second visit) is a safe no-op, never overwriting the original timestamp. `milestones` is
+keyed by each topic's key in `SPIRITUAL_GROWTH_TOPICS` (`app.js`) -- `setMilestoneComplete(uid, key,
+completed)` toggles one entry at a time via a narrow merge write, leaving every other topic's own
+entry untouched. Both read live via `watchSpiritualGrowth(uid, callback)`.
+
+`JournalEntry` shape (`spiritualGrowth/{uid}/journal/{entryId}`): `{ text, milestoneKey: string|null,
+createdAt: Timestamp }`. `milestoneKey` links a reflection back to whichever topic prompted it (set
+from the "add a reflection" box on a milestone's own reading screen) or stays `null` for an
+open-journal entry written from the Journal tab directly with no topic in mind -- either kind reads
+back through the exact same `watchJournalEntries(uid, callback)` list, newest first
+(`orderBy('createdAt','desc')`), and the Journal screen doesn't visually distinguish the two beyond
+an optional small "from: <topic title>" tag on a milestone-linked entry. `addJournalEntry(uid, text,
+milestoneKey)` / `deleteJournalEntry(uid, entryId)` round out the CRUD -- there's no edit-in-place;
+correcting an entry is delete-and-rewrite, same as this app's existing Fellowship comments.
+
+Not built in this pass, on purpose (all four were explicitly out of scope per the discipleship-copy
+review): any follow-up/notification to a pastor or admin when someone professes faith or completes a
+milestone (the privacy decision above means the app itself has no visibility to notify FROM); a
+progress badge/percentage anywhere outside the path screen itself; a way to un-profess/reset
+progress (Settings has no "clear my Spiritual Growth data" control yet -- would need its own
+explicit ask, given how sensitive this data is); and any tie-in to Fellowship (a profession or
+journal entry is never shareable to the feed, unlike a devotional).

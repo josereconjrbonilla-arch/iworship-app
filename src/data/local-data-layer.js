@@ -15,6 +15,8 @@ const LS_ROOMS = 'iworship:local:rooms';
 const LS_UID = 'iworship:local:uid';
 const LS_USER = 'iworship:local:user';
 const LS_MESSAGES_PREFIX = 'iworship:local:messages:';
+const LS_SPIRITUAL_GROWTH_PREFIX = 'iworship:local:spiritualgrowth:';
+const LS_JOURNAL_PREFIX = 'iworship:local:journal:';
 
 let channel = null;
 try { channel = new BroadcastChannel('iworship-local'); } catch (e) { /* unsupported */ }
@@ -345,6 +347,61 @@ export function watchChurchRoster(churchId, callback) {
   };
   fire();
   return onBroadcast('profiles', fire);
+}
+
+// Spiritual Growth [2026-09-28] -- demo-mode mirror of the real Firestore
+// layer's spiritualGrowth/{uid} doc + journal subcollection (see that
+// file's matching comment for the full design). No separate privacy
+// boundary to enforce here, same reasoning as watchChurchRoster() just
+// above -- it's all one browser's localStorage -- so this is just a plain
+// per-uid localStorage key, keyed exactly like LS_MESSAGES_PREFIX's
+// per-room-code keys are.
+export function watchSpiritualGrowth(uid, callback) {
+  const fire = () => callback(readJSON(LS_SPIRITUAL_GROWTH_PREFIX + uid, { professedAt: null, milestones: {} }));
+  fire();
+  return onBroadcast('spiritualGrowth:' + uid, fire);
+}
+export async function recordSalvationDecision(uid) {
+  const key = LS_SPIRITUAL_GROWTH_PREFIX + uid;
+  const rec = readJSON(key, { professedAt: null, milestones: {} });
+  if (rec.professedAt) return; // already recorded -- see the real layer's matching comment
+  rec.professedAt = Date.now();
+  writeJSON(key, rec);
+  broadcast('spiritualGrowth:' + uid);
+}
+export async function setMilestoneComplete(uid, milestoneKey, completed) {
+  const key = LS_SPIRITUAL_GROWTH_PREFIX + uid;
+  const rec = readJSON(key, { professedAt: null, milestones: {} });
+  rec.milestones = rec.milestones || {};
+  rec.milestones[milestoneKey] = completed ? { completedAt: Date.now() } : null;
+  writeJSON(key, rec);
+  broadcast('spiritualGrowth:' + uid);
+}
+export function watchJournalEntries(uid, callback) {
+  const key = LS_JOURNAL_PREFIX + uid;
+  const fire = () => {
+    const list = readJSON(key, []);
+    callback(list.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+  };
+  fire();
+  return onBroadcast('journal:' + uid, fire);
+}
+export async function addJournalEntry(uid, text, milestoneKey) {
+  const key = LS_JOURNAL_PREFIX + uid;
+  const list = readJSON(key, []);
+  list.push({
+    id: 'entry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    text: text,
+    milestoneKey: milestoneKey || null,
+    createdAt: Date.now()
+  });
+  writeJSON(key, list);
+  broadcast('journal:' + uid);
+}
+export async function deleteJournalEntry(uid, entryId) {
+  const key = LS_JOURNAL_PREFIX + uid;
+  writeJSON(key, readJSON(key, []).filter((e) => e.id !== entryId));
+  broadcast('journal:' + uid);
 }
 
 // ---------------------------------------------------------------------- Rooms

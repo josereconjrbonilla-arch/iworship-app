@@ -52,6 +52,8 @@ export const {
   checkIsEditor, watchSessionMessages, sendSessionMessage,
   watchChurch, watchAllChurches, newChurchId, saveChurch, checkIsAdmin,
   watchAllUsers, watchDirectory, watchChurchRoster,
+  watchSpiritualGrowth, recordSalvationDecision, setMilestoneComplete,
+  watchJournalEntries, addJournalEntry, deleteJournalEntry,
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,

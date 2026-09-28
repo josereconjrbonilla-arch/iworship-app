@@ -71,5 +71,10 @@ export const ICONS = {
     // which would have put the same icon twice in one sidebar) and, before
     // that, `heart` (already Fellowship's tab icon) -- a sprout reads as
     // "growth" on its own and collides with nothing else in this set.
-    sprout:'<path d="M12 21v-8"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6Z"/><path d="M12 13c0-3.5-2.5-5.5-6-5.5 0 3.5 2.5 5.5 6 5.5Z"/>'
+    sprout:'<path d="M12 21v-8"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6Z"/><path d="M12 13c0-3.5-2.5-5.5-6-5.5 0 3.5 2.5 5.5 6 5.5Z"/>',
+    // "BUILD THEM ALL NOW" batch 2 [2026-09-28] -- Worship Team Scheduling's
+    // nav entry needed a glyph nothing above already covered (users/flag/
+    // gear are all spoken for elsewhere); a plain page-a-day calendar reads
+    // clearly as "schedule" at a glance.
+    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/>'
   };

@@ -2629,5 +2629,15 @@ body.stage-page .appfoot{ display:none; }
   }
   .fellowship-preview-tab-active{ background:var(--wine); color:var(--gold-tint); }
 
+  /* Practice Mode [2026-09-28, "BUILD THEM ALL NOW" batch 2] -- a plain
+     circle that briefly brightens on every metronome tick (practiceMetronomeTick()
+     in app.js toggles this .pulse class on and off), a silent-environment-
+     friendly companion to the audio click. */
+  .practice-beat-dot{
+    display:inline-block; width:14px; height:14px; border-radius:50%;
+    background:var(--border); vertical-align:middle; transition:background .05s linear, transform .05s linear;
+  }
+  .practice-beat-dot.pulse{ background:var(--wine); transform:scale(1.3); }
+
   [hidden]{ display:none !important; }
 

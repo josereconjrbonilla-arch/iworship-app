@@ -531,6 +531,162 @@ export async function deleteGrowthTopic(topicId) {
   await deleteDoc(doc(db, 'growthTopics', topicId));
 }
 
+// ================================================ READING PLAN PROGRESS
+// [2026-09-28, "BUILD THEM ALL NOW" batch 1] See firestore.rules'
+// readingPlanProgress/{uid} block for the full design. The 365-day PLAN
+// itself lives in src/content/reading-plan.json (static, language-
+// agnostic {book,chapter} refs) -- this is only the per-person progress:
+// which day numbers have been marked done, plus which calendar dates (so
+// app.js can compute a streak client-side; see readingPlanStreak() there).
+export function watchReadingPlanProgress(uid, callback) {
+  return onSnapshot(doc(db, 'readingPlanProgress', uid), (snap) => {
+    callback(snap.exists() ? snap.data() : { completedDayNumbers: [], completedDates: [] });
+  });
+}
+// Idempotent (arrayUnion) -- marking the same day done twice, or marking
+// it done twice in one calendar day, never double-counts either array.
+export async function markReadingPlanDayDone(uid, dayNumber, isoDate) {
+  await setDoc(doc(db, 'readingPlanProgress', uid), {
+    startedAt: serverTimestamp(),
+    completedDayNumbers: arrayUnion(dayNumber),
+    completedDates: arrayUnion(isoDate),
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+// ======================================================= TESTIMONY WALL
+// [2026-09-28, "BUILD THEM ALL NOW" batch 1] See firestore.rules'
+// testimonies/{testimonyId} block for the full design -- deliberately a
+// much simpler shape than Fellowship's posts/{postId}: no comments, no
+// repost, just the testimony text plus an "Amen" encouragement tap that
+// reuses the generic likes mechanism just above (kind:'testimonies').
+export function watchTestimonies(callback) {
+  const q = query(collection(db, 'testimonies'), orderBy('createdAt', 'desc'), limit(200));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  });
+}
+export async function addTestimony(authorUid, authorName, title, text) {
+  const ref = await addDoc(collection(db, 'testimonies'), {
+    authorUid: authorUid,
+    authorName: authorName,
+    title: title || null,
+    text: text,
+    likeCount: 0,
+    createdAt: serverTimestamp()
+  });
+  return ref.id;
+}
+export async function deleteTestimony(testimonyId) {
+  await deleteDoc(doc(db, 'testimonies', testimonyId));
+}
+
+// ========================================================== PRAYER WALL
+// [2026-09-28, "BUILD THEM ALL NOW" batch 1] See firestore.rules'
+// prayerRequests/{requestId} block for the full design. Two independent
+// queries, each provable on its own under that rule (same "each half of
+// an OR read rule needs its own provable query" shape as songRequests'
+// watch functions elsewhere in this file) -- app.js merges + de-dupes the
+// two callbacks by id (a signed-in person's OWN public request would
+// otherwise appear in both). No orderBy in either query (this app's
+// established way of avoiding a composite-index requirement -- see
+// watchFeedPosts()'s comment above for the one query in this file that
+// DOES use one) -- both callbacks hand back client-side-sorted lists.
+export function watchPublicPrayerRequests(callback) {
+  const q = query(collection(db, 'prayerRequests'), where('isPrivate', '==', false));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+    callback(list);
+  });
+}
+export function watchMyPrayerRequests(uid, callback) {
+  const q = query(collection(db, 'prayerRequests'), where('authorUid', '==', uid));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+    callback(list);
+  });
+}
+export async function addPrayerRequest(authorUid, authorName, requestText, onBehalfOf, isPrivate) {
+  const ref = await addDoc(collection(db, 'prayerRequests'), {
+    authorUid: authorUid,
+    authorName: authorName,
+    requestText: requestText,
+    onBehalfOf: onBehalfOf || null,
+    isPrivate: !!isPrivate,
+    status: 'open',
+    likeCount: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  return ref.id;
+}
+export async function markPrayerRequestAnswered(requestId, answeredNote) {
+  await updateDoc(doc(db, 'prayerRequests', requestId), {
+    status: 'answered',
+    answeredNote: answeredNote || null,
+    answeredAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+}
+export async function setPrayerRequestPrivacy(requestId, isPrivate) {
+  await updateDoc(doc(db, 'prayerRequests', requestId), { isPrivate: !!isPrivate, updatedAt: serverTimestamp() });
+}
+export async function deletePrayerRequest(requestId) {
+  await deleteDoc(doc(db, 'prayerRequests', requestId));
+}
+
+// ================================================ WORSHIP TEAM SCHEDULING
+// [2026-09-28, "BUILD THEM ALL NOW" batch 2] See firestore.rules'
+// serviceAssignments/{assignmentId} block for the full read/write design.
+// Two independent queries again (own-assignments vs. whole-church-roster's
+// assignments), same "no orderBy, client-sort instead" composite-index
+// avoidance as Prayer Wall just above -- neither of these two call sites
+// ever needs both queries at once, unlike Prayer Wall, so app.js doesn't
+// need a merge/de-dupe step here.
+export function watchMyAssignments(uid, callback) {
+  const q = query(collection(db, 'serviceAssignments'), where('assignedUid', '==', uid));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+    callback(list);
+  });
+}
+export function watchChurchAssignments(churchId, callback) {
+  const q = query(collection(db, 'serviceAssignments'), where('churchId', '==', churchId));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+    callback(list);
+  });
+}
+export async function addAssignment(churchId, serviceDate, role, assignedUid, assignedName, notes, createdByUid, createdByName) {
+  const ref = await addDoc(collection(db, 'serviceAssignments'), {
+    churchId: churchId,
+    serviceDate: serviceDate,
+    role: role,
+    assignedUid: assignedUid,
+    assignedName: assignedName,
+    notes: notes || null,
+    status: 'invited',
+    createdByUid: createdByUid,
+    createdByName: createdByName,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  return ref.id;
+}
+// Called by the ASSIGNED member only ('confirmed'/'declined') -- see the
+// rules block's own field-scoped carve-out for why this never touches any
+// field but status/updatedAt.
+export async function respondToAssignment(assignmentId, status) {
+  await updateDoc(doc(db, 'serviceAssignments', assignmentId), { status: status, updatedAt: serverTimestamp() });
+}
+export async function deleteAssignment(assignmentId) {
+  await deleteDoc(doc(db, 'serviceAssignments', assignmentId));
+}
+
 // Every signed-up profile, for the Admin screen's "find by name" search --
 // so an Admin can assign a role/beta access without already having the
 // person's Account ID in hand. Safe to list unfiltered under firestore.rules'
@@ -898,6 +1054,99 @@ export function watchSermonsSharedWithMe(uid, callback) {
       .filter((s) => s.createdByUid !== uid);
     shared.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
     callback(shared);
+  });
+}
+
+// ----------------------------------------------------------- SERMON ARCHIVE
+// [2026-09-28, "BUILD THEM ALL NOW" batch 3] -- a congregation-facing,
+// PUBLIC list of past sermons a creator has chosen to publish for anyone to
+// browse/revisit, distinct from the private "build/present my own sermons"
+// screen above. Deliberately NOT a new collection: `archived` (bool),
+// `archivedAt`, `summary`, and `dateGiven` are just three more fields on the
+// exact same Sermon doc, written through the exact same generic
+// updateSermon(id, patch) already exported above -- no new write function
+// needed. This IS the first real "browse sermons a person doesn't own"
+// list query this collection has ever had (see firestore.rules' updated
+// sermons/{sermonId} comment) -- safe under the existing unconditional
+// `allow read: if true`, same as watchSermonsSharedWithMe()'s query just
+// above; only `archived == true` docs are ever returned, so an unpublished
+// sermon a pastor is still drafting never surfaces here regardless of who's
+// looking. Client-sorted (never combined with a Firestore orderBy), this
+// app's established way of avoiding a composite-index requirement.
+export function watchSermonArchive(callback) {
+  const q = query(collection(db, 'sermons'), where('archived', '==', true));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillis(b.archivedAt) - toMillis(a.archivedAt));
+    callback(list);
+  });
+}
+
+// ------------------------------------------------------------ SMALL GROUPS
+// ["BUILD THEM ALL NOW" batch 4, 2026-09-28, Community & Church Life] --
+// see firestore.rules' smallGroups/{groupId} block for the full access-
+// model writeup (open read, open create, join/leave as a narrow
+// memberUids-only update carve-out mirroring sermons' sharedWithUids).
+// Screen-scoped in app.js (started on open, stopped on BACK), same
+// convention as Testimony Wall/Prayer Wall/Team Schedule/Sermon Archive in
+// this session's earlier batches, rather than an always-on global watch.
+export async function createSmallGroup(group) {
+  const ref = await addDoc(collection(db, 'smallGroups'), {
+    ...group,
+    memberUids: group.memberUids || [],
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  });
+  return ref.id;
+}
+export async function updateSmallGroup(id, patch) {
+  await updateDoc(doc(db, 'smallGroups', id), { ...patch, updatedAt: serverTimestamp() });
+}
+export async function deleteSmallGroup(id) {
+  await deleteDoc(doc(db, 'smallGroups', id));
+}
+export function watchSmallGroups(callback) {
+  return onSnapshot(collection(db, 'smallGroups'), (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+    callback(list);
+  });
+}
+// arrayUnion/arrayRemove (not a read-modify-write) so two people joining
+// the same group around the same moment never clobber each other -- exact
+// same reasoning as shareSermon()/unshareSermon() above.
+export async function joinSmallGroup(id, uid) {
+  await updateDoc(doc(db, 'smallGroups', id), { memberUids: arrayUnion(uid), updatedAt: serverTimestamp() });
+}
+export async function leaveSmallGroup(id, uid) {
+  await updateDoc(doc(db, 'smallGroups', id), { memberUids: arrayRemove(uid), updatedAt: serverTimestamp() });
+}
+
+// ------------------------------------------------------------------ EVENTS
+// ["BUILD THEM ALL NOW" batch 4, 2026-09-28, Community & Church Life] --
+// see firestore.rules' events/{eventId} block for the access-model
+// writeup (open read, host-eligible-only create/update/delete). `eventDate`
+// is a plain 'YYYY-MM-DD' string (an <input type="date">'s native value),
+// sorted lexicographically client-side -- that ordering is correct for
+// ISO dates with no date-parsing needed, same trick this app already
+// leans on for a handful of other plain-string sort keys.
+export async function createEvent(evt) {
+  const ref = await addDoc(collection(db, 'events'), {
+    ...evt,
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  });
+  return ref.id;
+}
+export async function updateEvent(id, patch) {
+  await updateDoc(doc(db, 'events', id), { ...patch, updatedAt: serverTimestamp() });
+}
+export async function deleteEvent(id) {
+  await deleteDoc(doc(db, 'events', id));
+}
+export function watchEvents(callback) {
+  return onSnapshot(collection(db, 'events'), (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => (a.eventDate || '').localeCompare(b.eventDate || ''));
+    callback(list);
   });
 }
 

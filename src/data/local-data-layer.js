@@ -18,6 +18,10 @@ const LS_MESSAGES_PREFIX = 'iworship:local:messages:';
 const LS_SPIRITUAL_GROWTH_PREFIX = 'iworship:local:spiritualgrowth:';
 const LS_JOURNAL_PREFIX = 'iworship:local:journal:';
 const LS_GROWTH_TOPICS = 'iworship:local:growthTopics';
+const LS_READING_PLAN_PROGRESS_PREFIX = 'iworship:local:readingplan:';
+const LS_TESTIMONIES = 'iworship:local:testimonies';
+const LS_PRAYER_REQUESTS = 'iworship:local:prayerRequests';
+const LS_SERVICE_ASSIGNMENTS = 'iworship:local:serviceAssignments';
 
 let channel = null;
 try { channel = new BroadcastChannel('iworship-local'); } catch (e) { /* unsupported */ }
@@ -436,6 +440,171 @@ export async function deleteGrowthTopic(topicId) {
   broadcast('growthTopics');
 }
 
+// Reading Plan Progress [2026-09-28, "BUILD THEM ALL NOW" batch 1] --
+// demo-mode mirror of the real Firestore layer's readingPlanProgress/{uid}
+// doc (see that file's matching comment). Same plain per-uid key shape as
+// LS_SPIRITUAL_GROWTH_PREFIX just above.
+export function watchReadingPlanProgress(uid, callback) {
+  const fire = () => callback(readJSON(LS_READING_PLAN_PROGRESS_PREFIX + uid, { completedDayNumbers: [], completedDates: [] }));
+  fire();
+  return onBroadcast('readingPlanProgress:' + uid, fire);
+}
+export async function markReadingPlanDayDone(uid, dayNumber, isoDate) {
+  const key = LS_READING_PLAN_PROGRESS_PREFIX + uid;
+  const rec = readJSON(key, { completedDayNumbers: [], completedDates: [] });
+  rec.completedDayNumbers = rec.completedDayNumbers || [];
+  rec.completedDates = rec.completedDates || [];
+  if (!rec.completedDayNumbers.includes(dayNumber)) rec.completedDayNumbers.push(dayNumber);
+  if (!rec.completedDates.includes(isoDate)) rec.completedDates.push(isoDate);
+  if (!rec.startedAt) rec.startedAt = Date.now();
+  writeJSON(key, rec);
+  broadcast('readingPlanProgress:' + uid);
+}
+
+// Testimony Wall [2026-09-28, "BUILD THEM ALL NOW" batch 1] -- demo-mode
+// mirror of the real Firestore layer's testimonies/{testimonyId}
+// collection. Global key, same shape as LS_GROWTH_TOPICS/LS_SONGS above --
+// a testimony is public content every demo user on this browser should
+// see, not scoped to one uid. The "Amen" tap reuses the generic
+// likeItem/unlikeItem/likeCountFor mechanism further down this file
+// (kind:'testimonies') exactly like the real layer reuses its own likes
+// collection -- no separate counter needed here at all.
+export function watchTestimonies(callback) {
+  const fire = () => {
+    const list = readJSON(LS_TESTIMONIES, []);
+    callback(list.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+  };
+  fire();
+  return onBroadcast('testimonies', fire);
+}
+export async function addTestimony(authorUid, authorName, title, text) {
+  const list = readJSON(LS_TESTIMONIES, []);
+  const id = 'testimony-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  list.push({ id, authorUid, authorName, title: title || null, text, createdAt: Date.now() });
+  writeJSON(LS_TESTIMONIES, list);
+  broadcast('testimonies');
+  return id;
+}
+export async function deleteTestimony(testimonyId) {
+  writeJSON(LS_TESTIMONIES, readJSON(LS_TESTIMONIES, []).filter((t) => t.id !== testimonyId));
+  broadcast('testimonies');
+}
+
+// Prayer Wall [2026-09-28, "BUILD THEM ALL NOW" batch 1] -- demo-mode
+// mirror of the real Firestore layer's prayerRequests/{requestId}
+// collection. Global key (same reasoning as testimonies above) -- privacy
+// is just a field on each request, filtered client-side by the two watch
+// functions below, matching the real layer's two-separate-queries shape
+// (there's no cross-tab privacy boundary to enforce in a single browser's
+// localStorage anyway, same reasoning watchSpiritualGrowth's comment gives).
+export function watchPublicPrayerRequests(callback) {
+  const fire = () => {
+    const list = readJSON(LS_PRAYER_REQUESTS, []).filter((r) => !r.isPrivate);
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    callback(list);
+  };
+  fire();
+  return onBroadcast('prayerRequests', fire);
+}
+export function watchMyPrayerRequests(uid, callback) {
+  const fire = () => {
+    const list = readJSON(LS_PRAYER_REQUESTS, []).filter((r) => r.authorUid === uid);
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    callback(list);
+  };
+  fire();
+  return onBroadcast('prayerRequests', fire);
+}
+export async function addPrayerRequest(authorUid, authorName, requestText, onBehalfOf, isPrivate) {
+  const list = readJSON(LS_PRAYER_REQUESTS, []);
+  const id = 'prayer-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  list.push({
+    id, authorUid, authorName, requestText,
+    onBehalfOf: onBehalfOf || null,
+    isPrivate: !!isPrivate,
+    status: 'open',
+    createdAt: Date.now(), updatedAt: Date.now()
+  });
+  writeJSON(LS_PRAYER_REQUESTS, list);
+  broadcast('prayerRequests');
+  return id;
+}
+export async function markPrayerRequestAnswered(requestId, answeredNote) {
+  const list = readJSON(LS_PRAYER_REQUESTS, []);
+  const idx = list.findIndex((r) => r.id === requestId);
+  if (idx !== -1) {
+    list[idx] = { ...list[idx], status: 'answered', answeredNote: answeredNote || null, answeredAt: Date.now(), updatedAt: Date.now() };
+    writeJSON(LS_PRAYER_REQUESTS, list);
+    broadcast('prayerRequests');
+  }
+}
+export async function setPrayerRequestPrivacy(requestId, isPrivate) {
+  const list = readJSON(LS_PRAYER_REQUESTS, []);
+  const idx = list.findIndex((r) => r.id === requestId);
+  if (idx !== -1) {
+    list[idx] = { ...list[idx], isPrivate: !!isPrivate, updatedAt: Date.now() };
+    writeJSON(LS_PRAYER_REQUESTS, list);
+    broadcast('prayerRequests');
+  }
+}
+export async function deletePrayerRequest(requestId) {
+  writeJSON(LS_PRAYER_REQUESTS, readJSON(LS_PRAYER_REQUESTS, []).filter((r) => r.id !== requestId));
+  broadcast('prayerRequests');
+}
+
+// Worship Team Scheduling [2026-09-28, "BUILD THEM ALL NOW" batch 2] --
+// demo-mode mirror of the real Firestore layer's
+// serviceAssignments/{assignmentId} collection. Global key, same reasoning
+// as LS_TESTIMONIES/LS_PRAYER_REQUESTS above -- a single browser's demo
+// data has no real cross-account privacy boundary to enforce, so both
+// watch functions below just filter the one shared list client-side,
+// matching the real layer's two-separate-queries shape.
+export function watchMyAssignments(uid, callback) {
+  const fire = () => {
+    const list = readJSON(LS_SERVICE_ASSIGNMENTS, []).filter((a) => a.assignedUid === uid);
+    list.sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+    callback(list);
+  };
+  fire();
+  return onBroadcast('serviceAssignments', fire);
+}
+export function watchChurchAssignments(churchId, callback) {
+  const fire = () => {
+    const list = readJSON(LS_SERVICE_ASSIGNMENTS, []).filter((a) => a.churchId === churchId);
+    list.sort((a, b) => (a.serviceDate || '').localeCompare(b.serviceDate || ''));
+    callback(list);
+  };
+  fire();
+  return onBroadcast('serviceAssignments', fire);
+}
+export async function addAssignment(churchId, serviceDate, role, assignedUid, assignedName, notes, createdByUid, createdByName) {
+  const list = readJSON(LS_SERVICE_ASSIGNMENTS, []);
+  const id = 'assignment-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  list.push({
+    id, churchId, serviceDate, role, assignedUid, assignedName,
+    notes: notes || null,
+    status: 'invited',
+    createdByUid, createdByName,
+    createdAt: Date.now(), updatedAt: Date.now()
+  });
+  writeJSON(LS_SERVICE_ASSIGNMENTS, list);
+  broadcast('serviceAssignments');
+  return id;
+}
+export async function respondToAssignment(assignmentId, status) {
+  const list = readJSON(LS_SERVICE_ASSIGNMENTS, []);
+  const idx = list.findIndex((a) => a.id === assignmentId);
+  if (idx !== -1) {
+    list[idx] = { ...list[idx], status: status, updatedAt: Date.now() };
+    writeJSON(LS_SERVICE_ASSIGNMENTS, list);
+    broadcast('serviceAssignments');
+  }
+}
+export async function deleteAssignment(assignmentId) {
+  writeJSON(LS_SERVICE_ASSIGNMENTS, readJSON(LS_SERVICE_ASSIGNMENTS, []).filter((a) => a.id !== assignmentId));
+  broadcast('serviceAssignments');
+}
+
 // ---------------------------------------------------------------------- Rooms
 function readRooms() { return readJSON(LS_ROOMS, {}); }
 function writeRooms(rooms) { writeJSON(LS_ROOMS, rooms); broadcast('rooms'); }
@@ -821,6 +990,120 @@ export function watchSermonsSharedWithMe(uid, callback) {
   };
   fire();
   return onBroadcast('sermons', fire);
+}
+
+// Sermon Archive [2026-09-28, "BUILD THEM ALL NOW" batch 3] -- exact mirror
+// of the real data layer's watchSermonArchive() (see that file's own
+// comment for the full design). Every sermon with `archived === true`,
+// regardless of creator -- this app's first "browse sermons you don't own"
+// list, safe here for the same reason it's safe against the real backend:
+// demo mode has no security rules at all, and the real rule this mirrors is
+// already unconditionally open to begin with.
+export function watchSermonArchive(callback) {
+  const fire = () => {
+    const list = readSermons().filter((s) => s.archived === true);
+    list.sort((a, b) => (b.archivedAt || 0) - (a.archivedAt || 0));
+    callback(list);
+  };
+  fire();
+  return onBroadcast('sermons', fire);
+}
+
+// ------------------------------------------------------------ SMALL GROUPS
+// ["BUILD THEM ALL NOW" batch 4, 2026-09-28] Exact mirror of the real data
+// layer's small-group functions -- see that file's comment for the design.
+const LS_SMALL_GROUPS = 'iworship:local:smallGroups';
+function readSmallGroups() { return readJSON(LS_SMALL_GROUPS, []); }
+function writeSmallGroups(list) { writeJSON(LS_SMALL_GROUPS, list); broadcast('smallGroups'); }
+
+export async function createSmallGroup(group) {
+  const list = readSmallGroups();
+  const withId = {
+    ...group,
+    memberUids: group.memberUids || [],
+    id: 'group-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  list.push(withId);
+  writeSmallGroups(list);
+  return withId.id;
+}
+export async function updateSmallGroup(id, patch) {
+  const list = readSmallGroups();
+  const idx = list.findIndex((g) => g.id === id);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], ...patch, updatedAt: Date.now() };
+  writeSmallGroups(list);
+}
+export async function deleteSmallGroup(id) {
+  writeSmallGroups(readSmallGroups().filter((g) => g.id !== id));
+}
+export function watchSmallGroups(callback) {
+  const fire = () => {
+    const list = readSmallGroups();
+    list.sort((a, b) => b.createdAt - a.createdAt);
+    callback(list);
+  };
+  fire();
+  return onBroadcast('smallGroups', fire);
+}
+export async function joinSmallGroup(id, uid) {
+  const list = readSmallGroups();
+  const idx = list.findIndex((g) => g.id === id);
+  if (idx === -1) return;
+  const current = list[idx].memberUids || [];
+  if (!current.includes(uid)) {
+    list[idx] = { ...list[idx], memberUids: current.concat([uid]), updatedAt: Date.now() };
+    writeSmallGroups(list);
+  }
+}
+export async function leaveSmallGroup(id, uid) {
+  const list = readSmallGroups();
+  const idx = list.findIndex((g) => g.id === id);
+  if (idx === -1) return;
+  const current = list[idx].memberUids || [];
+  if (current.includes(uid)) {
+    list[idx] = { ...list[idx], memberUids: current.filter((x) => x !== uid), updatedAt: Date.now() };
+    writeSmallGroups(list);
+  }
+}
+
+// ------------------------------------------------------------------ EVENTS
+// ["BUILD THEM ALL NOW" batch 4, 2026-09-28] Exact mirror of the real data
+// layer's event functions -- see that file's comment for the design.
+const LS_EVENTS = 'iworship:local:events';
+function readEvents() { return readJSON(LS_EVENTS, []); }
+function writeEvents(list) { writeJSON(LS_EVENTS, list); broadcast('events'); }
+
+export async function createEvent(evt) {
+  const list = readEvents();
+  const withId = {
+    ...evt,
+    id: 'event-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  list.push(withId);
+  writeEvents(list);
+  return withId.id;
+}
+export async function updateEvent(id, patch) {
+  const list = readEvents();
+  const idx = list.findIndex((e) => e.id === id);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], ...patch, updatedAt: Date.now() };
+  writeEvents(list);
+}
+export async function deleteEvent(id) {
+  writeEvents(readEvents().filter((e) => e.id !== id));
+}
+export function watchEvents(callback) {
+  const fire = () => {
+    const list = readEvents();
+    list.sort((a, b) => (a.eventDate || '').localeCompare(b.eventDate || ''));
+    callback(list);
+  };
+  fire();
+  return onBroadcast('events', fire);
 }
 
 // -------------------------------------------------------------- Program Builder

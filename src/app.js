@@ -1,6 +1,15 @@
 import { ICONS } from './content/icons.js';
 import { THEMES } from './content/themes.js';
 import { VERSES } from './content/verses.js';
+// Bible Reading Plan ["BUILD THEM ALL NOW" batch 1, 2026-09-28] -- generated
+// by scripts/build-reading-plan.mjs (see that script's header comment for
+// the full design). Small enough (~38KB of plain {book,chapter} refs, no
+// verse TEXT) to import statically like songs-seed.js/icons.js/themes.js
+// above rather than lazy-loaded like the Bible text itself (kjv.json,
+// ~4.3MB) -- see READING_PLAN's first use in renderSpiritualGrowthReadingPlan()
+// below for why no Firestore collection is needed for the plan CONTENT,
+// only per-person progress.
+import READING_PLAN from './content/reading-plan.json';
 import {
   usingDemoMode,
   watchSongs, addSong, updateSong, recordSongUsage,
@@ -15,9 +24,17 @@ import {
   watchSpiritualGrowth, recordSalvationDecision, setMilestoneComplete,
   watchJournalEntries, addJournalEntry, deleteJournalEntry,
   watchGrowthTopics, addGrowthTopic, deleteGrowthTopic,
+  watchReadingPlanProgress, markReadingPlanDayDone,
+  watchTestimonies, addTestimony, deleteTestimony,
+  watchPublicPrayerRequests, watchMyPrayerRequests, addPrayerRequest,
+  markPrayerRequestAnswered, setPrayerRequestPrivacy, deletePrayerRequest,
+  watchMyAssignments, watchChurchAssignments, addAssignment,
+  respondToAssignment, deleteAssignment,
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
-  shareSermon, unshareSermon, watchSermonsSharedWithMe,
+  shareSermon, unshareSermon, watchSermonsSharedWithMe, watchSermonArchive,
+  createSmallGroup, updateSmallGroup, deleteSmallGroup, watchSmallGroups, joinSmallGroup, leaveSmallGroup,
+  createEvent, updateEvent, deleteEvent, watchEvents,
   createProgram, updateProgram, deleteProgram, watchMyPrograms, watchProgram,
   shareProgram, unshareProgram, watchProgramsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
@@ -147,6 +164,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     spiritualGrowth: null,   // populated live by watchSpiritualGrowth(uid) while state.view === 'spiritual-growth' -- {professedAt, milestones} for the signed-in person's own account only (see startSpiritualGrowthWatch())
     journalEntries: [],      // populated live by watchJournalEntries(uid) while state.view === 'spiritual-growth' -- this person's own private journal, newest first (see startJournalWatch())
     spiritualGrowthCustomTopics: [], // populated live by watchGrowthTopics() -- ALWAYS running, same as state.library/watchSongs() just below, since these are public Admin-authored topics rather than per-uid data; merged with the hardcoded SPIRITUAL_GROWTH_TOPICS by allSpiritualGrowthTopics() (see that function's comment)
+    testimonies: [],         // ["BUILD THEM ALL NOW" batch 1] populated live by watchTestimonies() while state.view === 'spiritual-growth' -- public, cross-church, same "no data walls" reasoning as Fellowship posts
+    publicPrayerRequests: [], // populated live by watchPublicPrayerRequests() while state.view === 'spiritual-growth' -- every request marked NOT private, from any signed-in person
+    myPrayerRequests: [],     // populated live by watchMyPrayerRequests(uid) while state.view === 'spiritual-growth' -- this person's own requests, public or private alike (merged with publicPrayerRequests for display, de-duped by id -- see prayerWallRequests())
+    readingPlanProgress: { completedDayNumbers: [], completedDates: [] }, // populated live by watchReadingPlanProgress(uid) while state.view === 'spiritual-growth' -- this person's own reading-plan progress only
+    myAssignments: [],       // populated live by watchMyAssignments(uid) while state.view === 'team-schedule' -- this person's own upcoming/past serving assignments, any church
+    churchAssignments: [],   // populated live by watchChurchAssignments(churchId) while state.view === 'team-schedule' and the MANAGE tab is open -- the target church's whole schedule (see churchTeamTargetChurchId(), reused here)
     mySongRequests: [],      // populated live by watchMySongRequests() while state.view === 'song-request'
     pendingSongRequests: [], // populated live by watchPendingSongRequests() while state.view === 'song-request-queue'
     activeRoomCode: safeSessionGet('cv:activeRoomCode', null),
@@ -164,6 +187,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     publicRooms: [],         // populated live by watchPublicRooms() while on session-join
     mySermons: [],           // populated live by watchMySermons() while on the sermons/sermon-edit views, and by the host picker
     sharedSermons: [],       // populated live by watchSermonsSharedWithMe() alongside mySermons -- sermons someone else built and shared with this uid
+    sermonArchive: [],       // Sermon Archive [2026-09-28] -- populated live by watchSermonArchive() while on the sermon-archive/sermon-archive-detail views; every sermon ANY creator has published to the public archive
+    smallGroups: [],         // Small Group Finder [2026-09-28] -- populated live by watchSmallGroups() while on the small-groups view
+    events: [],              // Events Calendar [2026-09-28] -- populated live by watchEvents() while on the events-calendar view
     directory: [],           // populated live by watchDirectory() while the Sermons screen's share panel is open -- powers "search by name/church" (see startDirectoryWatch())
     viewSermon: null,        // populated live by ensureViewSermonWatch() -- whichever ONE sermon the active room is currently presenting, for host/congregant/projector alike
     hostProgram: null,       // populated live by ensureHostProgramWatch() -- whichever ONE program the active room is running from (room.programId), host-only
@@ -964,6 +990,46 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       if(state.view === 'sermons' || state.view === 'sermon-edit' || state.view === 'session-host') render();
     });
   }
+  // Sermon Archive [2026-09-28, "BUILD THEM ALL NOW" batch 3] -- the public
+  // browse list, deliberately a SEPARATE watch from startMySermonsWatch()
+  // above even though both read the same `sermons` collection: this one is
+  // open to a signed-out visitor too (no `if(!state.user) return` guard),
+  // matching the Sermon Archive screen's own read-rule reasoning (see
+  // firestore.rules' updated sermons/{sermonId} comment) -- Bible/
+  // Devotionals are the app's other "true either way" public content, and
+  // neither of those gates on sign-in either.
+  let unsubSermonArchive = null;
+  function stopSermonArchiveWatch(){ if(unsubSermonArchive){ unsubSermonArchive(); unsubSermonArchive = null; } }
+  function startSermonArchiveWatch(){
+    stopSermonArchiveWatch();
+    unsubSermonArchive = watchSermonArchive(function(sermons){
+      state.sermonArchive = sermons;
+      if(state.view === 'sermon-archive' || state.view === 'sermon-archive-detail') render();
+    });
+  }
+  // Small Group Finder [2026-09-28, "BUILD THEM ALL NOW" batch 4] -- public,
+  // no sign-in needed to browse (joining/leaving does need one -- gated in
+  // the UI, not the watch).
+  let unsubSmallGroups = null;
+  function stopSmallGroupsWatch(){ if(unsubSmallGroups){ unsubSmallGroups(); unsubSmallGroups = null; } }
+  function startSmallGroupsWatch(){
+    stopSmallGroupsWatch();
+    unsubSmallGroups = watchSmallGroups(function(groups){
+      state.smallGroups = groups;
+      if(state.view === 'small-groups') render();
+    });
+  }
+  // Events Calendar [2026-09-28, "BUILD THEM ALL NOW" batch 4] -- same
+  // "public, no sign-in needed to browse" shape as Small Groups above.
+  let unsubEvents = null;
+  function stopEventsWatch(){ if(unsubEvents){ unsubEvents(); unsubEvents = null; } }
+  function startEventsWatch(){
+    stopEventsWatch();
+    unsubEvents = watchEvents(function(events){
+      state.events = events;
+      if(state.view === 'events-calendar') render();
+    });
+  }
 
   // Program Builder [2026-09-24] -- exact mirror of startMySermonsWatch()/
   // startSharedSermonsWatch() just above, powering the Programs screen AND
@@ -1104,6 +1170,89 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     unsubJournal = watchJournalEntries(state.user.uid, function(list){
       state.journalEntries = list;
       if(state.view === 'spiritual-growth') render();
+    });
+  }
+
+  // Testimony Wall / Prayer Wall / Bible Reading Plan ["BUILD THEM ALL NOW"
+  // batch 1, 2026-09-28] -- same "started/stopped only while Growth is
+  // open" reasoning as Spiritual Growth's own watches just above, and
+  // wired the exact same way (openSpiritualGrowth() starts all of them
+  // together, restoreLastViewIfNeeded()'s 'spiritual-growth' case re-opens
+  // the whole hub the same way on a page reload).
+  let unsubTestimonies = null;
+  function stopTestimoniesWatch(){ if(unsubTestimonies){ unsubTestimonies(); unsubTestimonies = null; } }
+  function startTestimoniesWatch(){
+    stopTestimoniesWatch();
+    unsubTestimonies = watchTestimonies(function(list){
+      state.testimonies = list;
+      if(state.view === 'spiritual-growth') render();
+    });
+  }
+  let unsubPublicPrayerRequests = null;
+  let unsubMyPrayerRequests = null;
+  function stopPrayerWallWatch(){
+    if(unsubPublicPrayerRequests){ unsubPublicPrayerRequests(); unsubPublicPrayerRequests = null; }
+    if(unsubMyPrayerRequests){ unsubMyPrayerRequests(); unsubMyPrayerRequests = null; }
+  }
+  function startPrayerWallWatch(){
+    stopPrayerWallWatch();
+    unsubPublicPrayerRequests = watchPublicPrayerRequests(function(list){
+      state.publicPrayerRequests = list;
+      if(state.view === 'spiritual-growth') render();
+    });
+    if(!state.user) { state.myPrayerRequests = []; return; }
+    unsubMyPrayerRequests = watchMyPrayerRequests(state.user.uid, function(list){
+      state.myPrayerRequests = list;
+      if(state.view === 'spiritual-growth') render();
+    });
+  }
+  // Merges publicPrayerRequests + myPrayerRequests, de-duped by id (a
+  // signed-in person's own PUBLIC request would otherwise appear twice --
+  // once from each watch) and re-sorted newest-first.
+  function prayerWallRequests(){
+    const byId = new Map();
+    state.publicPrayerRequests.forEach(function(r){ byId.set(r.id, r); });
+    state.myPrayerRequests.forEach(function(r){ byId.set(r.id, r); });
+    return Array.from(byId.values()).sort(function(a, b){ return toMillis(b.createdAt) - toMillis(a.createdAt); });
+  }
+  let unsubReadingPlan = null;
+  function stopReadingPlanWatch(){ if(unsubReadingPlan){ unsubReadingPlan(); unsubReadingPlan = null; } }
+  function startReadingPlanWatch(){
+    stopReadingPlanWatch();
+    if(!state.user) { state.readingPlanProgress = { completedDayNumbers: [], completedDates: [] }; return; }
+    unsubReadingPlan = watchReadingPlanProgress(state.user.uid, function(progress){
+      state.readingPlanProgress = progress;
+      if(state.view === 'spiritual-growth') render();
+    });
+  }
+
+  // Worship Team Scheduling [2026-09-28, "BUILD THEM ALL NOW" batch 2] --
+  // two independent watches, same shape as Prayer Wall's above but never
+  // merged (unlike Prayer Wall, "my assignments" and "this church's whole
+  // schedule" are shown on two different tabs of the same screen, never
+  // combined into one list). The church-wide watch only ever starts once a
+  // target church is actually known (a leader's own churchId, or an
+  // Admin's picked one -- see churchTeamTargetChurchId(), reused verbatim
+  // rather than inventing a second "which church" resolver).
+  let unsubMyAssignments = null;
+  function stopMyAssignmentsWatch(){ if(unsubMyAssignments){ unsubMyAssignments(); unsubMyAssignments = null; } }
+  function startMyAssignmentsWatch(){
+    stopMyAssignmentsWatch();
+    if(!state.user) { state.myAssignments = []; return; }
+    unsubMyAssignments = watchMyAssignments(state.user.uid, function(list){
+      state.myAssignments = list;
+      if(state.view === 'team-schedule') render();
+    });
+  }
+  let unsubChurchAssignments = null;
+  function stopChurchAssignmentsWatch(){ if(unsubChurchAssignments){ unsubChurchAssignments(); unsubChurchAssignments = null; } }
+  function startChurchAssignmentsWatch(){
+    stopChurchAssignmentsWatch();
+    const churchId = churchTeamTargetChurchId();
+    if(!churchId) { state.churchAssignments = []; return; }
+    unsubChurchAssignments = watchChurchAssignments(churchId, function(list){
+      state.churchAssignments = list;
+      if(state.view === 'team-schedule') render();
     });
   }
 
@@ -1306,6 +1455,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stopChurchRosterWatch();
     stopSpiritualGrowthWatch();
     stopJournalWatch();
+    stopTestimoniesWatch();
+    stopPrayerWallWatch();
+    stopReadingPlanWatch();
+    stopMyAssignmentsWatch();
+    stopChurchAssignmentsWatch();
     stopSocialWatches();
     if(user){
       unsubProfile = watchProfile(user.uid, function(profile, meta){
@@ -2199,12 +2353,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button type="button" class="hamburger-item" id="hbMyProfileBtn">MY PROFILE</button>' +
         '<p class="hamburger-section-label">Personal</p>' +
         '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
+        '<button type="button" class="hamburger-item" id="hbSermonArchiveBtn">SERMON ARCHIVE</button>' +
+        '<button type="button" class="hamburger-item" id="hbChurchDirectoryBtn">CHURCH DIRECTORY</button>' +
+        '<button type="button" class="hamburger-item" id="hbSmallGroupsBtn">SMALL GROUPS</button>' +
+        '<button type="button" class="hamburger-item" id="hbEventsCalendarBtn">EVENTS CALENDAR</button>' +
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
-        ((canHost() || state.isEditor || hasFullAccess() || canManageChurchTeam() || canManageAnyChurchTeam() || state.isAdmin) ? (
+        ((canHost() || state.isEditor || hasFullAccess() || canManageChurchTeam() || canManageAnyChurchTeam() || canViewTeamSchedule() || state.isAdmin) ? (
           '<p class="hamburger-section-label">Church Tools</p>' +
           (canHost() ? '<button type="button" class="hamburger-item" id="hbMediaLibraryBtn">MEDIA LIBRARY</button>' : '') +
           ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
           ((canManageChurchTeam() || canManageAnyChurchTeam()) ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
+          (canViewTeamSchedule() ? '<button type="button" class="hamburger-item" id="hbTeamScheduleBtn">TEAM SCHEDULE</button>' : '') +
           (state.isAdmin ? '<button type="button" class="hamburger-item" id="hbAdminBtn">ADMIN TOOLS</button>' : '')
         ) : '') +
         '<p class="hamburger-section-label">App</p>' +
@@ -2215,6 +2374,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       ) : (
         '<button type="button" class="hamburger-item" id="hbHomeBtn">HOME</button>' +
         '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
+        '<button type="button" class="hamburger-item" id="hbSermonArchiveBtn">SERMON ARCHIVE</button>' +
+        '<button type="button" class="hamburger-item" id="hbSmallGroupsBtn">SMALL GROUPS</button>' +
+        '<button type="button" class="hamburger-item" id="hbEventsCalendarBtn">EVENTS CALENDAR</button>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
         '<button type="button" class="hamburger-item" id="hbAboutBtn">ABOUT IWORSHIP</button>' +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>'
@@ -2229,6 +2391,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(hbProfile) hbProfile.addEventListener('click', function(){ goTo(openProfileEdit); });
     const hbDevotionals = document.getElementById('hbDevotionalsBtn');
     if(hbDevotionals) hbDevotionals.addEventListener('click', function(){ goTo(function(){ state.view='devotionals'; render(); window.scrollTo(0,0); }); });
+    const hbSermonArchive = document.getElementById('hbSermonArchiveBtn');
+    if(hbSermonArchive) hbSermonArchive.addEventListener('click', function(){ goTo(openSermonArchive); });
+    const hbChurchDirectory = document.getElementById('hbChurchDirectoryBtn');
+    if(hbChurchDirectory) hbChurchDirectory.addEventListener('click', function(){ goTo(openChurchDirectory); });
+    const hbSmallGroups = document.getElementById('hbSmallGroupsBtn');
+    if(hbSmallGroups) hbSmallGroups.addEventListener('click', function(){ goTo(openSmallGroups); });
+    const hbEventsCalendar = document.getElementById('hbEventsCalendarBtn');
+    if(hbEventsCalendar) hbEventsCalendar.addEventListener('click', function(){ goTo(openEventsCalendar); });
     const hbMediaLibrary = document.getElementById('hbMediaLibraryBtn');
     if(hbMediaLibrary) hbMediaLibrary.addEventListener('click', function(){ goTo(function(){ openMediaLibrary('landing'); }); });
     const hbExplore = document.getElementById('hbExploreBtn');
@@ -2241,6 +2411,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(hbSongRequests) hbSongRequests.addEventListener('click', function(){ goTo(function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); }); });
     const hbChurchTeam = document.getElementById('hbChurchTeamBtn');
     if(hbChurchTeam) hbChurchTeam.addEventListener('click', function(){ goTo(function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); if(canManageAnyChurchTeam()) startAdminChurchesWatch(); }); });
+    const hbTeamSchedule = document.getElementById('hbTeamScheduleBtn');
+    if(hbTeamSchedule) hbTeamSchedule.addEventListener('click', function(){ goTo(openTeamSchedule); });
     const hbAdmin = document.getElementById('hbAdminBtn');
     if(hbAdmin) hbAdmin.addEventListener('click', function(){ goTo(function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); }); });
     const hbSettings = document.getElementById('hbSettingsBtn');
@@ -2269,12 +2441,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       slot.innerHTML =
         '<div class="sidebar-section">' +
           '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
+          '<button type="button" class="sidebar-item" id="sideSermonArchiveBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Sermon Archive</span></button>' +
+          '<button type="button" class="sidebar-item" id="sideSmallGroupsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Small Groups</span></button>' +
+          '<button type="button" class="sidebar-item" id="sideEventsCalendarBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('calendar')+'</svg><span>Events Calendar</span></button>' +
           '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
           '<button type="button" class="sidebar-item" id="sideAboutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('info')+'</svg><span>About iWorship</span></button>' +
           '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
         '</div>';
       const devotionalsBtn0 = document.getElementById('sideDevotionalsBtn');
       if(devotionalsBtn0) devotionalsBtn0.addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
+      const sermonArchiveBtn0 = document.getElementById('sideSermonArchiveBtn');
+      if(sermonArchiveBtn0) sermonArchiveBtn0.addEventListener('click', openSermonArchive);
+      const smallGroupsBtn0 = document.getElementById('sideSmallGroupsBtn');
+      if(smallGroupsBtn0) smallGroupsBtn0.addEventListener('click', openSmallGroups);
+      const eventsCalendarBtn0 = document.getElementById('sideEventsCalendarBtn');
+      if(eventsCalendarBtn0) eventsCalendarBtn0.addEventListener('click', openEventsCalendar);
       const plansBtn = document.getElementById('sidePlansBtn');
       if(plansBtn) plansBtn.addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
       const aboutBtn0 = document.getElementById('sideAboutBtn');
@@ -2302,8 +2483,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const showMediaLibrary = canHost();
     const showSongRequests = (state.isEditor || hasFullAccess());
     const showChurchTeam = (canManageChurchTeam() || canManageAnyChurchTeam());
+    const showTeamSchedule = canViewTeamSchedule();
     const showAdminTools = state.isAdmin;
-    const showChurchToolsSection = showMediaLibrary || showSongRequests || showChurchTeam || showAdminTools;
+    const showChurchToolsSection = showMediaLibrary || showSongRequests || showChurchTeam || showTeamSchedule || showAdminTools;
     slot.innerHTML =
       '<button type="button" class="sidebar-profile-row" id="sideProfileBtn">' +
         personAvatar(state.user.uid, 38) +
@@ -2314,6 +2496,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '<div class="sidebar-section">' +
         '<button type="button" class="sidebar-item" id="sideMessagesBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('messenger')+'</svg><span>Messages</span>'+(unreadMsgs?(' <span class="notif-badge-inline">'+(unreadMsgs>99?'99+':unreadMsgs)+'</span>'):'')+'</button>' +
         '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
+        '<button type="button" class="sidebar-item" id="sideSermonArchiveBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Sermon Archive</span></button>' +
+        '<button type="button" class="sidebar-item" id="sideChurchDirectoryBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Directory</span></button>' +
+        '<button type="button" class="sidebar-item" id="sideSmallGroupsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Small Groups</span></button>' +
+        '<button type="button" class="sidebar-item" id="sideEventsCalendarBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('calendar')+'</svg><span>Events Calendar</span></button>' +
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
       '</div>' +
       (showChurchToolsSection ? (
@@ -2322,6 +2508,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           (showMediaLibrary ? ('<button type="button" class="sidebar-item" id="sideMediaLibraryBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>Media Library</span></button>') : '') +
           (showSongRequests ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
           (showChurchTeam ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
+          (showTeamSchedule ? ('<button type="button" class="sidebar-item" id="sideTeamScheduleBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('calendar')+'</svg><span>Team Schedule</span></button>') : '') +
           (showAdminTools ? ('<button type="button" class="sidebar-item" id="sideAdminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>Admin Tools</span></button>') : '') +
         '</div>'
       ) : '') +
@@ -2337,6 +2524,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.getElementById('sideProfileBtn').addEventListener('click', openProfileEdit);
     document.getElementById('sideMessagesBtn').addEventListener('click', openMessages);
     document.getElementById('sideDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
+    document.getElementById('sideSermonArchiveBtn').addEventListener('click', openSermonArchive);
+    document.getElementById('sideChurchDirectoryBtn').addEventListener('click', openChurchDirectory);
+    document.getElementById('sideSmallGroupsBtn').addEventListener('click', openSmallGroups);
+    document.getElementById('sideEventsCalendarBtn').addEventListener('click', openEventsCalendar);
     const sideMediaLibraryBtn = document.getElementById('sideMediaLibraryBtn');
     if(sideMediaLibraryBtn) sideMediaLibraryBtn.addEventListener('click', function(){ openMediaLibrary('landing'); });
     document.getElementById('sideExploreBtn').addEventListener('click', openExplore);
@@ -2345,6 +2536,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(songReqBtn) songReqBtn.addEventListener('click', function(){ state.view='song-request-queue'; render(); window.scrollTo(0,0); startPendingSongRequestsWatch(); });
     const churchTeamBtn = document.getElementById('sideChurchTeamBtn');
     if(churchTeamBtn) churchTeamBtn.addEventListener('click', function(){ state.view='church-team'; render(); window.scrollTo(0,0); startDirectoryWatch(); startChurchRosterWatch(); if(canManageAnyChurchTeam()) startAdminChurchesWatch(); });
+    const teamScheduleBtn = document.getElementById('sideTeamScheduleBtn');
+    if(teamScheduleBtn) teamScheduleBtn.addEventListener('click', openTeamSchedule);
     const adminBtn = document.getElementById('sideAdminBtn');
     if(adminBtn) adminBtn.addEventListener('click', function(){ state.view='admin'; render(); window.scrollTo(0,0); startAdminChurchesWatch(); startAdminUsersWatch(); startPendingReportsWatch(); startDirectoryWatch(); });
     document.getElementById('sideAboutBtn').addEventListener('click', function(){ state.view='about'; render(); window.scrollTo(0,0); });
@@ -2936,6 +3129,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // projector output deliberately never does this, timing there matters
     // too much to risk it).
     if(state.view !== lastRenderedView){
+      // Practice Mode cleanup [2026-09-28, "BUILD THEM ALL NOW" batch 2] --
+      // catches navigating AWAY from Practice Mode by any means other than
+      // its own BACK button (a browser back/forward tap, signing out,
+      // reloading into a different resumed view, etc.), so a metronome
+      // click track or an autoscroll timer this person started never keeps
+      // running silently in the background once the screen itself is gone.
+      // lastRenderedView is only ever updated here, right after this
+      // check, so this only fires once per actual navigation away, not on
+      // every one of Practice Mode's own re-renders (BPM/speed taps) while
+      // the view itself hasn't changed.
+      if(lastRenderedView === 'practice' && state.view !== 'practice'){ stopPracticeMetronome(); stopPracticeScroll(); }
       lastRenderedView = state.view;
       main.classList.remove('view-fade-in');
       void main.offsetWidth; // force a reflow so the removal above actually "takes" before re-adding
@@ -3008,6 +3212,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='landing') return renderLanding();
     if(state.view==='list') return renderList();
     if(state.view==='detail') return renderDetail();
+    if(state.view==='practice') return renderPractice();
     if(state.view==='edit') return renderEditSong();
     if(state.view==='add') return renderAdd();
     if(state.view==='bulk-add') return renderBulkAdd();
@@ -3023,6 +3228,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='song-request') return renderSongRequest();
     if(state.view==='song-request-queue') return renderSongRequestQueue();
     if(state.view==='church-team') return renderChurchTeam();
+    if(state.view==='team-schedule') return renderTeamSchedule();
     if(state.view==='bible') return renderBible();
     if(state.view==='devotionals') return renderDevotionals();
     if(state.view==='about') return renderAbout();
@@ -3030,6 +3236,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='sermons') return renderSermons();
     if(state.view==='sermon-edit') return renderSermonEdit();
     if(state.view==='shared-sermon-link') return renderSharedSermonLink();
+    if(state.view==='sermon-archive') return renderSermonArchive();
+    if(state.view==='sermon-archive-detail') return renderSermonArchiveDetail();
+    if(state.view==='church-directory') return renderChurchDirectory();
+    if(state.view==='small-groups') return renderSmallGroups();
+    if(state.view==='events-calendar') return renderEventsCalendar();
     if(state.view==='programs') return renderPrograms();
     if(state.view==='program-edit') return renderProgramEdit();
     if(state.view==='shared-program-link') return renderSharedProgramLink();
@@ -3275,6 +3486,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
       '<button class="btn btn-ghost btn-lg btn-block" id="openBibleBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>OPEN THE BIBLE (KJV / TAGALOG)</button>' +
       '<button class="btn btn-ghost btn-lg btn-block" id="openDevotionalsBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>DAILY DEVOTIONALS</button>' +
+      // Sermon Archive [2026-09-28] -- a big Home button, same treatment as
+      // Bible/Devotionals just above (public content, no sign-in required,
+      // deserves the same "impossible to miss" placement rather than being
+      // buried only inside the host-only Sermons screen).
+      '<button class="btn btn-ghost btn-lg btn-block" id="openSermonArchiveBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>SERMON ARCHIVE</button>' +
+      // Events Calendar ["BUILD THEM ALL NOW" batch 4, 2026-09-28] -- same
+      // "big Home button" treatment as Sermon Archive just above (public
+      // read, no sign-in required to browse). Small Groups and Church
+      // Directory deliberately do NOT get a Home button -- they're
+      // reachable via the sidebar/hamburger only, same tier as Explore or
+      // Media Library, since browsing them isn't quite as universally
+      // relevant on first landing as a dated calendar of what's coming up.
+      '<button class="btn btn-ghost btn-lg btn-block" id="openEventsCalendarBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('calendar')+'</svg>EVENTS CALENDAR</button>' +
       // Media Library, promoted to its own Home button [2026-09-24, Jared:
       // "let's add it as a separate section as well just like devotionals
       // (of course this will only appear to those who have host access)"
@@ -3336,6 +3560,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.getElementById('plansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     document.getElementById('openBibleBtn').addEventListener('click', function(){ state.view='bible'; render(); window.scrollTo(0,0); });
     document.getElementById('openDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
+    document.getElementById('openEventsCalendarBtn').addEventListener('click', openEventsCalendar);
+    document.getElementById('openSermonArchiveBtn').addEventListener('click', openSermonArchive);
     const openMediaLibraryFromHomeBtn = document.getElementById('openMediaLibraryFromHomeBtn');
     if(openMediaLibraryFromHomeBtn) openMediaLibraryFromHomeBtn.addEventListener('click', function(){ openMediaLibrary('landing'); });
     const reviewRequestsBtn = document.getElementById('reviewRequestsBtn');
@@ -4735,6 +4961,212 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     }
   }
 
+  // ============================================ WORSHIP TEAM SCHEDULING
+  // [2026-09-28, "BUILD THEM ALL NOW" batch 2] Jared's "Worship Team
+  // Scheduling" idea from the launch deck: a leader assigns roster members
+  // (see Church Team just above) to serve on a given date/role, and the
+  // assigned member confirms or declines from their own MY ASSIGNMENTS
+  // tab. Deliberately reuses Church Team's own churchTeamTargetChurchId()/
+  // state.churchRoster/state.adminChurches machinery wholesale rather than
+  // re-inventing a second "which church, who's on it" resolver -- a
+  // leader/Admin lands on the exact same church context switching between
+  // the two screens. Read/write gating mirrors firestore.rules'
+  // serviceAssignments/{assignmentId} block exactly: any church-team
+  // member (including a plain 'musician', not just a leader) can see this
+  // screen at all, since everyone needs to see their OWN assignments; only
+  // a leader of that church (or an Admin) sees the MANAGE tab.
+  function canViewTeamSchedule(){
+    return CHURCH_TEAM_MEMBER_ROLES.includes(myRole()) || canManageAnyChurchTeam();
+  }
+  let teamScheduleTab = 'mine';
+  let teamScheduleAddDate = '';
+  let teamScheduleAddRole = '';
+  let teamScheduleAddAssigneeUid = '';
+  let teamScheduleAddNotes = '';
+  let teamScheduleRemoveConfirmId = null;
+  function openTeamSchedule(){
+    state.view='team-schedule'; render(); window.scrollTo(0,0);
+    startDirectoryWatch(); startChurchRosterWatch(); startMyAssignmentsWatch(); startChurchAssignmentsWatch();
+    if(canManageAnyChurchTeam()) startAdminChurchesWatch();
+  }
+  function teamScheduleStatusLabel(status){
+    if(status === 'confirmed') return 'CONFIRMED';
+    if(status === 'declined') return 'DECLINED';
+    return 'AWAITING RESPONSE';
+  }
+  function renderTeamSchedule(){
+    // Same defensive snap-back as renderChurchTeam()'s own guard just
+    // above -- a role/church can change out from under this screen while
+    // it's still open, and firestore.rules would reject every write here
+    // once that happens anyway.
+    if(!canViewTeamSchedule()){ state.view='landing'; render(); return; }
+    const canManage = canManageChurchTeam() || canManageAnyChurchTeam();
+    if(!canManage) teamScheduleTab = 'mine'; // a plain team member never sees MANAGE
+    const isAdminPicking = canManageAnyChurchTeam();
+    const targetChurchId = churchTeamTargetChurchId();
+    const pickedChurch = isAdminPicking ? (state.adminChurches||[]).find(function(c){ return c.id===targetChurchId; }) : null;
+    const churchName = pickedChurch ? (pickedChurch.name || '(unnamed church)') : ((state.church && state.church.name) || state.profile.churchName || 'your church');
+
+    const mine = (state.myAssignments||[]).slice();
+    const roster = (state.churchRoster||[]).slice().sort(function(a,b){
+      const an = directoryEntry(a.uid) ? (directoryEntry(a.uid).displayName||'') : '';
+      const bn = directoryEntry(b.uid) ? (directoryEntry(b.uid).displayName||'') : '';
+      return an.localeCompare(bn);
+    });
+    const churchList = (state.churchAssignments||[]).slice();
+
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="teamScheduleBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Team Schedule</p>' +
+        '<p class="landing-sub">See when you&rsquo;re serving, or build out the schedule for your church&rsquo;s worship team.</p>' +
+      '</div>' +
+      (canManage ? (
+        '<div class="mode-switch">' +
+          '<button class="'+(teamScheduleTab==='mine'?'active':'')+'" id="tsTabMine">MY ASSIGNMENTS</button>' +
+          '<button class="'+(teamScheduleTab==='manage'?'active':'')+'" id="tsTabManage">MANAGE SCHEDULE</button>' +
+        '</div>'
+      ) : '') +
+      (teamScheduleTab === 'manage' && canManage ? (
+        '<div class="session-card">' +
+          (isAdminPicking ? (
+            '<div class="field"><label for="tsChurchSelect">CHURCH <span style="text-transform:none;font-weight:400;">(Admin &mdash; pick any church to manage its schedule remotely)</span></label><select id="tsChurchSelect">' +
+              '<option value="">(choose a church)</option>' +
+              (state.adminChurches||[]).slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).map(function(c){
+                return '<option value="'+escapeAttr(c.id)+'" '+(targetChurchId===c.id?'selected':'')+'>'+escapeHtml(c.name||'(unnamed)')+'</option>';
+              }).join('') +
+            '</select></div>'
+          ) : '') +
+          (!targetChurchId ? '<p class="hint">Pick a church above to view and manage its schedule.</p>' : (
+            '<p class="control-label uc" style="margin-bottom:10px;">Assignments &mdash; '+escapeHtml(churchName)+'</p>' +
+            (churchList.length ? ('<ul class="setlist-items">' + churchList.map(function(a){
+              const person = directoryEntry(a.assignedUid);
+              const name = person ? (person.displayName || a.assignedName || '(no name set)') : (a.assignedName || a.assignedUid);
+              const confirming = teamScheduleRemoveConfirmId === a.id;
+              return '<li class="setlist-item" style="flex-wrap:wrap;">' +
+                '<span class="setlist-title">'+escapeHtml(a.serviceDate)+' &mdash; '+escapeHtml(a.role)+' &mdash; '+escapeHtml(name)+
+                  ' <span class="pill" style="margin-left:6px;">'+teamScheduleStatusLabel(a.status)+'</span></span>' +
+                '<span class="setlist-controls" style="flex-wrap:wrap;gap:6px;">' +
+                  (confirming ? (
+                    '<span class="hint">Remove this assignment?</span>' +
+                    '<button type="button" class="icon-btn-sm" data-ts-remove-yes="'+escapeAttr(a.id)+'" style="width:auto;padding:0 8px;">YES, REMOVE</button>' +
+                    '<button type="button" class="icon-btn-sm" data-ts-remove-cancel="1" style="width:auto;padding:0 8px;">CANCEL</button>'
+                  ) : '<button type="button" class="icon-btn-sm" data-ts-remove-ask="'+escapeAttr(a.id)+'" style="width:auto;padding:0 8px;">REMOVE</button>') +
+                '</span></li>';
+            }).join('') + '</ul>') : '<p class="hint">Nothing scheduled yet &mdash; add the first assignment below.</p>')
+          )) +
+        '</div>' +
+        (targetChurchId ? (
+          '<div class="session-card">' +
+            '<p class="control-label uc" style="margin-bottom:10px;">Add An Assignment</p>' +
+            (!roster.length ? '<p class="hint">No one&rsquo;s on the Church Team roster yet &mdash; add people from the Church Team screen first.</p>' : (
+              '<div class="field-row">' +
+                '<div class="field"><label for="tsAddDate">DATE</label><input type="date" id="tsAddDate" value="'+escapeAttr(teamScheduleAddDate)+'"></div>' +
+                '<div class="field"><label for="tsAddRole">ROLE</label><input type="text" id="tsAddRole" value="'+escapeAttr(teamScheduleAddRole)+'" placeholder="e.g. Vocals, Keys, Drums, Sound"></div>' +
+              '</div>' +
+              '<div class="field"><label for="tsAddAssignee">WHO&rsquo;S SERVING</label><select id="tsAddAssignee">' +
+                '<option value="">(choose someone from the team)</option>' +
+                roster.map(function(r){
+                  const person = directoryEntry(r.uid);
+                  const name = person ? (person.displayName || '(no name set)') : r.uid;
+                  return '<option value="'+escapeAttr(r.uid)+'" '+(teamScheduleAddAssigneeUid===r.uid?'selected':'')+'>'+escapeHtml(name)+'</option>';
+                }).join('') +
+              '</select></div>' +
+              '<div class="field"><label for="tsAddNotes">NOTES (OPTIONAL)</label><input type="text" id="tsAddNotes" value="'+escapeAttr(teamScheduleAddNotes)+'" placeholder="e.g. Arrive 30 min early for sound check"></div>' +
+              '<button class="btn btn-primary btn-lg btn-block" id="tsAddBtn">ADD TO SCHEDULE</button>'
+            )) +
+          '</div>'
+        ) : '')
+      ) : (
+        '<div class="session-card">' +
+          '<p class="control-label uc" style="margin-bottom:10px;">Your Assignments</p>' +
+          (mine.length ? ('<ul class="setlist-items">' + mine.map(function(a){
+            return '<li class="setlist-item" style="flex-wrap:wrap;">' +
+              '<span class="setlist-title">'+escapeHtml(a.serviceDate)+' &mdash; '+escapeHtml(a.role)+
+                (a.notes ? ('<br><span class="hint">'+escapeHtml(a.notes)+'</span>') : '') +
+              '</span>' +
+              '<span class="setlist-controls" style="flex-wrap:wrap;gap:6px;">' +
+                '<span class="pill">'+teamScheduleStatusLabel(a.status)+'</span>' +
+                '<button type="button" class="icon-btn-sm '+(a.status==='confirmed'?'active':'')+'" data-ts-respond-confirm="'+escapeAttr(a.id)+'" style="width:auto;padding:0 8px;">CONFIRM</button>' +
+                '<button type="button" class="icon-btn-sm '+(a.status==='declined'?'active':'')+'" data-ts-respond-decline="'+escapeAttr(a.id)+'" style="width:auto;padding:0 8px;">DECLINE</button>' +
+              '</span></li>';
+          }).join('') + '</ul>') : '<p class="hint">Nothing on your schedule yet.</p>') +
+        '</div>'
+      ));
+    attachTeamScheduleHandlers();
+  }
+  function attachTeamScheduleHandlers(){
+    document.getElementById('teamScheduleBackBtn').addEventListener('click', function(){
+      stopMyAssignmentsWatch(); stopChurchAssignmentsWatch(); stopChurchRosterWatch(); stopDirectoryWatch(); stopAdminChurchesWatch();
+      teamScheduleTab = 'mine'; teamScheduleAddDate = ''; teamScheduleAddRole = ''; teamScheduleAddAssigneeUid = ''; teamScheduleAddNotes = ''; teamScheduleRemoveConfirmId = null;
+      adminChurchTeamChurchId = '';
+      state.view='landing'; render(); window.scrollTo(0,0);
+    });
+    const tabMine = document.getElementById('tsTabMine');
+    if(tabMine) tabMine.addEventListener('click', function(){ teamScheduleTab='mine'; render(); });
+    const tabManage = document.getElementById('tsTabManage');
+    if(tabManage) tabManage.addEventListener('click', function(){ teamScheduleTab='manage'; render(); });
+    const churchSelect = document.getElementById('tsChurchSelect');
+    if(churchSelect) churchSelect.addEventListener('change', function(e){
+      adminChurchTeamChurchId = e.target.value;
+      teamScheduleRemoveConfirmId = null;
+      startChurchRosterWatch();
+      startChurchAssignmentsWatch();
+      render();
+    });
+    const dateInput = document.getElementById('tsAddDate');
+    if(dateInput) dateInput.addEventListener('input', function(e){ teamScheduleAddDate = e.target.value; });
+    const roleInput = document.getElementById('tsAddRole');
+    if(roleInput) roleInput.addEventListener('input', function(e){ teamScheduleAddRole = e.target.value; });
+    const assigneeSelect = document.getElementById('tsAddAssignee');
+    if(assigneeSelect) assigneeSelect.addEventListener('change', function(e){ teamScheduleAddAssigneeUid = e.target.value; });
+    const notesInput = document.getElementById('tsAddNotes');
+    if(notesInput) notesInput.addEventListener('input', function(e){ teamScheduleAddNotes = e.target.value; });
+    const addBtn = document.getElementById('tsAddBtn');
+    if(addBtn) addBtn.addEventListener('click', function(){
+      const churchId = churchTeamTargetChurchId();
+      if(!churchId || !teamScheduleAddDate || !teamScheduleAddRole.trim() || !teamScheduleAddAssigneeUid){
+        showToast('Pick a date, a role, and who&rsquo;s serving first.'); return;
+      }
+      const person = directoryEntry(teamScheduleAddAssigneeUid);
+      const assignedName = person ? (person.displayName || teamScheduleAddAssigneeUid) : teamScheduleAddAssigneeUid;
+      addBtn.disabled = true;
+      addAssignment(churchId, teamScheduleAddDate, teamScheduleAddRole.trim(), teamScheduleAddAssigneeUid, assignedName, teamScheduleAddNotes.trim(), state.user.uid, (state.profile&&state.profile.displayName)||'')
+        .then(function(){
+          showToast('Added to the schedule.');
+          teamScheduleAddDate = ''; teamScheduleAddRole = ''; teamScheduleAddAssigneeUid = ''; teamScheduleAddNotes = '';
+          render();
+        })
+        .catch(function(){ showToast('Couldn&rsquo;t add that assignment &mdash; try again.'); addBtn.disabled = false; });
+    });
+    document.querySelectorAll('[data-ts-remove-ask]').forEach(function(btn){
+      btn.addEventListener('click', function(){ teamScheduleRemoveConfirmId = btn.getAttribute('data-ts-remove-ask'); render(); });
+    });
+    document.querySelectorAll('[data-ts-remove-cancel]').forEach(function(btn){
+      btn.addEventListener('click', function(){ teamScheduleRemoveConfirmId = null; render(); });
+    });
+    document.querySelectorAll('[data-ts-remove-yes]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-ts-remove-yes');
+        btn.disabled = true;
+        deleteAssignment(id).then(function(){ teamScheduleRemoveConfirmId = null; render(); })
+          .catch(function(){ showToast('Couldn&rsquo;t remove that assignment &mdash; try again.'); render(); });
+      });
+    });
+    document.querySelectorAll('[data-ts-respond-confirm]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        respondToAssignment(btn.getAttribute('data-ts-respond-confirm'), 'confirmed').catch(function(){ showToast('Couldn&rsquo;t save your response &mdash; try again.'); render(); });
+      });
+    });
+    document.querySelectorAll('[data-ts-respond-decline]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        respondToAssignment(btn.getAttribute('data-ts-respond-decline'), 'declined').catch(function(){ showToast('Couldn&rsquo;t save your response &mdash; try again.'); render(); });
+      });
+    });
+  }
+
   function renderAdminBetaForm(){
     return '<div class="field"><label for="adminBetaUserSearch">FIND BY NAME <span style="text-transform:none;font-weight:400;">(optional &mdash; or paste an Account ID below)</span></label>' +
         '<div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
@@ -5028,6 +5460,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           '</button>' +
           '<a class="btn btn-youtube" href="'+escapeAttr(song.youtube||youtubeSearchUrl(song.title))+'" target="_blank" rel="noopener">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round">'+icon('play')+'</svg>LEARN ON YOUTUBE</a>' +
+          // Practice Mode [2026-09-28, "BUILD THEM ALL NOW" batch 2] --
+          // gated identically to Play Mode just below (canUsePlayMode()),
+          // since practicing needs the exact same chords/transpose this
+          // screen's Play Mode already paywalls -- not a separate paid
+          // tier of its own.
+          (canUsePlayMode() ? '<button class="btn btn-ghost" id="practiceBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg>PRACTICE MODE</button>' : '') +
           (state.isEditor ? '<button class="btn btn-ghost" id="editSongBtn">EDIT SONG</button>' : '') +
         '</div>' +
       '</div>' +
@@ -5082,6 +5520,155 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(editSongBtn) editSongBtn.addEventListener('click', function(){
       editDraft = null; // always start the edit form fresh from this song's current data
       state.view='edit'; render(); window.scrollTo(0,0);
+    });
+    const practiceBtn = document.getElementById('practiceBtn');
+    if(practiceBtn) practiceBtn.addEventListener('click', function(){ state.view='practice'; render(); window.scrollTo(0,0); });
+  }
+
+  // ================================================== PRACTICE MODE
+  // [2026-09-28, "BUILD THEM ALL NOW" batch 2] Jared's "Practice Mode" idea
+  // from the launch deck: a distraction-free screen for a musician to work
+  // through a song at their own pace -- the same key transpose/text-size
+  // controls Play Mode already has, plus two things Play Mode doesn't:
+  // a metronome (so they can practice at the song's actual tempo) and
+  // hands-free autoscroll (so they can keep both hands on their
+  // instrument). Deliberately entirely client-side, no Firestore
+  // collection or firestore.rules change at all -- nothing here is shared
+  // or persisted between sessions or devices, matching how the existing
+  // transpose/text-size prefs are per-song, in-memory state too.
+  //
+  // 🔶 Not confirmed with Jared first: the metronome's timing is driven by
+  // a plain setInterval, not Web Audio's own scheduling clock -- accurate
+  // enough for a musician to practice roughly at tempo, but it WILL drift
+  // a little over a long stretch (browser timer throttling, especially on
+  // a backgrounded tab) the way a real metronome app's sample-accurate
+  // audio-clock scheduling wouldn't. Flagging this rather than silently
+  // shipping a metronome that quietly claims more precision than it has;
+  // worth revisiting with a proper lookahead scheduler if anyone practices
+  // long sessions against it and notices real drift.
+  let practiceBpm = 80;
+  let practiceMetronomeOn = false;
+  let practiceMetronomeTimer = null;
+  let practiceMetronomeAudioCtx = null;
+  let practiceScrollOn = false;
+  let practiceScrollSpeed = 5;
+  let practiceScrollTimer = null;
+  function stopPracticeMetronome(){
+    if(practiceMetronomeTimer){ clearInterval(practiceMetronomeTimer); practiceMetronomeTimer = null; }
+    practiceMetronomeOn = false;
+  }
+  function practiceMetronomeTick(){
+    // Web Audio is best-effort -- some browsers only allow an AudioContext
+    // to actually produce sound after a user gesture, which START
+    // METRONOME always is, so this should work in practice; if it doesn't
+    // (context creation blocked/unsupported), the visual pulse below still
+    // gives a silent-environment-friendly beat.
+    try{
+      if(!practiceMetronomeAudioCtx) practiceMetronomeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = practiceMetronomeAudioCtx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 1000;
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.08);
+    }catch(e){ /* no audio -- the visual pulse below still ticks */ }
+    const dot = document.getElementById('practiceBeatDot');
+    if(dot){
+      dot.classList.add('pulse');
+      setTimeout(function(){ if(dot) dot.classList.remove('pulse'); }, 120);
+    }
+  }
+  function startPracticeMetronome(){
+    stopPracticeMetronome();
+    practiceMetronomeOn = true;
+    practiceMetronomeTimer = setInterval(practiceMetronomeTick, 60000 / practiceBpm);
+    practiceMetronomeTick();
+  }
+  function stopPracticeScroll(){
+    if(practiceScrollTimer){ clearInterval(practiceScrollTimer); practiceScrollTimer = null; }
+    practiceScrollOn = false;
+  }
+  function startPracticeScroll(){
+    stopPracticeScroll();
+    practiceScrollOn = true;
+    practiceScrollTimer = setInterval(function(){ window.scrollBy(0, Math.max(1, practiceScrollSpeed / 2)); }, 60);
+  }
+  function renderPractice(){
+    const song = state.library.find(function(s){ return s.id===state.songId; });
+    if(!song){ state.view='list'; return render(); }
+    // Defensive snap-back, same pattern as renderDetail()'s own Play Mode
+    // guard just above -- if paid access is ever lost while this screen is
+    // still open, bounce back to the song rather than leaving a paid
+    // screen reachable to someone who no longer qualifies.
+    if(!canUsePlayMode()){ state.view='detail'; return render(); }
+    const steps = state.transpose[song.id] || 0;
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="practiceBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK TO SONG</button></div>' +
+      '<div class="hymn-header"><p class="hymn-title">'+escapeHtml(song.title)+'</p><p class="hymn-author">Practice Mode &middot; Key '+transposeKeyLabel(song.key, steps)+'</p></div>' +
+      '<div class="control-bar">' +
+        '<div class="control-group"><span class="control-label uc">Text Size</span><div class="stepper">' +
+          '<button id="practiceFontDown" aria-label="Smaller text">&minus;</button><span class="val">'+Math.round(state.scale*100)+'%</span><button id="practiceFontUp" aria-label="Larger text">+</button></div></div>' +
+        '<div class="control-group"><span class="control-label uc">Key</span><div class="stepper">' +
+          '<button id="practiceKeyDown" aria-label="Transpose down a half step">&minus;</button><span class="val">'+transposeKeyLabel(song.key, steps)+'</span><button id="practiceKeyUp" aria-label="Transpose up a half step">+</button></div></div>' +
+      '</div>' +
+      '<div class="session-card">' +
+        '<p class="control-label uc" style="margin-bottom:10px;">Metronome</p>' +
+        '<div class="stepper"><button id="practiceBpmDown" aria-label="Slower">&minus;</button><span class="val">'+practiceBpm+' BPM</span><button id="practiceBpmUp" aria-label="Faster">+</button></div>' +
+        '<button class="btn '+(practiceMetronomeOn?'btn-primary':'btn-ghost')+'" id="practiceMetroToggle" style="margin-top:10px;">'+(practiceMetronomeOn?'STOP METRONOME':'START METRONOME')+'</button>' +
+        ' <span id="practiceBeatDot" class="practice-beat-dot" aria-hidden="true"></span>' +
+      '</div>' +
+      '<div class="session-card">' +
+        '<p class="control-label uc" style="margin-bottom:10px;">Autoscroll</p>' +
+        '<div class="stepper"><button id="practiceScrollDown" aria-label="Slower">&minus;</button><span class="val">Speed '+practiceScrollSpeed+'</span><button id="practiceScrollUp" aria-label="Faster">+</button></div>' +
+        '<button class="btn '+(practiceScrollOn?'btn-primary':'btn-ghost')+'" id="practiceScrollToggle" style="margin-top:10px;">'+(practiceScrollOn?'STOP AUTOSCROLL':'START AUTOSCROLL')+'</button>' +
+      '</div>' +
+      '<div class="lyric-sheet play" style="--scale:'+state.scale+'">' +
+        (song.sections||[]).map(function(sec){
+          return '<div class="verse-block '+sec.type+'"><p class="section-label uc type-'+sec.type+'">'+sec.label+'</p>' +
+            sec.lines.map(function(l){ return '<p class="lyric-line">'+renderChordLyricLine(l, steps)+'</p>'; }).join('') +
+          '</div>';
+        }).join('') +
+      '</div>';
+    attachPracticeHandlers(song);
+  }
+  function attachPracticeHandlers(song){
+    document.getElementById('practiceBackBtn').addEventListener('click', function(){
+      stopPracticeMetronome(); stopPracticeScroll();
+      state.view='detail'; render(); window.scrollTo(0,0);
+    });
+    document.getElementById('practiceFontDown').addEventListener('click', function(){ state.scale = Math.max(0.8, +(state.scale-0.1).toFixed(2)); safeSet('cv:scale', state.scale); render(); });
+    document.getElementById('practiceFontUp').addEventListener('click', function(){ state.scale = Math.min(1.6, +(state.scale+0.1).toFixed(2)); safeSet('cv:scale', state.scale); render(); });
+    document.getElementById('practiceKeyDown').addEventListener('click', function(){ state.transpose[song.id] = (state.transpose[song.id]||0) - 1; render(); });
+    document.getElementById('practiceKeyUp').addEventListener('click', function(){ state.transpose[song.id] = (state.transpose[song.id]||0) + 1; render(); });
+    document.getElementById('practiceBpmDown').addEventListener('click', function(){
+      practiceBpm = Math.max(30, practiceBpm - 5);
+      if(practiceMetronomeOn) startPracticeMetronome();
+      render();
+    });
+    document.getElementById('practiceBpmUp').addEventListener('click', function(){
+      practiceBpm = Math.min(240, practiceBpm + 5);
+      if(practiceMetronomeOn) startPracticeMetronome();
+      render();
+    });
+    document.getElementById('practiceMetroToggle').addEventListener('click', function(){
+      if(practiceMetronomeOn) stopPracticeMetronome(); else startPracticeMetronome();
+      render();
+    });
+    document.getElementById('practiceScrollDown').addEventListener('click', function(){
+      practiceScrollSpeed = Math.max(1, practiceScrollSpeed - 1);
+      if(practiceScrollOn) startPracticeScroll();
+      render();
+    });
+    document.getElementById('practiceScrollUp').addEventListener('click', function(){
+      practiceScrollSpeed = Math.min(10, practiceScrollSpeed + 1);
+      if(practiceScrollOn) startPracticeScroll();
+      render();
+    });
+    document.getElementById('practiceScrollToggle').addEventListener('click', function(){
+      if(practiceScrollOn) stopPracticeScroll(); else startPracticeScroll();
+      render();
     });
   }
 
@@ -6513,6 +7100,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   let spiritualGrowthJournalDraft = ''; // shared textarea value for whichever journal composer is currently on screen
   let spiritualGrowthJournalDraftTopicKey = null; // null while the draft belongs to the Journal tab's own open box; a topic key while it belongs to that topic's "add a reflection" box -- keeps the two composers from clobbering each other's typed-but-unsaved text on re-render
 
+  // Testimony Wall / Prayer Wall / Bible Reading Plan draft state
+  // ["BUILD THEM ALL NOW" batch 1, 2026-09-28] -- 'testimonies', 'prayer-
+  // wall' and 'reading-plan' are three more spiritualGrowthScreen values
+  // (see renderSpiritualGrowthBody()/attachSpiritualGrowthBodyHandlers()),
+  // reached from three more renderSpiritualGrowthHome() NAV cards, same
+  // hub-and-drill-down shape as Path/Journal above.
+  let testimonyComposerOpen = false;
+  let testimonyDraftTitle = '';
+  let testimonyDraftText = '';
+  let prayerComposerOpen = false;
+  let prayerDraftText = '';
+  let prayerDraftOnBehalf = '';
+  let prayerDraftIsPrivate = false;
+  let prayerRequestRemoveConfirmId = null; // tap-to-confirm delete, same pattern as churchTeamRemoveConfirmUid
+
   const SPIRITUAL_GROWTH_INVITATION = {
     title: 'Would You Like to Know God Personally?',
     blocks: [
@@ -6633,8 +7235,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     spiritualGrowthJournalDraft = '';
     spiritualGrowthJournalDraftTopicKey = null;
     spiritualGrowthHistory = [];
+    testimonyComposerOpen = false; testimonyDraftTitle = ''; testimonyDraftText = '';
+    prayerComposerOpen = false; prayerDraftText = ''; prayerDraftOnBehalf = ''; prayerDraftIsPrivate = false; prayerRequestRemoveConfirmId = null;
     startSpiritualGrowthWatch();
     startJournalWatch();
+    startTestimoniesWatch();
+    startPrayerWallWatch();
+    startReadingPlanWatch();
+    startDirectoryWatch(); // Testimony Wall/Prayer Wall show OTHER people's avatars -- see personAvatar()'s own comment on why this needs to be started explicitly, same as Sermons/Messages/Admin already do
     state.view = 'spiritual-growth'; render(); window.scrollTo(0,0);
   }
   function goToSgScreen(screen, topicKey){
@@ -6643,6 +7251,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     spiritualGrowthActiveTopicKey = topicKey || null;
     spiritualGrowthJournalDraft = '';
     spiritualGrowthJournalDraftTopicKey = null;
+    testimonyComposerOpen = false; prayerComposerOpen = false; prayerRequestRemoveConfirmId = null;
     render(); window.scrollTo(0,0);
   }
   // Pops one step off spiritualGrowthHistory (one screen back); with
@@ -6656,6 +7265,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       spiritualGrowthActiveTopicKey = prev.topicKey || null;
       spiritualGrowthJournalDraft = '';
       spiritualGrowthJournalDraftTopicKey = null;
+      testimonyComposerOpen = false; prayerComposerOpen = false; prayerRequestRemoveConfirmId = null;
       render(); window.scrollTo(0,0);
     } else {
       state.view = 'landing'; render(); window.scrollTo(0,0);
@@ -6678,6 +7288,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(spiritualGrowthScreen === 'path') return renderSpiritualGrowthPath();
     if(spiritualGrowthScreen === 'topic') return renderSpiritualGrowthTopic();
     if(spiritualGrowthScreen === 'journal') return renderSpiritualGrowthJournal();
+    if(spiritualGrowthScreen === 'testimonies') return renderSpiritualGrowthTestimonies();
+    if(spiritualGrowthScreen === 'prayer-wall') return renderSpiritualGrowthPrayerWall();
+    if(spiritualGrowthScreen === 'reading-plan') return renderSpiritualGrowthReadingPlan();
     return renderSpiritualGrowthHome();
   }
   function renderSpiritualGrowthHome(){
@@ -6700,7 +7313,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       { screen:'invitation', title:'The Gospel Invitation', desc: alreadyProfessed ? 'Revisit the gospel message, any time you’d like.' : 'Would you like to know God personally?' },
       { screen:'confirmation', title:'You Can Be Sure', desc:'What just happened, and why you can be sure of it.' },
       { screen:'path', title:'Discipleship Path', desc: pathAllDone ? 'You’ve read every topic here -- growth keeps going below.' : 'Milestone topics for a new believer, at your own pace.' },
-      { screen:'journal', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' }
+      { screen:'journal', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' },
+      { screen:'reading-plan', title:'Bible Reading Plan', desc:'A daily reading schedule with a streak counter, in KJV or Tagalog.' },
+      { screen:'testimonies', title:'Testimony Wall', desc:'See how God is working in this congregation, and share your own.' },
+      { screen:'prayer-wall', title:'Prayer Wall', desc:'Post a request, or let someone know you’re praying for theirs.' }
     ];
     return (
       '<div class="about-section-card">' +
@@ -6855,6 +7471,315 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '</div>'
     );
   }
+  // ========================================================= TESTIMONY WALL
+  // ["BUILD THEM ALL NOW" batch 1, 2026-09-28] See firestore.rules'
+  // testimonies/{testimonyId} block and the data layer's matching comment
+  // for the full design -- public, cross-church, "Amen" reuses the
+  // generic likes mechanism (toggleLike('testimonies', ...)/isLikedByMe/
+  // itemLikeCount, the exact same helpers Fellowship posts already use).
+  function renderSpiritualGrowthTestimonies(){
+    const list = state.testimonies || [];
+    return (
+      '<div class="about-section-card">' +
+        '<p class="about-section-title">Testimony Wall</p>' +
+        '<p class="about-section-intro">A living record of what God is doing among us &mdash; separate from the general Fellowship feed. Share a baptism story, an answered prayer, a turning point.</p>' +
+        (testimonyComposerOpen ? renderTestimonyComposer() :
+          '<button type="button" class="btn btn-primary" id="newTestimonyBtn" style="width:100%;max-width:360px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>SHARE A TESTIMONY</button>') +
+        (list.length ?
+          '<div class="about-feature-list" style="margin-top:22px;">' +
+            list.map(function(t){
+              const mine = state.user && t.authorUid === state.user.uid;
+              const liked = isLikedByMe('testimonies', t.id);
+              const count = itemLikeCount('testimonies', t);
+              return '<div class="about-feature-item" style="align-items:flex-start;">' +
+                personAvatar(t.authorUid, 36) +
+                '<div style="flex:1;min-width:0;">' +
+                  (t.title ? '<p style="margin:0 0 4px;font-weight:700;">'+escapeHtml(t.title)+'</p>' : '') +
+                  '<p class="devotional-reader-text" style="margin:0;">'+escapeHtml(t.text)+'</p>' +
+                  '<p class="hint" style="margin:6px 0 0;">'+escapeHtml(t.authorName||'Someone')+' &middot; '+timeAgo(toMillis(t.createdAt))+'</p>' +
+                  '<div style="display:flex;gap:14px;align-items:center;margin-top:8px;">' +
+                    '<button type="button" class="switch-account" data-testimony-amen="'+escapeAttr(t.id)+'"'+(liked?' style="font-weight:700;"':'')+'>'+(liked?'🙌 AMEN':'🙌 SAY AMEN')+(count?(' &middot; '+count):'')+'</button>' +
+                    (mine ? '<button type="button" class="switch-account" data-testimony-delete="'+escapeAttr(t.id)+'">DELETE</button>' : '') +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+            }).join('') +
+          '</div>'
+        : '<p class="hint" style="margin-top:18px;">No testimonies shared yet &mdash; be the first.</p>') +
+      '</div>'
+    );
+  }
+  function renderTestimonyComposer(){
+    return '<div class="signin-card" style="margin-top:14px;text-align:left;">' +
+      '<div class="field"><label for="testimonyTitleInput">TITLE (OPTIONAL)</label><input type="text" id="testimonyTitleInput" placeholder="e.g. Answered prayer" value="'+escapeAttr(testimonyDraftTitle)+'"></div>' +
+      '<div class="field"><label for="testimonyTextInput">YOUR TESTIMONY</label><textarea id="testimonyTextInput" rows="5" placeholder="Share what God has done...">'+escapeHtml(testimonyDraftText)+'</textarea></div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button class="btn btn-primary" id="saveTestimonyBtn">SHARE</button>' +
+        '<button class="btn btn-ghost" id="cancelTestimonyBtn">CANCEL</button>' +
+      '</div>' +
+    '</div>';
+  }
+  function attachSpiritualGrowthTestimoniesHandlers(){
+    const newBtn = document.getElementById('newTestimonyBtn');
+    if(newBtn) newBtn.addEventListener('click', function(){ testimonyComposerOpen = true; testimonyDraftTitle=''; testimonyDraftText=''; render(); });
+    const titleEl = document.getElementById('testimonyTitleInput');
+    if(titleEl) titleEl.addEventListener('input', function(e){ testimonyDraftTitle = e.target.value; });
+    const textEl = document.getElementById('testimonyTextInput');
+    if(textEl) textEl.addEventListener('input', function(e){ testimonyDraftText = e.target.value; });
+    const cancelBtn = document.getElementById('cancelTestimonyBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', function(){ testimonyComposerOpen = false; render(); });
+    const saveBtn = document.getElementById('saveTestimonyBtn');
+    if(saveBtn) saveBtn.addEventListener('click', function(){
+      const text = (testimonyDraftText||'').trim();
+      if(!text){ showToast('Write your testimony first.'); return; }
+      saveBtn.disabled = true;
+      addTestimony(state.user.uid, currentDisplayName()||'Someone', (testimonyDraftTitle||'').trim(), text).then(function(){
+        testimonyComposerOpen = false; testimonyDraftTitle=''; testimonyDraftText='';
+        showToast('Shared to the Testimony Wall.');
+        render();
+      }).catch(function(e){ showToast('Couldn&rsquo;t share that &mdash; try again.'+describeError(e)); saveBtn.disabled = false; });
+    });
+    document.querySelectorAll('[data-testimony-amen]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-testimony-amen');
+        const t = (state.testimonies||[]).find(function(x){ return x.id === id; });
+        toggleLike('testimonies', id, t ? t.authorUid : null);
+      });
+    });
+    document.querySelectorAll('[data-testimony-delete]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        deleteTestimony(btn.getAttribute('data-testimony-delete')).catch(function(e){ showToast('Couldn&rsquo;t delete that &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+  }
+
+  // =========================================================== PRAYER WALL
+  // ["BUILD THEM ALL NOW" batch 1, 2026-09-28] See firestore.rules'
+  // prayerRequests/{requestId} block and the data layer's matching comment
+  // for the full design. "Praying for this" also reuses the generic likes
+  // mechanism (kind:'prayerRequests') -- the UI just labels it differently.
+  function renderSpiritualGrowthPrayerWall(){
+    const list = prayerWallRequests();
+    return (
+      '<div class="about-section-card">' +
+        '<p class="about-section-title">Prayer Wall</p>' +
+        '<p class="about-section-intro">Post a request &mdash; for yourself or on someone else&rsquo;s behalf &mdash; and others can tap &ldquo;praying for this&rdquo; to let you know you&rsquo;re not carrying it alone. Keep it private to just you, or share it with the whole church.</p>' +
+        (prayerComposerOpen ? renderPrayerComposer() :
+          '<button type="button" class="btn btn-primary" id="newPrayerRequestBtn" style="width:100%;max-width:360px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>POST A PRAYER REQUEST</button>') +
+        (list.length ?
+          '<div class="about-feature-list" style="margin-top:22px;">' +
+            list.map(function(r){
+              const mine = state.user && r.authorUid === state.user.uid;
+              const liked = isLikedByMe('prayerRequests', r.id);
+              const count = itemLikeCount('prayerRequests', r);
+              const answered = r.status === 'answered';
+              const confirming = prayerRequestRemoveConfirmId === r.id;
+              return '<div class="about-feature-item" style="align-items:flex-start;">' +
+                personAvatar(r.authorUid, 36) +
+                '<div style="flex:1;min-width:0;">' +
+                  (answered ? '<p class="hint" style="margin:0 0 4px;color:var(--accent, #6B1220);font-weight:700;">ANSWERED ✓</p>' : '') +
+                  '<p class="devotional-reader-text" style="margin:0;">'+escapeHtml(r.requestText)+'</p>' +
+                  (r.onBehalfOf ? '<p class="hint" style="margin:6px 0 0;">On behalf of '+escapeHtml(r.onBehalfOf)+'</p>' : '') +
+                  (answered && r.answeredNote ? '<p class="hint" style="margin:6px 0 0;font-style:italic;">'+escapeHtml(r.answeredNote)+'</p>' : '') +
+                  '<p class="hint" style="margin:6px 0 0;">'+escapeHtml(r.authorName||'Someone')+' &middot; '+timeAgo(toMillis(r.createdAt))+(r.isPrivate?' &middot; Private to you':'')+'</p>' +
+                  '<div style="display:flex;gap:14px;align-items:center;margin-top:8px;flex-wrap:wrap;">' +
+                    (!r.isPrivate ? '<button type="button" class="switch-account" data-prayer-pray="'+escapeAttr(r.id)+'"'+(liked?' style="font-weight:700;"':'')+'>'+(liked?'🙏 PRAYING':'🙏 I&rsquo;M PRAYING')+(count?(' &middot; '+count):'')+'</button>' : '') +
+                    (mine && !answered ? '<button type="button" class="switch-account" data-prayer-mark-answered="'+escapeAttr(r.id)+'">MARK ANSWERED</button>' : '') +
+                    (mine ? ('<button type="button" class="switch-account" data-prayer-toggle-private="'+escapeAttr(r.id)+'">'+(r.isPrivate?'SHARE WITH CHURCH':'MAKE PRIVATE')+'</button>') : '') +
+                    (mine ? (confirming ?
+                      ('<span class="hint">Delete this request?</span><button type="button" class="switch-account" data-prayer-delete-yes="'+escapeAttr(r.id)+'">YES, DELETE</button><button type="button" class="switch-account" data-prayer-delete-cancel="1">CANCEL</button>')
+                      : '<button type="button" class="switch-account" data-prayer-delete-ask="'+escapeAttr(r.id)+'">DELETE</button>') : '') +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+            }).join('') +
+          '</div>'
+        : '<p class="hint" style="margin-top:18px;">No prayer requests yet.</p>') +
+      '</div>'
+    );
+  }
+  function renderPrayerComposer(){
+    return '<div class="signin-card" style="margin-top:14px;text-align:left;">' +
+      '<div class="field"><label for="prayerTextInput">YOUR REQUEST</label><textarea id="prayerTextInput" rows="4" placeholder="What would you like prayer for?">'+escapeHtml(prayerDraftText)+'</textarea></div>' +
+      '<div class="field"><label for="prayerOnBehalfInput">ON BEHALF OF (OPTIONAL)</label><input type="text" id="prayerOnBehalfInput" placeholder="e.g. My father" value="'+escapeAttr(prayerDraftOnBehalf)+'"></div>' +
+      '<label class="check-row" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;"><input type="checkbox" id="prayerPrivateInput" '+(prayerDraftIsPrivate?'checked':'')+'> <span>Keep this private to just me</span></label>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button class="btn btn-primary" id="savePrayerRequestBtn">POST</button>' +
+        '<button class="btn btn-ghost" id="cancelPrayerRequestBtn">CANCEL</button>' +
+      '</div>' +
+    '</div>';
+  }
+  function attachSpiritualGrowthPrayerWallHandlers(){
+    const newBtn = document.getElementById('newPrayerRequestBtn');
+    if(newBtn) newBtn.addEventListener('click', function(){ prayerComposerOpen = true; prayerDraftText=''; prayerDraftOnBehalf=''; prayerDraftIsPrivate=false; render(); });
+    const textEl = document.getElementById('prayerTextInput');
+    if(textEl) textEl.addEventListener('input', function(e){ prayerDraftText = e.target.value; });
+    const onBehalfEl = document.getElementById('prayerOnBehalfInput');
+    if(onBehalfEl) onBehalfEl.addEventListener('input', function(e){ prayerDraftOnBehalf = e.target.value; });
+    const privateEl = document.getElementById('prayerPrivateInput');
+    if(privateEl) privateEl.addEventListener('change', function(e){ prayerDraftIsPrivate = e.target.checked; });
+    const cancelBtn = document.getElementById('cancelPrayerRequestBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', function(){ prayerComposerOpen = false; render(); });
+    const saveBtn = document.getElementById('savePrayerRequestBtn');
+    if(saveBtn) saveBtn.addEventListener('click', function(){
+      const text = (prayerDraftText||'').trim();
+      if(!text){ showToast('Write your request first.'); return; }
+      saveBtn.disabled = true;
+      addPrayerRequest(state.user.uid, currentDisplayName()||'Someone', text, (prayerDraftOnBehalf||'').trim(), prayerDraftIsPrivate).then(function(){
+        prayerComposerOpen = false; prayerDraftText=''; prayerDraftOnBehalf=''; prayerDraftIsPrivate=false;
+        showToast('Posted to the Prayer Wall.');
+        render();
+      }).catch(function(e){ showToast('Couldn&rsquo;t post that &mdash; try again.'+describeError(e)); saveBtn.disabled = false; });
+    });
+    document.querySelectorAll('[data-prayer-pray]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-prayer-pray');
+        const r = prayerWallRequests().find(function(x){ return x.id === id; });
+        toggleLike('prayerRequests', id, r ? r.authorUid : null);
+      });
+    });
+    document.querySelectorAll('[data-prayer-mark-answered]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        markPrayerRequestAnswered(btn.getAttribute('data-prayer-mark-answered'), null).catch(function(e){ showToast('Couldn&rsquo;t update that &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+    document.querySelectorAll('[data-prayer-toggle-private]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-prayer-toggle-private');
+        const r = prayerWallRequests().find(function(x){ return x.id === id; });
+        if(!r) return;
+        btn.disabled = true;
+        setPrayerRequestPrivacy(id, !r.isPrivate).catch(function(e){ showToast('Couldn&rsquo;t update that &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+    document.querySelectorAll('[data-prayer-delete-ask]').forEach(function(btn){
+      btn.addEventListener('click', function(){ prayerRequestRemoveConfirmId = btn.getAttribute('data-prayer-delete-ask'); render(); });
+    });
+    document.querySelectorAll('[data-prayer-delete-cancel]').forEach(function(btn){
+      btn.addEventListener('click', function(){ prayerRequestRemoveConfirmId = null; render(); });
+    });
+    document.querySelectorAll('[data-prayer-delete-yes]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        deletePrayerRequest(btn.getAttribute('data-prayer-delete-yes')).then(function(){ prayerRequestRemoveConfirmId = null; render(); })
+          .catch(function(e){ showToast('Couldn&rsquo;t delete that &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+  }
+
+  // ==================================================== BIBLE READING PLAN
+  // ["BUILD THEM ALL NOW" batch 1, 2026-09-28] The 365-day PLAN itself
+  // (READING_PLAN, imported at the top of this file) is static and
+  // language-agnostic -- {book,chapter} refs read against whichever of
+  // kjv.json/tagalog-bible.json the reader currently has selected (see
+  // activeBibleData()/bibleTranslation near the Bible section above), so
+  // "Available in either KJV or Tagalog" needs zero extra content here.
+  // Only per-person PROGRESS lives in Firestore (readingPlanProgress/{uid}
+  // -- see that data-layer function's comment). Deliberately self-reported
+  // ("mark today's reading done"), not auto-detected from actually opening
+  // the Bible screen -- simpler, and matches how every other checkbox-style
+  // progress marker in this app already works (Discipleship Path's "MARK AS
+  // READ", the Journal).
+  function readingPlanDateKey(d){
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  // Smallest day number (1-365) not yet marked done -- lets someone who
+  // fell behind just pick back up at the day they actually left off,
+  // rather than being pushed to "today's calendar date" and losing any
+  // days they skipped.
+  function readingPlanCurrentDay(){
+    const done = new Set((state.readingPlanProgress && state.readingPlanProgress.completedDayNumbers) || []);
+    for(let n=1; n<=READING_PLAN.days.length; n++){ if(!done.has(n)) return n; }
+    return READING_PLAN.days.length; // every day done -- show the last day rather than falling off the end
+  }
+  // Current + longest streak, computed client-side from completedDates
+  // (plain local YYYY-MM-DD strings) -- never stored pre-computed, so it
+  // can never drift out of sync with the actual dates on file. "Current"
+  // counts backward from TODAY, but treats yesterday as an equally valid
+  // anchor -- so the streak doesn't look broken before someone has even
+  // had a chance to do today's reading yet (the "gentle nudge," not a
+  // punitive reset the moment a day ticks over).
+  function readingPlanStreak(){
+    const dates = ((state.readingPlanProgress && state.readingPlanProgress.completedDates) || []).slice().sort();
+    if(!dates.length) return { current: 0, longest: 0 };
+    const dateSet = new Set(dates);
+    function dayBefore(key){
+      const d = new Date(key + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      return readingPlanDateKey(d);
+    }
+    function dayAfter(key){
+      const d = new Date(key + 'T00:00:00');
+      d.setDate(d.getDate() + 1);
+      return readingPlanDateKey(d);
+    }
+    const today = readingPlanDateKey(new Date());
+    const anchor = dateSet.has(today) ? today : dayBefore(today);
+    let current = 0, cursor = anchor;
+    while(dateSet.has(cursor)){ current++; cursor = dayBefore(cursor); }
+    // Longest run anywhere in the history: walk the sorted, deduped list
+    // once -- a fresh run starts whenever a date isn't the day right after
+    // the previous one on file.
+    let longest = 0, run = 0, prevKey = null;
+    dates.forEach(function(key){
+      run = (prevKey && dayAfter(prevKey) === key) ? run + 1 : 1;
+      longest = Math.max(longest, run);
+      prevKey = key;
+    });
+    return { current: current, longest: Math.max(longest, current) };
+  }
+  function renderSpiritualGrowthReadingPlan(){
+    const dayNum = readingPlanCurrentDay();
+    const dayRefs = READING_PLAN.days[dayNum-1] || [];
+    const done = new Set((state.readingPlanProgress && state.readingPlanProgress.completedDayNumbers) || []);
+    const todayDone = done.has(dayNum);
+    const streak = readingPlanStreak();
+    const doneCount = done.size;
+    const readingLine = dayRefs.map(function(r){ return bibleDisplayBookName(r.book) + ' ' + r.chapter; }).join(', ');
+    return (
+      '<div class="about-section-card">' +
+        '<p class="about-section-title">Bible Reading Plan</p>' +
+        '<p class="about-section-intro">A structured read-through-the-Bible tracker &mdash; '+READING_PLAN.days.length+' days, in either KJV or Tagalog. A plan turns good intentions into a habit.</p>' +
+        '<div style="display:flex;gap:24px;justify-content:center;margin:10px 0 22px;flex-wrap:wrap;">' +
+          '<div style="text-align:center;"><p class="display" style="margin:0;font-size:32px;">'+streak.current+'</p><p class="hint">Day streak</p></div>' +
+          '<div style="text-align:center;"><p class="display" style="margin:0;font-size:32px;">'+doneCount+'/'+READING_PLAN.days.length+'</p><p class="hint">Days read</p></div>' +
+        '</div>' +
+        '<div class="signin-card" style="text-align:center;">' +
+          '<p class="hint" style="margin:0 0 6px;">DAY '+dayNum+' OF '+READING_PLAN.days.length+'</p>' +
+          '<p class="about-section-title" style="font-size:22px;">'+escapeHtml(readingLine)+'</p>' +
+          '<div style="display:flex;flex-direction:column;gap:10px;align-items:center;margin-top:16px;">' +
+            '<button type="button" class="btn btn-ghost" id="rpOpenBibleBtn" style="width:100%;max-width:340px;">OPEN IN THE BIBLE</button>' +
+            '<button type="button" class="btn'+(todayDone?'':' btn-primary')+'" id="rpMarkDoneBtn" style="width:100%;max-width:340px;">'+(todayDone?'COMPLETED ✓ (tap to un-mark)':'MARK TODAY’S READING DONE')+'</button>' +
+          '</div>' +
+          (!doneCount ? '<p class="hint" style="margin-top:14px;">Just getting started &mdash; every plan begins with day one.</p>' :
+            (streak.current === 0 ? '<p class="hint" style="margin-top:14px;">A day got missed &mdash; no worries, pick back up today.</p>' : '')) +
+        '</div>' +
+      '</div>'
+    );
+  }
+  function attachSpiritualGrowthReadingPlanHandlers(){
+    const openBibleBtn = document.getElementById('rpOpenBibleBtn');
+    if(openBibleBtn) openBibleBtn.addEventListener('click', function(){
+      const dayNum = readingPlanCurrentDay();
+      const dayRefs = READING_PLAN.days[dayNum-1] || [];
+      if(!dayRefs.length) return;
+      bibleBook = dayRefs[0].book;
+      bibleChapter = dayRefs[0].chapter;
+      loadActiveBibleData();
+      state.view = 'bible'; render(); window.scrollTo(0,0);
+    });
+    const markDoneBtn = document.getElementById('rpMarkDoneBtn');
+    if(markDoneBtn) markDoneBtn.addEventListener('click', function(){
+      const dayNum = readingPlanCurrentDay();
+      markDoneBtn.disabled = true;
+      markReadingPlanDayDone(state.user.uid, dayNum, readingPlanDateKey(new Date())).catch(function(e){
+        showToast('Couldn&rsquo;t save that &mdash; try again.'+describeError(e));
+      }).then(function(){ markDoneBtn.disabled = false; });
+    });
+  }
+
   function attachSpiritualGrowthBodyHandlers(){
     document.querySelectorAll('[data-sg-nav]').forEach(function(btn){
       btn.addEventListener('click', function(){ goToSgScreen(btn.getAttribute('data-sg-nav')); });
@@ -6864,6 +7789,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     else if(spiritualGrowthScreen === 'path') attachSpiritualGrowthPathHandlers();
     else if(spiritualGrowthScreen === 'topic') attachSpiritualGrowthTopicHandlers();
     else if(spiritualGrowthScreen === 'journal') attachSpiritualGrowthJournalHandlers();
+    else if(spiritualGrowthScreen === 'testimonies') attachSpiritualGrowthTestimoniesHandlers();
+    else if(spiritualGrowthScreen === 'prayer-wall') attachSpiritualGrowthPrayerWallHandlers();
+    else if(spiritualGrowthScreen === 'reading-plan') attachSpiritualGrowthReadingPlanHandlers();
   }
   function attachSpiritualGrowthInvitationHandlers(){
     const professBtn = document.getElementById('sgProfessBtn');
@@ -7208,6 +8136,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   let sermonShareOpenId = null;
   let sermonShareQuery = '';
 
+  // Sermon Archive publish panel [2026-09-28, "BUILD THEM ALL NOW" batch 3]
+  // -- one-at-a-time inline panel on a sermon's own card, same convention as
+  // sermonShareOpenId just above. Publishing writes archived/archivedAt
+  // immediately (via the plain, already-existing updateSermon()) so a host
+  // isn't blocked on filling in the optional date/summary fields first;
+  // both fields can be added or edited afterward from the same panel
+  // without unpublishing and republishing.
+  let sermonArchivePanelOpenId = null;
+  let sermonArchiveDateDraft = '';
+  let sermonArchiveSummaryDraft = '';
+
   function sermonShareLink(id){
     return window.location.origin + window.location.pathname + '?sermon=' + encodeURIComponent(id);
   }
@@ -7270,6 +8209,28 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         render();
       });
     });
+  }
+
+  // Sermon Archive publish panel [2026-09-28, "BUILD THEM ALL NOW" batch 3]
+  // -- opens on a sermon's own card (see renderSermons() above), same
+  // one-at-a-time convention as renderSermonSharePanel(). Both fields are
+  // deliberately optional plain text: `dateGiven` is free text rather than
+  // a date picker (this app has no date-input UI convention anywhere else
+  // to match, and "the Sunday before Easter" is a perfectly reasonable
+  // thing for a pastor to type here); `summary` is a short blurb shown on
+  // the public archive card so browsers can tell two similarly-titled
+  // sermons apart without opening either one.
+  function renderSermonArchivePanel(s){
+    return '<p class="control-label uc" style="margin-bottom:10px;">'+(s.archived?'Archive Details':'Publish &ldquo;'+escapeHtml(s.title||'this sermon')+'&rdquo; to the Sermon Archive')+'</p>' +
+      (s.archived ? '<p class="hint" style="margin-bottom:10px;">Anyone can browse this sermon on the public Sermon Archive screen &mdash; no sign-in needed.</p>' : '<p class="hint" style="margin-bottom:10px;">Publishing makes this sermon visible to your whole congregation on the public Sermon Archive screen, for anyone to revisit later. You can remove it again anytime.</p>') +
+      '<div class="field"><label for="sermonArchiveDateInput">DATE PREACHED <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="sermonArchiveDateInput" placeholder="e.g. September 28, 2026" value="'+escapeAttr(sermonArchiveDateDraft)+'"></div>' +
+      '<div class="field"><label for="sermonArchiveSummaryInput">SHORT SUMMARY <span style="text-transform:none;font-weight:400;">(optional)</span></label><textarea id="sermonArchiveSummaryInput" rows="2" placeholder="A sentence or two about this sermon, shown on the archive card.">'+escapeHtml(sermonArchiveSummaryDraft)+'</textarea></div>' +
+      (s.archived ?
+        ('<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+          '<button type="button" class="btn btn-primary" data-save-archive-details="'+s.id+'">SAVE DETAILS</button>' +
+          '<button type="button" class="btn btn-ghost" data-unpublish-from-archive="'+s.id+'">REMOVE FROM ARCHIVE</button>' +
+        '</div>')
+      : ('<button type="button" class="btn btn-primary btn-block" data-publish-to-archive="'+s.id+'">PUBLISH TO ARCHIVE</button>'));
   }
 
   // =========================================================================
@@ -8101,16 +9062,18 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p class="display landing-greeting">Sermons</p>' +
         '<p class="landing-sub">Build a sermon ahead of time &mdash; title, point, and Bible-verse slides &mdash; then present it live alongside your songs from the Host Session screen.</p>' +
       '</div>' +
-      '<button class="btn btn-primary btn-lg btn-block" id="newSermonBtn" style="margin-bottom:22px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>NEW SERMON</button>' +
+      '<button class="btn btn-primary btn-lg btn-block" id="newSermonBtn" style="margin-bottom:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>NEW SERMON</button>' +
+      '<button class="btn btn-ghost btn-block" id="goSermonArchiveFromEditorBtn" style="margin-bottom:22px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>BROWSE THE SERMON ARCHIVE</button>' +
       (state.mySermons.length ? state.mySermons.map(function(s){
         const n = (s.slides||[]).length;
         const confirming = sermonDeleteConfirmId === s.id;
         const sharing = sermonShareOpenId === s.id;
+        const archiving = sermonArchivePanelOpenId === s.id;
         const shareCount = (s.sharedWithUids||[]).length;
         return '<div class="room-list-card">' +
           '<button type="button" data-edit-sermon="'+s.id+'" style="background:none;border:none;padding:0;text-align:left;cursor:pointer;font:inherit;color:inherit;flex:1;min-width:200px;">' +
             '<div class="room-list-meta"><p class="room-name">'+escapeHtml(s.title||'Untitled sermon')+'</p>' +
-              '<p class="room-sub">'+(s.speaker?escapeHtml(s.speaker)+' &middot; ':'')+n+' slide'+(n===1?'':'s')+(shareCount?(' &middot; shared with '+shareCount):'')+'</p></div>' +
+              '<p class="room-sub">'+(s.speaker?escapeHtml(s.speaker)+' &middot; ':'')+n+' slide'+(n===1?'':'s')+(shareCount?(' &middot; shared with '+shareCount):'')+(s.archived?' &middot; <span class="pill pill-pine" style="padding:1px 8px;">IN SERMON ARCHIVE</span>':'')+'</p></div>' +
           '</button>' +
           (confirming ?
             ('<div class="confirm-row"><span>Delete this sermon?</span>' +
@@ -8118,9 +9081,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
               '<button class="btn btn-ghost" data-cancel-delete-sermon="'+s.id+'">CANCEL</button></div>')
             : ('<span class="setlist-controls">' +
                 '<button class="btn btn-ghost" data-toggle-share-sermon="'+s.id+'">'+(sharing?'CLOSE':'SHARE')+'</button>' +
+                '<button class="btn btn-ghost" data-toggle-archive-sermon="'+s.id+'">'+(archiving?'CLOSE':(s.archived?'ARCHIVE DETAILS':'PUBLISH TO ARCHIVE'))+'</button>' +
                 '<button class="btn btn-ghost" data-ask-delete-sermon="'+s.id+'">DELETE</button>' +
               '</span>')) +
           (sharing ? ('<div style="flex-basis:100%;width:100%;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">' + renderSermonSharePanel(s) + '</div>') : '') +
+          (archiving ? ('<div style="flex-basis:100%;width:100%;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">' + renderSermonArchivePanel(s) + '</div>') : '') +
         '</div>';
       }).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><p>No sermons yet &mdash; build one and it&rsquo;ll be ready to pick next time you host.</p></div>') +
       (state.sharedSermons.length ?
@@ -8137,6 +9102,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
     document.getElementById('sermonsBackBtn').addEventListener('click', function(){ stopMySermonsWatch(); stopSharedSermonsWatch(); stopDirectoryWatch(); state.view='host-hub'; render(); window.scrollTo(0,0); });
     document.getElementById('newSermonBtn').addEventListener('click', function(){ openSermonEditor(null, 'sermons'); });
+    document.getElementById('goSermonArchiveFromEditorBtn').addEventListener('click', function(){ stopMySermonsWatch(); stopSharedSermonsWatch(); stopDirectoryWatch(); openSermonArchive(); });
     document.querySelectorAll('[data-edit-sermon]').forEach(function(btn){
       btn.addEventListener('click', function(){
         const s = state.mySermons.find(function(x){ return x.id===btn.getAttribute('data-edit-sermon'); });
@@ -8204,6 +9170,55 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         } else { showToast(link); }
       });
     });
+    document.querySelectorAll('[data-toggle-archive-sermon]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-toggle-archive-sermon');
+        const wasOpen = sermonArchivePanelOpenId === id;
+        sermonArchivePanelOpenId = wasOpen ? null : id;
+        if(!wasOpen){
+          const s = state.mySermons.find(function(x){ return x.id === id; });
+          sermonArchiveDateDraft = (s && s.dateGiven) || '';
+          sermonArchiveSummaryDraft = (s && s.summary) || '';
+        }
+        sermonShareOpenId = null; sermonDeleteConfirmId = null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-publish-to-archive]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const id = btn.getAttribute('data-publish-to-archive');
+        btn.disabled = true;
+        try{
+          await updateSermon(id, { archived: true, archivedAt: Date.now(), dateGiven: sermonArchiveDateDraft.trim(), summary: sermonArchiveSummaryDraft.trim() });
+          showToast('Published to the Sermon Archive.');
+        }catch(e){ showToast('Couldn&rsquo;t publish &mdash; try again.'); }
+        render();
+      });
+    });
+    document.querySelectorAll('[data-unpublish-from-archive]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const id = btn.getAttribute('data-unpublish-from-archive');
+        btn.disabled = true;
+        try{ await updateSermon(id, { archived: false }); showToast('Removed from the Sermon Archive.'); }
+        catch(e){ showToast('Couldn&rsquo;t remove &mdash; try again.'); }
+        render();
+      });
+    });
+    document.querySelectorAll('[data-save-archive-details]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const id = btn.getAttribute('data-save-archive-details');
+        btn.disabled = true;
+        try{
+          await updateSermon(id, { dateGiven: sermonArchiveDateDraft.trim(), summary: sermonArchiveSummaryDraft.trim() });
+          showToast('Archive details saved.');
+        }catch(e){ showToast('Couldn&rsquo;t save &mdash; try again.'); }
+        render();
+      });
+    });
+    const archiveDateInput = document.getElementById('sermonArchiveDateInput');
+    if(archiveDateInput) archiveDateInput.addEventListener('input', function(){ sermonArchiveDateDraft = archiveDateInput.value; });
+    const archiveSummaryInput = document.getElementById('sermonArchiveSummaryInput');
+    if(archiveSummaryInput) archiveSummaryInput.addEventListener('input', function(){ sermonArchiveSummaryDraft = archiveSummaryInput.value; });
     bindSermonShareButtons();
   }
 
@@ -8262,6 +9277,90 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       state.view = 'sermons'; render(); window.scrollTo(0,0);
       startMySermonsWatch(); startSharedSermonsWatch(); startDirectoryWatch();
     });
+  }
+
+  // =========================================================================
+  // Sermon Archive [2026-09-28, "BUILD THEM ALL NOW" batch 3, Sermons &
+  // Teaching] -- a PUBLIC, congregation-facing "browse past sermons"
+  // screen, distinct from the private Sermons screen above (build/present/
+  // share your OWN sermons). This is a genuinely new feature, not another
+  // "already built under a different name" case like Suggest a Song turned
+  // out to be in batch 2 -- confirmed by reading the existing Sermons
+  // writeup first (see interface.md's "Sermons"/"Sermon sharing" sections):
+  // that feature is a private, creator-owned slide-BUILDING and
+  // live-PRESENTING tool, with no "browse everyone's sermons" screen
+  // anywhere. This adds exactly that, reusing the same `sermons/{sermonId}`
+  // doc (three new optional fields: `archived`, `archivedAt`, `summary`,
+  // `dateGiven` -- see firestore-data-layer.js's watchSermonArchive()) and
+  // the same read-only slide-rendering helpers (isBlocksSlide()/
+  // renderSlideCanvas()/sermonLinesAsCardHtml()) the live stage/split-screen
+  // views already use, rather than a second sermon-viewing implementation.
+  let sermonArchiveDetailId = null;
+  let sermonArchiveSlideIdx = 0;
+
+  function openSermonArchive(){
+    state.view = 'sermon-archive';
+    startSermonArchiveWatch();
+    render(); window.scrollTo(0,0);
+  }
+
+  function renderSermonArchive(){
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="sermonArchiveBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Sermon Archive</p>' +
+        '<p class="landing-sub">Past sermons your church has shared here, for anyone to revisit anytime &mdash; no sign-in needed.</p>' +
+      '</div>' +
+      (state.sermonArchive.length ? state.sermonArchive.map(function(s){
+        const n = (s.slides||[]).length;
+        return '<div class="room-list-card" data-view-archived-sermon="'+s.id+'" style="cursor:pointer;flex-direction:column;align-items:stretch;">' +
+          '<p class="room-name">'+escapeHtml(s.title||'Untitled sermon')+'</p>' +
+          '<p class="room-sub">'+(s.speaker?escapeHtml(s.speaker)+' &middot; ':'')+(s.dateGiven?escapeHtml(s.dateGiven)+' &middot; ':'')+n+' slide'+(n===1?'':'s')+'</p>' +
+          (s.summary ? '<p class="hint" style="margin-top:6px;">'+escapeHtml(s.summary)+'</p>' : '') +
+        '</div>';
+      }).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><p>No sermons in the archive yet &mdash; a host can publish one from their Sermons screen&rsquo;s PUBLISH TO ARCHIVE button.</p></div>');
+
+    document.getElementById('sermonArchiveBackBtn').addEventListener('click', function(){ stopSermonArchiveWatch(); state.view='landing'; render(); window.scrollTo(0,0); });
+    document.querySelectorAll('[data-view-archived-sermon]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        sermonArchiveDetailId = btn.getAttribute('data-view-archived-sermon');
+        sermonArchiveSlideIdx = 0;
+        state.view = 'sermon-archive-detail';
+        render(); window.scrollTo(0,0);
+      });
+    });
+  }
+
+  function renderSermonArchiveDetail(){
+    const s = state.sermonArchive.find(function(x){ return x.id === sermonArchiveDetailId; });
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="sermonArchiveDetailBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK TO ARCHIVE</button></div>' +
+      (!s ?
+        '<p style="text-align:center;color:var(--ink-soft);padding:60px 20px;">This sermon is no longer in the archive.</p>'
+      : (function(){
+          const slides = s.slides || [];
+          const idx = Math.max(0, Math.min(sermonArchiveSlideIdx, slides.length - 1));
+          const slide = slides[idx];
+          return '<div class="landing-hero">' +
+              '<p class="display landing-greeting" style="font-size:1.6rem;">'+escapeHtml(s.title||'Untitled sermon')+'</p>' +
+              '<p class="landing-sub">'+(s.speaker?escapeHtml(s.speaker)+' &middot; ':'')+(s.dateGiven?escapeHtml(s.dateGiven):'')+'</p>' +
+            '</div>' +
+            (s.summary ? '<p class="hint" style="margin-bottom:16px;">'+escapeHtml(s.summary)+'</p>' : '') +
+            (slide ?
+              ('<div class="slide-card" style="padding:0;overflow:hidden;">' + (isBlocksSlide(slide) ? renderSlideCanvas(slide,'card') : sermonLinesAsCardHtml(slide)) + '</div>' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;">' +
+                  '<button type="button" class="btn btn-ghost" id="sermonArchivePrevBtn" '+(idx===0?'disabled':'')+'>PREV</button>' +
+                  '<span class="hint">Slide '+(idx+1)+' of '+slides.length+'</span>' +
+                  '<button type="button" class="btn btn-ghost" id="sermonArchiveNextBtn" '+(idx===slides.length-1?'disabled':'')+'>NEXT</button>' +
+                '</div>')
+            : '<div class="empty-state"><p>This sermon has no slides.</p></div>');
+        })());
+
+    document.getElementById('sermonArchiveDetailBackBtn').addEventListener('click', function(){ state.view='sermon-archive'; render(); window.scrollTo(0,0); });
+    const prevBtn = document.getElementById('sermonArchivePrevBtn');
+    if(prevBtn) prevBtn.addEventListener('click', function(){ sermonArchiveSlideIdx = Math.max(0, sermonArchiveSlideIdx - 1); render(); });
+    const nextBtn = document.getElementById('sermonArchiveNextBtn');
+    if(nextBtn) nextBtn.addEventListener('click', function(){ sermonArchiveSlideIdx = sermonArchiveSlideIdx + 1; render(); });
   }
 
   function renderSermonEdit(){
@@ -14969,6 +16068,351 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       (state.user && d.uid !== state.user.uid ? ('<button type="button" class="btn btn-sm '+(isFollowingUid(d.uid)?'btn-ghost':'btn-primary')+'" data-follow-uid="'+escapeAttr(d.uid)+'">'+(isFollowingUid(d.uid)?'FOLLOWING':'FOLLOW')+'</button>') : '') +
     '</div>';
   }
+
+  // =========================================================================
+  // Church Directory ["BUILD THEM ALL NOW" batch 4, 2026-09-28, Community &
+  // Church Life] -- Jared's deck idea: browse the members of YOUR OWN
+  // church specifically, no typing required -- Explore just above already
+  // covers "search everyone, cross-church"; this is the narrower,
+  // browsable complement. Deliberately reuses state.directory/
+  // startDirectoryWatch()/renderPersonRow() wholesale rather than a new
+  // watch, a new collection, or a new card renderer: every signed-up
+  // person already has a free-text churchName from the "Almost There"
+  // profile-setup step, and it's already public on directory/{uid} --
+  // grouping by it needed no new field, no new query, no rules change of
+  // any kind.
+  //
+  // 🔶 Free-text matching, not a real linked church entity -- disclosed
+  // rather than silently accepted. `churchId` (the internal id Church
+  // Team/Team Schedule use) is only set for someone an Admin/church-team
+  // leader has formally added to a church's roster -- a small minority of
+  // accounts. Scoping THIS feature to churchId would leave it nearly empty
+  // for most churches, so it matches on `churchName` instead (trimmed,
+  // case-folded, so "Cedar Grove Baptist Church" and "cedar grove baptist
+  // church" count as the same church) -- the one thing every congregant
+  // already has. Genuinely different spellings/abbreviations of the same
+  // church will still end up as separate, non-matching groups; worth
+  // revisiting if a real churches/{id}-linked profile model ever replaces
+  // free-text churchName for ordinary members.
+  function normalizedChurchName(name){ return (name || '').trim().toLowerCase(); }
+  function churchDirectoryPeople(){
+    const mine = normalizedChurchName(state.profile && state.profile.churchName);
+    if(!mine) return [];
+    return state.directory.filter(function(d){
+      return d.uid !== (state.user && state.user.uid) && normalizedChurchName(d.churchName) === mine;
+    });
+  }
+  function openChurchDirectory(){
+    state.view = 'church-directory';
+    startDirectoryWatch();
+    render(); window.scrollTo(0,0);
+  }
+  function renderChurchDirectory(){
+    const churchName = (state.profile && state.profile.churchName) || '';
+    const people = churchDirectoryPeople();
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="churchDirectoryBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Church Directory</p>' +
+        '<p class="landing-sub">'+(churchName ? ('Everyone else at '+escapeHtml(churchName)+' who&rsquo;s signed up for iWorship.') : 'Set your church&rsquo;s name in My Profile to see who else from your church is already here.')+'</p>' +
+      '</div>' +
+      (people.length ? people.map(renderPersonRow).join('') :
+        ('<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><p>'+(churchName ? 'No one else from your church has signed up yet &mdash; invite them!' : 'Add your church&rsquo;s name in My Profile, then come back here.')+'</p></div>'));
+
+    document.getElementById('churchDirectoryBackBtn').addEventListener('click', function(){ stopDirectoryWatch(); state.view='landing'; render(); window.scrollTo(0,0); });
+    document.querySelectorAll('[data-open-profile]').forEach(function(btn){
+      btn.addEventListener('click', function(){ openProfileView(btn.getAttribute('data-open-profile')); });
+    });
+    document.querySelectorAll('[data-follow-uid]').forEach(function(btn){
+      btn.addEventListener('click', function(){ toggleFollow(btn.getAttribute('data-follow-uid')); });
+    });
+  }
+
+  // =========================================================================
+  // Small Group Finder ["BUILD THEM ALL NOW" batch 4, 2026-09-28, Community
+  // & Church Life] -- Jared's deck idea: browse and join Bible-study/cell
+  // groups. Public read (see firestore.rules' smallGroups/{groupId} block);
+  // any signed-in person can start one (🔶 disclosed default there); JOIN/
+  // LEAVE is self-service via the same arrayUnion/arrayRemove pattern
+  // sermon sharing already established. One-at-a-time composer/edit-panel
+  // convention, same as the Testimony Wall composer above.
+  let smallGroupComposerOpen = false;
+  let smallGroupEditId = null; // non-null while editing an existing group instead of creating a new one
+  let smallGroupDraftName = '';
+  let smallGroupDraftDescription = '';
+  let smallGroupDraftSchedule = '';
+  let smallGroupDraftLocation = '';
+  let smallGroupDeleteConfirmId = null;
+
+  function openSmallGroups(){
+    state.view = 'small-groups';
+    startSmallGroupsWatch();
+    render(); window.scrollTo(0,0);
+  }
+  function resetSmallGroupDraft(){
+    smallGroupComposerOpen = false; smallGroupEditId = null;
+    smallGroupDraftName = ''; smallGroupDraftDescription = ''; smallGroupDraftSchedule = ''; smallGroupDraftLocation = '';
+  }
+  function renderSmallGroups(){
+    const list = state.smallGroups || [];
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="smallGroupsBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Small Groups</p>' +
+        '<p class="landing-sub">Find a Bible study or cell group to join &mdash; or start your own.</p>' +
+      '</div>' +
+      (state.user ?
+        (smallGroupComposerOpen ? renderSmallGroupComposer() :
+          '<button type="button" class="btn btn-primary btn-lg btn-block" id="newSmallGroupBtn" style="margin-bottom:22px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>START A GROUP</button>')
+      : '<p class="hint" style="margin-bottom:22px;">Sign in to start or join a group.</p>') +
+      (list.length ? list.map(function(g){
+        const mine = state.user && g.createdByUid === state.user.uid;
+        const isMember = !!(state.user && (g.memberUids||[]).includes(state.user.uid));
+        const confirming = smallGroupDeleteConfirmId === g.id;
+        return '<div class="room-list-card" style="flex-direction:column;align-items:stretch;">' +
+          '<p class="room-name">'+escapeHtml(g.name||'Untitled group')+'</p>' +
+          '<p class="room-sub">'+[g.schedule, g.location].filter(Boolean).map(escapeHtml).join(' &middot; ')+(g.schedule||g.location?' &middot; ':'')+(g.memberUids||[]).length+' member'+((g.memberUids||[]).length===1?'':'s')+'</p>' +
+          (g.description ? '<p class="hint" style="margin-top:6px;">'+escapeHtml(g.description)+'</p>' : '') +
+          (confirming ?
+            ('<div class="confirm-row"><span>Delete this group?</span>' +
+              '<button class="btn btn-primary" data-confirm-delete-group="'+g.id+'">YES, DELETE</button>' +
+              '<button class="btn btn-ghost" data-cancel-delete-group="'+g.id+'">CANCEL</button></div>')
+          : ('<div class="setlist-controls" style="margin-top:10px;">' +
+              (state.user ? ('<button type="button" class="btn '+(isMember?'btn-ghost':'btn-primary')+'" data-toggle-join-group="'+g.id+'">'+(isMember?'LEAVE':'JOIN')+'</button>') : '') +
+              (mine ? ('<button type="button" class="btn btn-ghost" data-edit-group="'+g.id+'">EDIT</button><button type="button" class="btn btn-ghost" data-ask-delete-group="'+g.id+'">DELETE</button>') : '') +
+            '</div>')) +
+        '</div>';
+      }).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><p>No small groups yet &mdash; be the first to start one.</p></div>');
+
+    document.getElementById('smallGroupsBackBtn').addEventListener('click', function(){ stopSmallGroupsWatch(); resetSmallGroupDraft(); state.view='landing'; render(); window.scrollTo(0,0); });
+    attachSmallGroupsHandlers();
+  }
+  function renderSmallGroupComposer(){
+    return '<div class="signin-card" style="margin-bottom:22px;text-align:left;">' +
+      '<div class="field"><label for="sgNameInput">GROUP NAME</label><input type="text" id="sgNameInput" placeholder="e.g. Young Adults Bible Study" value="'+escapeAttr(smallGroupDraftName)+'"></div>' +
+      '<div class="field"><label for="sgScheduleInput">MEETING SCHEDULE <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="sgScheduleInput" placeholder="e.g. Tuesdays, 7:00 PM" value="'+escapeAttr(smallGroupDraftSchedule)+'"></div>' +
+      '<div class="field"><label for="sgLocationInput">LOCATION <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="sgLocationInput" placeholder="e.g. Fellowship Hall, or a Zoom link" value="'+escapeAttr(smallGroupDraftLocation)+'"></div>' +
+      '<div class="field"><label for="sgDescriptionInput">DESCRIPTION <span style="text-transform:none;font-weight:400;">(optional)</span></label><textarea id="sgDescriptionInput" rows="3" placeholder="What&rsquo;s this group about?">'+escapeHtml(smallGroupDraftDescription)+'</textarea></div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button class="btn btn-primary" id="saveSmallGroupBtn">'+(smallGroupEditId?'SAVE':'START GROUP')+'</button>' +
+        '<button class="btn btn-ghost" id="cancelSmallGroupBtn">CANCEL</button>' +
+      '</div>' +
+    '</div>';
+  }
+  function attachSmallGroupsHandlers(){
+    const newBtn = document.getElementById('newSmallGroupBtn');
+    if(newBtn) newBtn.addEventListener('click', function(){ resetSmallGroupDraft(); smallGroupComposerOpen = true; render(); });
+    const nameEl = document.getElementById('sgNameInput');
+    if(nameEl) nameEl.addEventListener('input', function(e){ smallGroupDraftName = e.target.value; });
+    const scheduleEl = document.getElementById('sgScheduleInput');
+    if(scheduleEl) scheduleEl.addEventListener('input', function(e){ smallGroupDraftSchedule = e.target.value; });
+    const locationEl = document.getElementById('sgLocationInput');
+    if(locationEl) locationEl.addEventListener('input', function(e){ smallGroupDraftLocation = e.target.value; });
+    const descEl = document.getElementById('sgDescriptionInput');
+    if(descEl) descEl.addEventListener('input', function(e){ smallGroupDraftDescription = e.target.value; });
+    const cancelBtn = document.getElementById('cancelSmallGroupBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', function(){ resetSmallGroupDraft(); render(); });
+    const saveBtn = document.getElementById('saveSmallGroupBtn');
+    if(saveBtn) saveBtn.addEventListener('click', function(){
+      const name = (smallGroupDraftName||'').trim();
+      if(!name){ showToast('Give the group a name first.'); return; }
+      saveBtn.disabled = true;
+      const patch = { name: name, description: (smallGroupDraftDescription||'').trim(), schedule: (smallGroupDraftSchedule||'').trim(), location: (smallGroupDraftLocation||'').trim() };
+      const done = smallGroupEditId ?
+        updateSmallGroup(smallGroupEditId, patch) :
+        createSmallGroup({ ...patch, createdByUid: state.user.uid, createdByName: currentDisplayName()||'Someone', memberUids: [state.user.uid] });
+      done.then(function(){
+        showToast(smallGroupEditId ? 'Group updated.' : 'Group started.');
+        resetSmallGroupDraft();
+        render();
+      }).catch(function(e){ showToast('Couldn&rsquo;t save that &mdash; try again.'+describeError(e)); saveBtn.disabled = false; });
+    });
+    document.querySelectorAll('[data-toggle-join-group]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-toggle-join-group');
+        const g = (state.smallGroups||[]).find(function(x){ return x.id === id; });
+        const isMember = !!(g && (g.memberUids||[]).includes(state.user.uid));
+        btn.disabled = true;
+        (isMember ? leaveSmallGroup(id, state.user.uid) : joinSmallGroup(id, state.user.uid))
+          .then(function(){ showToast(isMember ? 'Left the group.' : 'Joined!'); render(); })
+          .catch(function(e){ showToast('Couldn&rsquo;t update that &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+    document.querySelectorAll('[data-edit-group]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const g = (state.smallGroups||[]).find(function(x){ return x.id === btn.getAttribute('data-edit-group'); });
+        if(!g) return;
+        smallGroupEditId = g.id;
+        smallGroupDraftName = g.name || ''; smallGroupDraftDescription = g.description || '';
+        smallGroupDraftSchedule = g.schedule || ''; smallGroupDraftLocation = g.location || '';
+        smallGroupComposerOpen = true;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-ask-delete-group]').forEach(function(btn){
+      btn.addEventListener('click', function(){ smallGroupDeleteConfirmId = btn.getAttribute('data-ask-delete-group'); render(); });
+    });
+    document.querySelectorAll('[data-cancel-delete-group]').forEach(function(btn){
+      btn.addEventListener('click', function(){ smallGroupDeleteConfirmId = null; render(); });
+    });
+    document.querySelectorAll('[data-confirm-delete-group]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-confirm-delete-group');
+        btn.disabled = true;
+        deleteSmallGroup(id).then(function(){ showToast('Group deleted.'); smallGroupDeleteConfirmId = null; render(); })
+          .catch(function(e){ showToast('Couldn&rsquo;t delete &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+  }
+
+  // =========================================================================
+  // Events Calendar ["BUILD THEM ALL NOW" batch 4, 2026-09-28, Community &
+  // Church Life] -- Jared's deck idea: browse upcoming church events.
+  // Public read; creating one is host-eligible-only (mirrors sermons'
+  // create gate -- see firestore.rules' events/{eventId} block for why
+  // this one draws that line differently than Small Groups above).
+  let eventComposerOpen = false;
+  let eventEditId = null;
+  let eventDraftTitle = '';
+  let eventDraftDate = '';
+  let eventDraftTime = '';
+  let eventDraftLocation = '';
+  let eventDraftDescription = '';
+  let eventDeleteConfirmId = null;
+
+  function openEventsCalendar(){
+    state.view = 'events-calendar';
+    startEventsWatch();
+    render(); window.scrollTo(0,0);
+  }
+  function resetEventDraft(){
+    eventComposerOpen = false; eventEditId = null;
+    eventDraftTitle = ''; eventDraftDate = ''; eventDraftTime = ''; eventDraftLocation = ''; eventDraftDescription = '';
+  }
+  // Renders the plain 'YYYY-MM-DD' string (see firestore-data-layer.js's
+  // createEvent) as "Sep 28, 2026" for display. Parses the parts directly
+  // instead of `new Date('YYYY-MM-DD')` -- that constructor treats a
+  // date-only ISO string as UTC midnight, which then prints as the PREVIOUS
+  // day in any timezone behind UTC (all of the Philippines, always) --
+  // exactly the class of off-by-one date bug this app's other date field
+  // (Devotionals' date-jump) already had to route around.
+  function formatEventDate(isoDate){
+    const parts = (isoDate||'').split('-');
+    if(parts.length !== 3) return isoDate || '';
+    const y = parseInt(parts[0],10), m = parseInt(parts[1],10), d = parseInt(parts[2],10);
+    if(!y || !m || !d) return isoDate || '';
+    const local = new Date(y, m-1, d);
+    return local.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  function eventIsPast(evt){
+    if(!evt.eventDate) return false;
+    const today = new Date().toISOString().slice(0,10);
+    return evt.eventDate < today;
+  }
+  function renderEventsCalendar(){
+    const list = state.events || [];
+    const canCreate = canHost() || state.isEditor || hasFullAccess();
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="eventsCalendarBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero">' +
+        '<p class="display landing-greeting">Events Calendar</p>' +
+        '<p class="landing-sub">What&rsquo;s coming up at your church.</p>' +
+      '</div>' +
+      (canCreate ?
+        (eventComposerOpen ? renderEventComposer() :
+          '<button type="button" class="btn btn-primary btn-lg btn-block" id="newEventBtn" style="margin-bottom:22px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>ADD AN EVENT</button>')
+      : '') +
+      (list.length ? list.map(function(evt){
+        const mine = state.user && (evt.createdByUid === state.user.uid || hasFullAccess());
+        const confirming = eventDeleteConfirmId === evt.id;
+        const past = eventIsPast(evt);
+        return '<div class="room-list-card" style="flex-direction:column;align-items:stretch;'+(past?'opacity:.6;':'')+'">' +
+          '<p class="room-name">'+escapeHtml(evt.title||'Untitled event')+(past?' <span class="pill" style="padding:1px 8px;">PAST</span>':'')+'</p>' +
+          '<p class="room-sub">'+[evt.eventDate ? formatEventDate(evt.eventDate) : '', evt.eventTime, evt.location].filter(Boolean).map(escapeHtml).join(' &middot; ')+'</p>' +
+          (evt.description ? '<p class="hint" style="margin-top:6px;">'+escapeHtml(evt.description)+'</p>' : '') +
+          (confirming ?
+            ('<div class="confirm-row"><span>Delete this event?</span>' +
+              '<button class="btn btn-primary" data-confirm-delete-event="'+evt.id+'">YES, DELETE</button>' +
+              '<button class="btn btn-ghost" data-cancel-delete-event="'+evt.id+'">CANCEL</button></div>')
+          : (mine ? ('<div class="setlist-controls" style="margin-top:10px;"><button type="button" class="btn btn-ghost" data-edit-event="'+evt.id+'">EDIT</button><button type="button" class="btn btn-ghost" data-ask-delete-event="'+evt.id+'">DELETE</button></div>') : '')) +
+        '</div>';
+      }).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+icon('calendar')+'</svg><p>No events on the calendar yet.</p></div>');
+
+    document.getElementById('eventsCalendarBackBtn').addEventListener('click', function(){ stopEventsWatch(); resetEventDraft(); state.view='landing'; render(); window.scrollTo(0,0); });
+    attachEventsCalendarHandlers();
+  }
+  function renderEventComposer(){
+    return '<div class="signin-card" style="margin-bottom:22px;text-align:left;">' +
+      '<div class="field"><label for="evtTitleInput">EVENT TITLE</label><input type="text" id="evtTitleInput" placeholder="e.g. Fall Revival" value="'+escapeAttr(eventDraftTitle)+'"></div>' +
+      '<div class="field-row"><div class="field"><label for="evtDateInput">DATE</label><input type="date" id="evtDateInput" value="'+escapeAttr(eventDraftDate)+'"></div>' +
+        '<div class="field"><label for="evtTimeInput">TIME <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="evtTimeInput" placeholder="e.g. 6:00 PM" value="'+escapeAttr(eventDraftTime)+'"></div></div>' +
+      '<div class="field"><label for="evtLocationInput">LOCATION <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="evtLocationInput" placeholder="e.g. Main Sanctuary" value="'+escapeAttr(eventDraftLocation)+'"></div>' +
+      '<div class="field"><label for="evtDescriptionInput">DESCRIPTION <span style="text-transform:none;font-weight:400;">(optional)</span></label><textarea id="evtDescriptionInput" rows="3" placeholder="Details for the congregation">'+escapeHtml(eventDraftDescription)+'</textarea></div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button class="btn btn-primary" id="saveEventBtn">'+(eventEditId?'SAVE':'ADD EVENT')+'</button>' +
+        '<button class="btn btn-ghost" id="cancelEventBtn">CANCEL</button>' +
+      '</div>' +
+    '</div>';
+  }
+  function attachEventsCalendarHandlers(){
+    const newBtn = document.getElementById('newEventBtn');
+    if(newBtn) newBtn.addEventListener('click', function(){ resetEventDraft(); eventComposerOpen = true; render(); });
+    const titleEl = document.getElementById('evtTitleInput');
+    if(titleEl) titleEl.addEventListener('input', function(e){ eventDraftTitle = e.target.value; });
+    const dateEl = document.getElementById('evtDateInput');
+    if(dateEl) dateEl.addEventListener('input', function(e){ eventDraftDate = e.target.value; });
+    const timeEl = document.getElementById('evtTimeInput');
+    if(timeEl) timeEl.addEventListener('input', function(e){ eventDraftTime = e.target.value; });
+    const locationEl = document.getElementById('evtLocationInput');
+    if(locationEl) locationEl.addEventListener('input', function(e){ eventDraftLocation = e.target.value; });
+    const descEl = document.getElementById('evtDescriptionInput');
+    if(descEl) descEl.addEventListener('input', function(e){ eventDraftDescription = e.target.value; });
+    const cancelBtn = document.getElementById('cancelEventBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', function(){ resetEventDraft(); render(); });
+    const saveBtn = document.getElementById('saveEventBtn');
+    if(saveBtn) saveBtn.addEventListener('click', function(){
+      const title = (eventDraftTitle||'').trim();
+      const date = (eventDraftDate||'').trim();
+      if(!title){ showToast('Give the event a title first.'); return; }
+      if(!date){ showToast('Pick a date first.'); return; }
+      saveBtn.disabled = true;
+      const patch = { title: title, eventDate: date, eventTime: (eventDraftTime||'').trim(), location: (eventDraftLocation||'').trim(), description: (eventDraftDescription||'').trim() };
+      const done = eventEditId ?
+        updateEvent(eventEditId, patch) :
+        createEvent({ ...patch, createdByUid: state.user.uid, createdByName: currentDisplayName()||'Someone' });
+      done.then(function(){
+        showToast(eventEditId ? 'Event updated.' : 'Event added.');
+        resetEventDraft();
+        render();
+      }).catch(function(e){ showToast('Couldn&rsquo;t save that &mdash; try again.'+describeError(e)); saveBtn.disabled = false; });
+    });
+    document.querySelectorAll('[data-edit-event]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const evt = (state.events||[]).find(function(x){ return x.id === btn.getAttribute('data-edit-event'); });
+        if(!evt) return;
+        eventEditId = evt.id;
+        eventDraftTitle = evt.title || ''; eventDraftDate = evt.eventDate || ''; eventDraftTime = evt.eventTime || '';
+        eventDraftLocation = evt.location || ''; eventDraftDescription = evt.description || '';
+        eventComposerOpen = true;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-ask-delete-event]').forEach(function(btn){
+      btn.addEventListener('click', function(){ eventDeleteConfirmId = btn.getAttribute('data-ask-delete-event'); render(); });
+    });
+    document.querySelectorAll('[data-cancel-delete-event]').forEach(function(btn){
+      btn.addEventListener('click', function(){ eventDeleteConfirmId = null; render(); });
+    });
+    document.querySelectorAll('[data-confirm-delete-event]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-confirm-delete-event');
+        btn.disabled = true;
+        deleteEvent(id).then(function(){ showToast('Event deleted.'); eventDeleteConfirmId = null; render(); })
+          .catch(function(e){ showToast('Couldn&rsquo;t delete &mdash; try again.'+describeError(e)); btn.disabled = false; });
+      });
+    });
+  }
+
   function renderExplore(){
     const results = searchedPeople();
     const suggestions = suggestedPeople();
@@ -15006,6 +16450,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // ---- Notifications [2026-09-09] ----------------------------------------
   function notificationText(n){
     const who = escapeHtml(n.actorName || 'Someone');
+    // [2026-09-28, "BUILD THEM ALL NOW" batch 1] 'testimonies'/
+    // 'prayerRequests' reuse the exact same 'like' notification type as
+    // posts/shorts (see toggleLike()'s call sites in the Testimony Wall/
+    // Prayer Wall handlers) -- just with wording that actually fits what
+    // was tapped, instead of falling through to "liked your post."
+    if(n.type === 'like' && n.kind === 'testimonies') return who + ' said Amen to your testimony.';
+    if(n.type === 'like' && n.kind === 'prayerRequests') return who + ' is praying for your request.';
     if(n.type === 'like') return who + ' liked your ' + (n.kind === 'shorts' ? 'short' : 'post') + '.';
     if(n.type === 'comment') return who + ' commented on your ' + (n.kind === 'shorts' ? 'short' : 'post') + '.';
     if(n.type === 'repost') return who + ' reposted your post.';

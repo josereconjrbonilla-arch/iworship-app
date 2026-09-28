@@ -64,5 +64,12 @@ export const ICONS = {
     blackout:'<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" stroke="none"/>',
     // About iWorship [2026-09-26] -- a plain "i" info-circle glyph, the one
     // icon this set didn't already have a use for.
-    info:'<circle cx="12" cy="12" r="9.5"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r="0.9" fill="currentColor" stroke="none"/>'
+    info:'<circle cx="12" cy="12" r="9.5"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r="0.9" fill="currentColor" stroke="none"/>',
+    // Spiritual Growth promoted to a primary nav tab [2026-09-28] -- a plain
+    // sprout/seedling glyph. The first draft of this button reused `compass`
+    // (already spoken for by the sidebar's "Explore & Search People" item,
+    // which would have put the same icon twice in one sidebar) and, before
+    // that, `heart` (already Fellowship's tab icon) -- a sprout reads as
+    // "growth" on its own and collides with nothing else in this set.
+    sprout:'<path d="M12 21v-8"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6Z"/><path d="M12 13c0-3.5-2.5-5.5-6-5.5 0 3.5 2.5 5.5 6 5.5Z"/>'
   };

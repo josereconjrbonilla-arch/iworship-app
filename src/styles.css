@@ -2345,6 +2345,14 @@ body.stage-page .appfoot{ display:none; }
   }
   .hamburger-item:hover{ background:var(--surface-2); }
   .hamburger-item-danger{ color:var(--wine); margin-top:6px; border-top:1px solid var(--border); border-radius:0; padding-top:16px; }
+  /* Mobile drawer section grouping [2026-09-28] -- mirrors the desktop
+     sidebar's .sidebar-section-label (see that rule's comment); same
+     "crowded sidebar" fix applied to the hamburger drawer's own list. */
+  .hamburger-section-label{
+    font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-soft); padding:14px 12px 4px;
+  }
+  .hamburger-section-label:first-child{ padding-top:6px; }
 
   /* Desktop sidebar nav [2026-09-10] -- Jared: "look at Facebook's PC
      interface and Mobile interface. They differ. what if you do it like
@@ -2366,6 +2374,17 @@ body.stage-page .appfoot{ display:none; }
   .sidebar-scroll{ display:flex; flex-direction:column; gap:2px; padding:16px 12px; }
   .sidebar-section{ display:flex; flex-direction:column; gap:2px; }
   .sidebar-divider{ height:1px; background:var(--border); margin:10px 6px; }
+  /* Sidebar section grouping [2026-09-28] -- Jared: "the side bar is now
+     crowded." The signed-in extra list (renderSidebarExtra()) had grown to
+     ~9 flat items with nothing telling them apart; this labels them into
+     Personal / Church Tools / App groups without removing anything. Same
+     label style reused by the mobile hamburger drawer's own grouped list
+     (renderHamburgerDrawerBody() -> .hamburger-section-label). */
+  .sidebar-section-label{
+    font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-soft); padding:14px 14px 4px;
+  }
+  .sidebar-section-label:first-child{ padding-top:4px; }
   .sidebar-item{
     display:flex; align-items:center; gap:14px; text-align:left;
     background:none; border:none; border-radius:12px;

@@ -1657,16 +1657,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function renderBottomTabs(){
     const bar = document.getElementById('bottomTabs');
     if(!bar) return;
-    const active = inFellowshipMode() ? 'fellowship' : (inHostMode() ? 'host' : (MORE_VIEWS.includes(state.view) ? 'more' : (state.view === 'list' || state.view === 'detail' || state.view === 'edit' || state.view === 'add' || state.view === 'bulk-add' ? 'hymnal' : null)));
-    [['tabHymnalBtn','hymnal'],['tabHostBtn','host'],['tabFellowshipBtn','fellowship'],['tabMoreBtn','more']].forEach(function(pair){
+    const active = state.view === 'spiritual-growth' ? 'growth' : (inFellowshipMode() ? 'fellowship' : (inHostMode() ? 'host' : (MORE_VIEWS.includes(state.view) ? 'more' : (state.view === 'list' || state.view === 'detail' || state.view === 'edit' || state.view === 'add' || state.view === 'bulk-add' ? 'hymnal' : null))));
+    [['tabHymnalBtn','hymnal'],['tabHostBtn','host'],['tabFellowshipBtn','fellowship'],['tabGrowthBtn','growth'],['tabMoreBtn','more']].forEach(function(pair){
       const btn = document.getElementById(pair[0]);
       if(btn) btn.classList.toggle('bottom-tab-active', active === pair[1]);
     });
-    // Desktop sidebar's mirrored primary items [2026-09-10] -- same
-    // `active` value, just three targets instead of four (there's no
+    // Desktop sidebar's mirrored primary items [2026-09-10, +Growth 2026-09-28]
+    // -- same `active` value, just four targets instead of five (there's no
     // sidebar equivalent of the mobile MORE tab -- its contents are always
     // visible in the sidebar already, see renderSidebarExtra()).
-    [['sideHymnalBtn','hymnal'],['sideHostBtn','host'],['sideFellowshipBtn','fellowship']].forEach(function(pair){
+    [['sideHymnalBtn','hymnal'],['sideHostBtn','host'],['sideFellowshipBtn','fellowship'],['sideGrowthBtn','growth']].forEach(function(pair){
       const btn = document.getElementById(pair[0]);
       if(btn) btn.classList.toggle('sidebar-item-active', active === pair[1]);
     });
@@ -1686,13 +1686,25 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(!state.user){ showToast('Sign in to open Fellowship.'); state.view='landing'; render(); window.scrollTo(0,0); return; }
     openFellowshipFeed();
   }
+  // [2026-09-28] Growth promoted from a buried sidebar/hamburger "extra" item
+  // to a primary tab (Jared: "spiritual growth is supposed to be another
+  // main feature, why is it sidelined?") -- same signed-out-redirect pattern
+  // as goHostTab/goFellowshipTab above rather than openSpiritualGrowth()'s
+  // own toast-and-stay behavior, so a signed-out tap lands consistently on
+  // the landing screen like every other primary tab.
+  function goGrowthTab(){
+    if(!state.user){ showToast('Sign in to use Spiritual Growth.'); state.view='landing'; render(); window.scrollTo(0,0); return; }
+    openSpiritualGrowth();
+  }
   document.getElementById('tabHymnalBtn').addEventListener('click', goHymnalTab);
   document.getElementById('tabHostBtn').addEventListener('click', goHostTab);
   document.getElementById('tabFellowshipBtn').addEventListener('click', goFellowshipTab);
+  document.getElementById('tabGrowthBtn').addEventListener('click', goGrowthTab);
   document.getElementById('tabMoreBtn').addEventListener('click', openHamburger);
   document.getElementById('sideHymnalBtn').addEventListener('click', goHymnalTab);
   document.getElementById('sideHostBtn').addEventListener('click', goHostTab);
   document.getElementById('sideFellowshipBtn').addEventListener('click', goFellowshipTab);
+  document.getElementById('sideGrowthBtn').addEventListener('click', goGrowthTab);
 
   /* ============ HEADER CHROME + HAMBURGER MENU [2026-09-09] ============
      Jared: "add a burger button where the other stuff can also be
@@ -2167,15 +2179,22 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '</div>' +
       '<div class="hamburger-items">' +
       (signedIn ? (
+        // [2026-09-28] Jared: "the side bar is now crowded" -- same grouping
+        // as the desktop sidebar's renderSidebarExtra() (Personal / Church
+        // Tools / App), applied here too so mobile and desktop match.
         '<button type="button" class="hamburger-item" id="hbMyProfileBtn">MY PROFILE</button>' +
+        '<p class="hamburger-section-label">Personal</p>' +
         '<button type="button" class="hamburger-item" id="hbDevotionalsBtn">DEVOTIONALS</button>' +
-        '<button type="button" class="hamburger-item" id="hbSpiritualGrowthBtn">SPIRITUAL GROWTH</button>' +
-        (canHost() ? '<button type="button" class="hamburger-item" id="hbMediaLibraryBtn">MEDIA LIBRARY</button>' : '') +
         '<button type="button" class="hamburger-item" id="hbExploreBtn">EXPLORE &amp; SEARCH PEOPLE</button>' +
+        ((canHost() || state.isEditor || hasFullAccess() || canManageChurchTeam() || canManageAnyChurchTeam() || state.isAdmin) ? (
+          '<p class="hamburger-section-label">Church Tools</p>' +
+          (canHost() ? '<button type="button" class="hamburger-item" id="hbMediaLibraryBtn">MEDIA LIBRARY</button>' : '') +
+          ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
+          ((canManageChurchTeam() || canManageAnyChurchTeam()) ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
+          (state.isAdmin ? '<button type="button" class="hamburger-item" id="hbAdminBtn">ADMIN TOOLS</button>' : '')
+        ) : '') +
+        '<p class="hamburger-section-label">App</p>' +
         '<button type="button" class="hamburger-item" id="hbPlansBtn">PLANS &amp; PRICING</button>' +
-        ((state.isEditor || hasFullAccess()) ? '<button type="button" class="hamburger-item" id="hbSongRequestsBtn">SONG REQUESTS</button>' : '') +
-        ((canManageChurchTeam() || canManageAnyChurchTeam()) ? '<button type="button" class="hamburger-item" id="hbChurchTeamBtn">CHURCH TEAM</button>' : '') +
-        (state.isAdmin ? '<button type="button" class="hamburger-item" id="hbAdminBtn">ADMIN TOOLS</button>' : '') +
         '<button type="button" class="hamburger-item" id="hbAboutBtn">ABOUT IWORSHIP</button>' +
         '<button type="button" class="hamburger-item" id="hbSettingsBtn">SETTINGS</button>' +
         '<button type="button" class="hamburger-item hamburger-item-danger" id="hbSignOutBtn">SIGN OUT</button>'
@@ -2196,8 +2215,6 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(hbProfile) hbProfile.addEventListener('click', function(){ goTo(openProfileEdit); });
     const hbDevotionals = document.getElementById('hbDevotionalsBtn');
     if(hbDevotionals) hbDevotionals.addEventListener('click', function(){ goTo(function(){ state.view='devotionals'; render(); window.scrollTo(0,0); }); });
-    const hbSpiritualGrowth = document.getElementById('hbSpiritualGrowthBtn');
-    if(hbSpiritualGrowth) hbSpiritualGrowth.addEventListener('click', function(){ goTo(openSpiritualGrowth); });
     const hbMediaLibrary = document.getElementById('hbMediaLibraryBtn');
     if(hbMediaLibrary) hbMediaLibrary.addEventListener('click', function(){ goTo(function(){ openMediaLibrary('landing'); }); });
     const hbExplore = document.getElementById('hbExploreBtn');
@@ -2262,22 +2279,41 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // in-session-chat `chat` icon, plus the same unread-badge treatment
     // Notifications used to have.
     const unreadMsgs = unreadMessagesCount();
+    // [2026-09-28] Jared: "the side bar is now crowded." Same flat list of
+    // ~9 items, now grouped under three labels (Personal / Church Tools /
+    // App) instead of removing anything -- Church Tools only appears at
+    // all when at least one of its own role-gated rows would actually show,
+    // so a plain member never sees an empty section header. Mirrored below
+    // in renderHamburgerDrawerBody() for the mobile drawer.
+    const showMediaLibrary = canHost();
+    const showSongRequests = (state.isEditor || hasFullAccess());
+    const showChurchTeam = (canManageChurchTeam() || canManageAnyChurchTeam());
+    const showAdminTools = state.isAdmin;
+    const showChurchToolsSection = showMediaLibrary || showSongRequests || showChurchTeam || showAdminTools;
     slot.innerHTML =
       '<button type="button" class="sidebar-profile-row" id="sideProfileBtn">' +
         personAvatar(state.user.uid, 38) +
         '<span>'+escapeHtml(name || 'Your Account')+'</span>' +
       '</button>' +
       '<div class="sidebar-divider"></div>' +
+      '<p class="sidebar-section-label">Personal</p>' +
       '<div class="sidebar-section">' +
         '<button type="button" class="sidebar-item" id="sideMessagesBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('messenger')+'</svg><span>Messages</span>'+(unreadMsgs?(' <span class="notif-badge-inline">'+(unreadMsgs>99?'99+':unreadMsgs)+'</span>'):'')+'</button>' +
         '<button type="button" class="sidebar-item" id="sideDevotionalsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg><span>Devotionals</span></button>' +
-        '<button type="button" class="sidebar-item" id="sideSpiritualGrowthBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('heart')+'</svg><span>Spiritual Growth</span></button>' +
-        (canHost() ? ('<button type="button" class="sidebar-item" id="sideMediaLibraryBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>Media Library</span></button>') : '') +
         '<button type="button" class="sidebar-item" id="sideExploreBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('compass')+'</svg><span>Explore &amp; Search People</span></button>' +
+      '</div>' +
+      (showChurchToolsSection ? (
+        '<p class="sidebar-section-label">Church Tools</p>' +
+        '<div class="sidebar-section">' +
+          (showMediaLibrary ? ('<button type="button" class="sidebar-item" id="sideMediaLibraryBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg><span>Media Library</span></button>') : '') +
+          (showSongRequests ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
+          (showChurchTeam ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
+          (showAdminTools ? ('<button type="button" class="sidebar-item" id="sideAdminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>Admin Tools</span></button>') : '') +
+        '</div>'
+      ) : '') +
+      '<p class="sidebar-section-label">App</p>' +
+      '<div class="sidebar-section">' +
         '<button type="button" class="sidebar-item" id="sidePlansBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('tag')+'</svg><span>Plans &amp; Pricing</span></button>' +
-        ((state.isEditor || hasFullAccess()) ? ('<button type="button" class="sidebar-item" id="sideSongRequestsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>Song Requests</span></button>') : '') +
-        ((canManageChurchTeam() || canManageAnyChurchTeam()) ? ('<button type="button" class="sidebar-item" id="sideChurchTeamBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('users')+'</svg><span>Church Team</span></button>') : '') +
-        (state.isAdmin ? ('<button type="button" class="sidebar-item" id="sideAdminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('flag')+'</svg><span>Admin Tools</span></button>') : '') +
         '<button type="button" class="sidebar-item" id="sideAboutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('info')+'</svg><span>About iWorship</span></button>' +
         '<button type="button" class="sidebar-item" id="sideSettingsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+icon('gear')+'</svg><span>Settings</span></button>' +
       '</div>' +
@@ -2287,7 +2323,6 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.getElementById('sideProfileBtn').addEventListener('click', openProfileEdit);
     document.getElementById('sideMessagesBtn').addEventListener('click', openMessages);
     document.getElementById('sideDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
-    document.getElementById('sideSpiritualGrowthBtn').addEventListener('click', openSpiritualGrowth);
     const sideMediaLibraryBtn = document.getElementById('sideMediaLibraryBtn');
     if(sideMediaLibraryBtn) sideMediaLibraryBtn.addEventListener('click', function(){ openMediaLibrary('landing'); });
     document.getElementById('sideExploreBtn').addEventListener('click', openExplore);
@@ -6302,15 +6337,27 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
      "not built in this pass, on purpose" list.
 
      Screens (spiritualGrowthScreen): 'home' (four-card nav) ->
-     'invitation' / 'confirmation' / 'path' / 'topic' / 'journal'. Every
-     screen's own BACK button (rendered once by renderSpiritualGrowth()
-     itself, not per-screen) returns all the way to 'landing', matching
-     every other top-level screen in this app (About, Devotionals, etc.);
-     movement BETWEEN these five screens is a set of in-content buttons/
-     links instead (goToSgScreen()), same as About's own segmented tabs
-     just above. */
+     'invitation' / 'confirmation' / 'path' / 'topic' / 'journal'; movement
+     BETWEEN these five screens is a set of in-content buttons/links
+     (goToSgScreen()), same as About's own segmented tabs just above.
+
+     BACK button [2026-09-28, revised -- Jared: "fix the interface of the
+     spiritual growth, when I click back at certain sections, it goes all
+     the way back to the main page"]. The original design (every screen's
+     BACK returns straight to 'landing', matching About/Devotionals/etc.)
+     didn't fit here because, unlike About's tabs, Spiritual Growth's
+     screens are a real drill-down (home -> path -> topic, home ->
+     invitation, etc.), so jumping out of the whole feature from three
+     levels deep felt broken. Now goToSgScreen() pushes the screen/topic
+     being LEFT onto spiritualGrowthHistory before switching, and BACK
+     (goBackSgScreen()) pops one entry and returns to it -- one screen at
+     a time, e.g. topic -> path -> invitation -> home. Only BACK from
+     'home' itself (nothing left to pop) exits to 'landing', matching
+     every other top-level screen in the app. History resets to empty
+     each time openSpiritualGrowth() is opened fresh. */
   let spiritualGrowthScreen = 'home'; // 'home' | 'invitation' | 'confirmation' | 'path' | 'topic' | 'journal' -- set by openSpiritualGrowth()/goToSgScreen(), read by renderSpiritualGrowthBody()
   let spiritualGrowthActiveTopicKey = null; // which SPIRITUAL_GROWTH_TOPICS[].key is open on the 'topic' screen
+  let spiritualGrowthHistory = []; // stack of {screen, topicKey} entries LEFT behind by goToSgScreen(), popped one at a time by goBackSgScreen() -- see the BACK button note above
   let spiritualGrowthJournalDraft = ''; // shared textarea value for whichever journal composer is currently on screen
   let spiritualGrowthJournalDraftTopicKey = null; // null while the draft belongs to the Journal tab's own open box; a topic key while it belongs to that topic's "add a reflection" box -- keeps the two composers from clobbering each other's typed-but-unsaved text on re-render
 
@@ -6416,16 +6463,34 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     spiritualGrowthActiveTopicKey = null;
     spiritualGrowthJournalDraft = '';
     spiritualGrowthJournalDraftTopicKey = null;
+    spiritualGrowthHistory = [];
     startSpiritualGrowthWatch();
     startJournalWatch();
     state.view = 'spiritual-growth'; render(); window.scrollTo(0,0);
   }
   function goToSgScreen(screen, topicKey){
+    spiritualGrowthHistory.push({ screen: spiritualGrowthScreen, topicKey: spiritualGrowthActiveTopicKey });
     spiritualGrowthScreen = screen;
     spiritualGrowthActiveTopicKey = topicKey || null;
     spiritualGrowthJournalDraft = '';
     spiritualGrowthJournalDraftTopicKey = null;
     render(); window.scrollTo(0,0);
+  }
+  // Pops one step off spiritualGrowthHistory (one screen back); with
+  // nothing left to pop -- i.e. BACK from 'home' -- exits the whole
+  // feature to 'landing'. See the BACK button design note above
+  // spiritualGrowthScreen's declaration.
+  function goBackSgScreen(){
+    if(spiritualGrowthHistory.length){
+      const prev = spiritualGrowthHistory.pop();
+      spiritualGrowthScreen = prev.screen;
+      spiritualGrowthActiveTopicKey = prev.topicKey || null;
+      spiritualGrowthJournalDraft = '';
+      spiritualGrowthJournalDraftTopicKey = null;
+      render(); window.scrollTo(0,0);
+    } else {
+      state.view = 'landing'; render(); window.scrollTo(0,0);
+    }
   }
   function renderSpiritualGrowth(){
     main.innerHTML =
@@ -6435,9 +6500,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p class="landing-sub">A gentle, guided path &mdash; from a first gospel invitation to a lifetime of walking with God.</p>' +
       '</div>' +
       '<div id="sgBody">' + renderSpiritualGrowthBody() + '</div>';
-    document.getElementById('sgBackBtn').addEventListener('click', function(){
-      state.view='landing'; render(); window.scrollTo(0,0);
-    });
+    document.getElementById('sgBackBtn').addEventListener('click', goBackSgScreen);
     attachSpiritualGrowthBodyHandlers();
   }
   function renderSpiritualGrowthBody(){
@@ -6449,8 +6512,15 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return renderSpiritualGrowthHome();
   }
   function renderSpiritualGrowthHome(){
+    // [2026-09-28] Jared: "I've clicked 'I've accepted' but it keeps asking
+    // me again when I open it." -- the Invitation card's own description
+    // now reflects a decision already on file (state.spiritualGrowth.
+    // professedAt) instead of repeating the same first-time question every
+    // visit; see renderSpiritualGrowthInvitation() below for the matching
+    // change to the screen itself.
+    const alreadyProfessed = !!(state.spiritualGrowth && state.spiritualGrowth.professedAt);
     const NAV = [
-      { screen:'invitation', title:'The Gospel Invitation', desc:'Would you like to know God personally?' },
+      { screen:'invitation', title:'The Gospel Invitation', desc: alreadyProfessed ? 'Revisit the gospel message, any time you’d like.' : 'Would you like to know God personally?' },
       { screen:'confirmation', title:'You Can Be Sure', desc:'What just happened, and why you can be sure of it.' },
       { screen:'path', title:'Discipleship Path', desc:'Milestone topics for a new believer, at your own pace.' },
       { screen:'journal', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' }
@@ -6475,17 +6545,32 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     );
   }
   function renderSpiritualGrowthInvitation(){
+    // [2026-09-28] Jared: "I've clicked 'I've accepted' but it keeps asking
+    // me again when I open it." -- a decision already on file
+    // (state.spiritualGrowth.professedAt, set by recordSalvationDecision())
+    // now changes this screen instead of repeating the same first-time
+    // "have you prayed this?" prompt on every revisit: the content itself
+    // stays (it's good to be able to re-read), but the closing CTA becomes
+    // a plain acknowledgment + a way onward, not another altar call.
+    const alreadyProfessed = !!(state.spiritualGrowth && state.spiritualGrowth.professedAt);
     return (
       '<div class="about-section-card">' +
         '<span class="devotional-icon" aria-hidden="true" style="width:52px;height:52px;">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:26px;height:26px;">'+icon('heart')+'</svg>' +
         '</span>' +
+        (alreadyProfessed ? '<p class="hint" style="text-align:center;margin:-6px 0 6px;">You&rsquo;ve already made this decision &mdash; welcome back. Feel free to read it again any time.</p>' : '') +
         '<p class="about-section-title">'+escapeHtml(SPIRITUAL_GROWTH_INVITATION.title)+'</p>' +
         renderSgBlocks(SPIRITUAL_GROWTH_INVITATION.blocks) +
-        '<div style="margin-top:22px;display:flex;flex-direction:column;gap:10px;align-items:center;">' +
-          '<button type="button" class="btn btn-primary" id="sgProfessBtn" style="width:100%;max-width:360px;">I JUST PRAYED THIS / I&rsquo;VE ALREADY TRUSTED CHRIST</button>' +
-          '<button type="button" class="switch-account" id="sgKeepLearningBtn">Not ready yet &mdash; but I&rsquo;d like to keep learning &rarr;</button>' +
-        '</div>' +
+        (alreadyProfessed ?
+          '<div style="margin-top:22px;display:flex;flex-direction:column;gap:10px;align-items:center;">' +
+            '<button type="button" class="btn btn-primary" id="sgToPathFromInviteBtn" style="width:100%;max-width:360px;">CONTINUE YOUR DISCIPLESHIP PATH</button>' +
+          '</div>'
+        :
+          '<div style="margin-top:22px;display:flex;flex-direction:column;gap:10px;align-items:center;">' +
+            '<button type="button" class="btn btn-primary" id="sgProfessBtn" style="width:100%;max-width:360px;">I JUST PRAYED THIS / I&rsquo;VE ALREADY TRUSTED CHRIST</button>' +
+            '<button type="button" class="switch-account" id="sgKeepLearningBtn">Not ready yet &mdash; but I&rsquo;d like to keep learning &rarr;</button>' +
+          '</div>'
+        ) +
       '</div>'
     );
   }
@@ -6586,6 +6671,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
     const keepLearningBtn = document.getElementById('sgKeepLearningBtn');
     if(keepLearningBtn) keepLearningBtn.addEventListener('click', function(){ goToSgScreen('path'); });
+    const toPathFromInviteBtn = document.getElementById('sgToPathFromInviteBtn');
+    if(toPathFromInviteBtn) toPathFromInviteBtn.addEventListener('click', function(){ goToSgScreen('path'); });
   }
   function attachSpiritualGrowthConfirmationHandlers(){
     const toPathBtn = document.getElementById('sgToPathBtn');

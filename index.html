@@ -196,7 +196,7 @@
        replaces it entirely (bottom tabs are hidden there) AND absorbs the
        hamburger drawer's contents, so nothing on desktop is hidden behind
        a menu the way Facebook's own left rail keeps navigation always
-       visible. The three primary buttons mirror the bottom tabs exactly
+       visible. The four primary buttons mirror the bottom tabs exactly
        (same click handlers, see app.js) -- #sidebarExtraSlot is rebuilt
        live every render() by renderSidebarExtra(), same pattern as the
        hamburger drawer's own body. -->
@@ -215,6 +215,22 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-10-9.3C.4 8.4 2 5 5.4 5c2 0 3.4 1.1 4.1 2.2C10.2 6.1 11.6 5 13.6 5 17 5 18.6 8.4 17 11.7 15.5 16.4 12 21 12 21Z"/></svg>
           <span>Fellowship</span>
         </button>
+        <!-- Spiritual Growth promoted to a primary section [2026-09-28] --
+             Jared: "spiritual growth is supposed to be another main
+             feature, why is it sidelined?" Mirrors Hymnal/Host/Fellowship
+             exactly (same active-state/click-handler pattern in app.js).
+             Uses a sprout icon -- the first draft here reused the compass
+             icon, but that's already Explore & Search People's icon further
+             down this same sidebar (see renderSidebarExtra() in app.js),
+             so two different nav rows would've shown the identical glyph.
+             Heart was ruled out too since that's Fellowship's tab icon just
+             above. Sprout is unique in this set and reads as "growth" on
+             its own; the feature's own screens inside still use the heart
+             badge, this is only the primary-nav tab's icon. -->
+        <button type="button" class="sidebar-item" id="sideGrowthBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6Z"/><path d="M12 13c0-3.5-2.5-5.5-6-5.5 0 3.5 2.5 5.5 6 5.5Z"/></svg>
+          <span>Growth</span>
+        </button>
       </div>
       <div class="sidebar-divider"></div>
       <div id="sidebarExtraSlot"></div>
@@ -227,12 +243,15 @@
 
   <!-- Bottom tab bar [2026-09-10] -- Jared: "I need you to come up with a
        smoother and better looking way to switch between hymnal mode, host
-       mode, and fellowship mode." A 4th MORE tab replaces the old top-bar
+       mode, and fellowship mode." A MORE tab replaces the old top-bar
        hamburger button, opening the exact same drawer (#hamburgerOverlay
        below) -- see renderBottomTabs()/inFellowshipMode()/inHostMode() in
        app.js for how the active tab is picked. Hidden on the standalone
        stage/projector view alongside the topbar/footer (see body.stage-page
-       in styles.css). -->
+       in styles.css). Growth added as a 5th primary tab [2026-09-28] --
+       Jared: "spiritual growth is supposed to be another main feature, why
+       is it sidelined?" -- .bottom-tab's flex:1 sizing (styles.css) needed
+       no change to fit a 5th tab. -->
   <nav class="bottom-tabs" id="bottomTabs">
     <button type="button" class="bottom-tab" id="tabHymnalBtn" aria-label="Hymnal">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c4-2 8-1 8 1v13c0-2-4-3-8-1V5Z"/><path d="M20 5c-4-2-8-1-8 1v13c0-2 4-3 8-1V5Z"/></svg>
@@ -245,6 +264,10 @@
     <button type="button" class="bottom-tab" id="tabFellowshipBtn" aria-label="Fellowship">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7.5-4.6-10-9.3C.4 8.4 2 5 5.4 5c2 0 3.4 1.1 4.1 2.2C10.2 6.1 11.6 5 13.6 5 17 5 18.6 8.4 17 11.7 15.5 16.4 12 21 12 21Z"/></svg>
       <span>FELLOWSHIP</span>
+    </button>
+    <button type="button" class="bottom-tab" id="tabGrowthBtn" aria-label="Spiritual Growth">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13c0-4 3-6 7-6 0 4-3 6-7 6Z"/><path d="M12 13c0-3.5-2.5-5.5-6-5.5 0 3.5 2.5 5.5 6 5.5Z"/></svg>
+      <span>GROWTH</span>
     </button>
     <button type="button" class="bottom-tab" id="tabMoreBtn" aria-label="More">
       <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>

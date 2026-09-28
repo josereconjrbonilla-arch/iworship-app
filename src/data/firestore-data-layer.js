@@ -498,6 +498,39 @@ export async function deleteJournalEntry(uid, entryId) {
   await deleteDoc(doc(db, 'spiritualGrowth', uid, 'journal', entryId));
 }
 
+// -------------------------------------------- SPIRITUAL GROWTH: CUSTOM TOPICS
+// [2026-09-28] "growth means continual... yep I want an expanding path" --
+// Jared confirmed he wants the 9-topic Discipleship Path to actually grow
+// over time, not just point onward once finished (see the "Growth Doesn't
+// Stop Here" completion card added just above this in the app's history).
+// The 9 built-in SPIRITUAL_GROWTH_TOPICS in app.js stay exactly as they are
+// (zero migration risk -- milestones are keyed by topic `key`, and those
+// keys never change); new topics an Admin authors live in this separate
+// top-level collection instead and get merged with the built-in set at
+// render time by app.js's allSpiritualGrowthTopics(). Admin-only write (see
+// firestore.rules' growthTopics/{topicId} block, right below spiritualGrowth/
+// {uid} and reasoned the same way churches/{churchId} is: this is doctrinal
+// content, same gate as "who can add a hymn"). v1 scope is deliberately
+// add + list + delete only, no edit/reorder -- ordering is just createdAt,
+// and a wrong topic gets deleted and re-added rather than patched in place.
+export function watchGrowthTopics(callback) {
+  const q = query(collection(db, 'growthTopics'), orderBy('createdAt', 'asc'));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  });
+}
+export async function addGrowthTopic(title, blocks) {
+  await addDoc(collection(db, 'growthTopics'), {
+    title: title,
+    blocks: blocks,
+    createdAt: serverTimestamp(),
+    createdBy: auth.currentUser ? auth.currentUser.uid : null
+  });
+}
+export async function deleteGrowthTopic(topicId) {
+  await deleteDoc(doc(db, 'growthTopics', topicId));
+}
+
 // Every signed-up profile, for the Admin screen's "find by name" search --
 // so an Admin can assign a role/beta access without already having the
 // person's Account ID in hand. Safe to list unfiltered under firestore.rules'

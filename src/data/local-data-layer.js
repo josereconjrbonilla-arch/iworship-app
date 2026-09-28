@@ -17,6 +17,7 @@ const LS_USER = 'iworship:local:user';
 const LS_MESSAGES_PREFIX = 'iworship:local:messages:';
 const LS_SPIRITUAL_GROWTH_PREFIX = 'iworship:local:spiritualgrowth:';
 const LS_JOURNAL_PREFIX = 'iworship:local:journal:';
+const LS_GROWTH_TOPICS = 'iworship:local:growthTopics';
 
 let channel = null;
 try { channel = new BroadcastChannel('iworship-local'); } catch (e) { /* unsupported */ }
@@ -402,6 +403,37 @@ export async function deleteJournalEntry(uid, entryId) {
   const key = LS_JOURNAL_PREFIX + uid;
   writeJSON(key, readJSON(key, []).filter((e) => e.id !== entryId));
   broadcast('journal:' + uid);
+}
+
+// Spiritual Growth: custom topics [2026-09-28] -- demo-mode mirror of the
+// real Firestore layer's growthTopics/{topicId} collection (see that file's
+// matching comment for the full "expanding path" design). Unlike the
+// per-uid keys just above, this is a single GLOBAL key shared by every demo
+// user on this browser, same shape as LS_SONGS -- an admin-authored topic is
+// content everyone's Path should show, not something scoped to one uid.
+export function watchGrowthTopics(callback) {
+  const fire = () => {
+    const list = readJSON(LS_GROWTH_TOPICS, []);
+    callback(list.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
+  };
+  fire();
+  return onBroadcast('growthTopics', fire);
+}
+export async function addGrowthTopic(title, blocks) {
+  const list = readJSON(LS_GROWTH_TOPICS, []);
+  list.push({
+    id: 'topic-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    title: title,
+    blocks: blocks,
+    createdAt: Date.now(),
+    createdBy: currentUser()?.uid || null
+  });
+  writeJSON(LS_GROWTH_TOPICS, list);
+  broadcast('growthTopics');
+}
+export async function deleteGrowthTopic(topicId) {
+  writeJSON(LS_GROWTH_TOPICS, readJSON(LS_GROWTH_TOPICS, []).filter((t) => t.id !== topicId));
+  broadcast('growthTopics');
 }
 
 // ---------------------------------------------------------------------- Rooms

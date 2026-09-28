@@ -555,6 +555,26 @@ service cloud.firestore {
       }
     }
 
+    // ============================================ SPIRITUAL GROWTH: CUSTOM
+    // TOPICS [2026-09-28] "growth means continual... yep I want an expanding
+    // path" -- Jared wants the 9-topic Discipleship Path above to be able to
+    // grow over time. Rather than migrate the hardcoded built-in topics (each
+    // keyed by a string `key` that spiritualGrowth/{uid}'s milestones map
+    // already references -- zero reason to touch that), additional topics an
+    // Admin authors live here as their own documents and get merged with the
+    // built-in set at render time (see allSpiritualGrowthTopics() in
+    // app.js). Doctrinal content -- who can author a discipleship lesson is
+    // the same question as "who can add a song" or "who runs churches/" above:
+    // Admin-only write, matching every other doctrinal-content collection in
+    // this file (churches/{churchId} just above is the closest precedent).
+    // Signed-in read: any signed-in user needs to see these to walk the Path,
+    // same as the built-in topics (which ship in the client bundle, so are
+    // effectively public already).
+    match /growthTopics/{topicId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     // ========================================================= SONG REQUESTS
     // [2026-09-04] The free-access path for someone who can't add songs
     // directly (see canAddSongsRole() above) to still suggest a hymn: they

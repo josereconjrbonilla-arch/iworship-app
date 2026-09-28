@@ -1002,3 +1002,41 @@ progress badge/percentage anywhere outside the path screen itself; a way to un-p
 progress (Settings has no "clear my Spiritual Growth data" control yet -- would need its own
 explicit ask, given how sensitive this data is); and any tie-in to Fellowship (a profession or
 journal entry is never shareable to the feed, unlike a devotional).
+
+### Expanding Discipleship Path: custom topics [2026-09-28 continued]
+
+Jared, after the Path first shipped: "bro growth means continual. why does it end after the last
+lesson?" -- first answered narrowly with a "Growth Doesn't Stop Here" completion card pointing on to
+Journal/Devotionals. He then confirmed the broader ask directly: "yep I want an expanding path" -- the
+Path itself should be able to grow with new topics over time, not just the 9 built-in ones.
+
+The 9 built-in `SPIRITUAL_GROWTH_TOPICS` (`app.js`) are left completely untouched -- no migration,
+since `spiritualGrowth/{uid}`'s `milestones` map is keyed by topic `key` and those keys never change.
+Additional topics instead live in a new, separate, top-level collection, `growthTopics/{topicId}`:
+`{ title: string, blocks: Block[], createdAt: Timestamp, createdBy: uid }`, where `Block` is the exact
+same shape `renderSgBlocks()` in `app.js` already consumes for a built-in topic's reading content
+(`{type:'p'|'label'|'verse', text, ref?}` -- `'p'` is a plain paragraph; the admin authoring UI (see
+below) labels these Paragraph / Section Label / Bible Verse. See the built-in topics' own definitions
+for the precise per-type fields). `watchGrowthTopics(callback)` / `addGrowthTopic(title, blocks)` /
+`deleteGrowthTopic(topicId)` are the only three functions -- v1 is deliberately add + list + delete
+only, no edit/reorder (topics sort by `createdAt` ascending; a wrong one gets deleted and re-added
+rather than patched in place).
+
+🔶 **Write access is Admin-only** (`firestore.rules`' `growthTopics/{topicId}`: `allow read: if
+isSignedIn(); allow write: if isAdmin();`) -- the same gate as `churches/{churchId}` and every other
+doctrinal-content collection in this file (who can add a discipleship lesson is the same question as
+who can add a hymn or register a church). This is a default, not something Jared was asked to
+confirm first -- flagging it here in case he wants topic-authoring opened up to another role (e.g.
+editors) later, which would just mean loosening this one rule line.
+
+`app.js` merges built-in + custom at render time via `allSpiritualGrowthTopics()` (built-in array
+concatenated with `state.spiritualGrowthCustomTopics`, the latter populated by a
+`startGrowthTopicsWatch()` call alongside `openSpiritualGrowth()`'s existing
+`startSpiritualGrowthWatch()`/`startJournalWatch()`), rather than migrating or duplicating data --
+every existing callsite that used to read `SPIRITUAL_GROWTH_TOPICS` directly (the Path list, the
+all-done completion check, the topic-detail screen, and the Journal's "from: &lt;topic&gt;" lookup)
+now reads through this merged accessor instead, so a custom topic behaves identically to a built-in
+one everywhere in the UI once it's Admin-authored. Authoring itself is a new Admin-only card
+(`renderAdmin()`) with a repeatable block-list editor (add/remove a block, each with a type selector
+-- Paragraph / Section Label / Bible Verse -- and that type's own field(s)) rather than a parsed-text
+mini-syntax, since Jared authors these himself and isn't a developer.

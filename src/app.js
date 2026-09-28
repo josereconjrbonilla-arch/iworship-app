@@ -14,6 +14,7 @@ import {
   watchAllUsers, watchDirectory, watchChurchRoster,
   watchSpiritualGrowth, recordSalvationDecision, setMilestoneComplete,
   watchJournalEntries, addJournalEntry, deleteJournalEntry,
+  watchGrowthTopics, addGrowthTopic, deleteGrowthTopic,
   submitSongRequest, watchPendingSongRequests, watchMySongRequests, reviewSongRequest,
   createSermon, updateSermon, deleteSermon, watchMySermons, watchSermon,
   shareSermon, unshareSermon, watchSermonsSharedWithMe,
@@ -145,6 +146,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     churchRoster: [],        // populated live by watchChurchRoster(profile.churchId) while state.view === 'church-team' -- raw {uid,churchId,role,pastorTitle} rows; display info comes from state.directory (see startChurchRosterWatch())
     spiritualGrowth: null,   // populated live by watchSpiritualGrowth(uid) while state.view === 'spiritual-growth' -- {professedAt, milestones} for the signed-in person's own account only (see startSpiritualGrowthWatch())
     journalEntries: [],      // populated live by watchJournalEntries(uid) while state.view === 'spiritual-growth' -- this person's own private journal, newest first (see startJournalWatch())
+    spiritualGrowthCustomTopics: [], // populated live by watchGrowthTopics() -- ALWAYS running, same as state.library/watchSongs() just below, since these are public Admin-authored topics rather than per-uid data; merged with the hardcoded SPIRITUAL_GROWTH_TOPICS by allSpiritualGrowthTopics() (see that function's comment)
     mySongRequests: [],      // populated live by watchMySongRequests() while state.view === 'song-request'
     pendingSongRequests: [], // populated live by watchPendingSongRequests() while state.view === 'song-request-queue'
     activeRoomCode: safeSessionGet('cv:activeRoomCode', null),
@@ -1475,7 +1477,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     render();
   });
 
-
+  /* ============ SPIRITUAL GROWTH: CUSTOM TOPICS ============ */
+  // [2026-09-28] "yep I want an expanding path" -- watched unconditionally,
+  // signed-in or not, exactly like watchSongs() just above: these are public,
+  // Admin-authored topics (see firestore.rules' growthTopics/{topicId}
+  // block), not per-uid data, so there's no reason to gate this on
+  // state.user the way startSpiritualGrowthWatch()/startJournalWatch() gate
+  // that user's own private milestones/journal. Only the Spiritual Growth
+  // screen itself re-renders on a live update -- see allSpiritualGrowthTopics()
+  // below for where this gets merged with the hardcoded built-in topics.
+  watchGrowthTopics(function(topics){
+    state.spiritualGrowthCustomTopics = topics;
+    if(state.view === 'spiritual-growth' || state.view === 'admin') render();
+  });
 
   /* ============ THEME ============ */
   // Preference stored is 'light' | 'dark' | 'system' -- 'system' (the
@@ -3958,6 +3972,137 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // adminLibraryQuery above.
   let adminUsageQuery = '';
 
+  // ============================== SPIRITUAL GROWTH: CUSTOM TOPICS (ADMIN)
+  // [2026-09-28] "yep I want an expanding path" -- same null-means-closed
+  // draft pattern as adminChurchDraft above. A GROWTH_TOPIC_BLOCK_TYPES block
+  // is a repeatable list editor rather than a parsed-text mini-syntax, since
+  // Jared authors these himself and isn't a developer -- each block is just
+  // {type, text, ref?}, the exact shape renderSgBlocks() already knows how to
+  // read for a built-in topic (see that function above), reused unchanged.
+  const GROWTH_TOPIC_BLOCK_TYPES = [
+    { id:'p', label:'Paragraph' },
+    { id:'label', label:'Section Label' },
+    { id:'verse', label:'Bible Verse' }
+  ];
+  let adminGrowthTopicDraft = null; // null = just the list is showing; an object ({title, blocks}) = the new-topic form is open
+  let adminGrowthTopicRemoveConfirmId = null; // tap-to-confirm delete, same pattern as churchTeamRemoveConfirmUid above
+  function newGrowthTopicDraft(){
+    return { title: '', blocks: [ { type:'p', text:'' } ] };
+  }
+
+  function renderAdminGrowthTopicsSection(){
+    const custom = state.spiritualGrowthCustomTopics || [];
+    return (
+      (custom.length ? ('<ul class="setlist-items">' + custom.map(function(t){
+        const confirming = adminGrowthTopicRemoveConfirmId === t.id;
+        return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(t.title||'(untitled)')+'</span>' +
+          '<span class="setlist-controls">' +
+          (confirming ? (
+            '<span class="hint">Delete this topic?</span>' +
+            '<button type="button" class="icon-btn-sm" data-growth-topic-remove-yes="'+escapeAttr(t.id)+'" style="width:auto;padding:0 8px;">YES, DELETE</button>' +
+            '<button type="button" class="icon-btn-sm" data-growth-topic-remove-cancel="1" style="width:auto;padding:0 8px;">CANCEL</button>'
+          ) : (
+            '<button type="button" class="icon-btn-sm" data-growth-topic-remove-ask="'+escapeAttr(t.id)+'" aria-label="Delete" style="width:auto;padding:0 8px;">DELETE</button>'
+          )) +
+          '</span></li>';
+      }).join('') + '</ul>') : '<p class="hint">No custom topics yet -- the Discipleship Path currently shows just the 9 built-in topics.</p>') +
+      (adminGrowthTopicDraft ? renderAdminGrowthTopicForm() :
+        '<button class="btn btn-ghost" id="newGrowthTopicBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>ADD A TOPIC</button>')
+    );
+  }
+
+  function renderAdminGrowthTopicForm(){
+    const d = adminGrowthTopicDraft;
+    return '<div class="signin-card" style="margin-top:14px;">' +
+      '<h3>New Discipleship Topic</h3>' +
+      '<div class="field"><label for="growthTopicTitleInput">TITLE</label><input type="text" id="growthTopicTitleInput" placeholder="e.g. Fasting" value="'+escapeAttr(d.title)+'"></div>' +
+      '<p class="control-label uc" style="margin:14px 0 8px;">Content</p>' +
+      d.blocks.map(function(b, i){
+        return '<div class="field" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px;">' +
+          '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">' +
+            '<select data-growth-block-type="'+i+'" style="width:auto;flex:none;">' +
+              GROWTH_TOPIC_BLOCK_TYPES.map(function(bt){ return '<option value="'+bt.id+'" '+(b.type===bt.id?'selected':'')+'>'+bt.label+'</option>'; }).join('') +
+            '</select>' +
+            '<span class="hint" style="flex:1;">Block '+(i+1)+'</span>' +
+            (d.blocks.length > 1 ? '<button type="button" class="icon-btn-sm" data-growth-block-remove="'+i+'" aria-label="Remove block" style="width:auto;padding:0 8px;flex:none;">REMOVE</button>' : '') +
+          '</div>' +
+          (b.type === 'verse' ? '<input type="text" data-growth-block-ref="'+i+'" placeholder="Reference, e.g. John 3:16" value="'+escapeAttr(b.ref||'')+'" style="margin-bottom:8px;">' : '') +
+          '<textarea data-growth-block-text="'+i+'" rows="'+(b.type==='label'?1:3)+'" placeholder="'+(b.type==='label'?'Short label text':(b.type==='verse'?'The verse text itself':'Paragraph text'))+'">'+escapeHtml(b.text||'')+'</textarea>' +
+        '</div>';
+      }).join('') +
+      '<button class="btn btn-ghost" id="addGrowthBlockBtn" style="margin-bottom:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('plus')+'</svg>ADD A BLOCK</button>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button class="btn btn-primary" id="saveGrowthTopicBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg>SAVE TOPIC</button>' +
+        '<button class="btn btn-ghost" id="cancelGrowthTopicBtn">CANCEL</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function attachAdminGrowthTopicsHandlers(){
+    const newBtn = document.getElementById('newGrowthTopicBtn');
+    if(newBtn) newBtn.addEventListener('click', function(){ adminGrowthTopicDraft = newGrowthTopicDraft(); render(); });
+
+    document.querySelectorAll('[data-growth-topic-remove-ask]').forEach(function(btn){
+      btn.addEventListener('click', function(){ adminGrowthTopicRemoveConfirmId = btn.getAttribute('data-growth-topic-remove-ask'); render(); });
+    });
+    document.querySelectorAll('[data-growth-topic-remove-cancel]').forEach(function(btn){
+      btn.addEventListener('click', function(){ adminGrowthTopicRemoveConfirmId = null; render(); });
+    });
+    document.querySelectorAll('[data-growth-topic-remove-yes]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const id = btn.getAttribute('data-growth-topic-remove-yes');
+        btn.disabled = true;
+        deleteGrowthTopic(id).then(function(){ showToast('Topic deleted.'); adminGrowthTopicRemoveConfirmId = null; render(); })
+          .catch(function(){ showToast('Couldn&rsquo;t delete that topic &mdash; check you&rsquo;re still signed in as an Admin.'); btn.disabled = false; });
+      });
+    });
+
+    if(!adminGrowthTopicDraft) return;
+    const d = adminGrowthTopicDraft;
+    const titleEl = document.getElementById('growthTopicTitleInput');
+    if(titleEl) titleEl.addEventListener('input', function(e){ d.title = e.target.value; });
+
+    document.querySelectorAll('[data-growth-block-type]').forEach(function(el){
+      el.addEventListener('change', function(e){ d.blocks[parseInt(el.getAttribute('data-growth-block-type'),10)].type = e.target.value; render(); });
+    });
+    document.querySelectorAll('[data-growth-block-text]').forEach(function(el){
+      el.addEventListener('input', function(e){ d.blocks[parseInt(el.getAttribute('data-growth-block-text'),10)].text = e.target.value; });
+    });
+    document.querySelectorAll('[data-growth-block-ref]').forEach(function(el){
+      el.addEventListener('input', function(e){ d.blocks[parseInt(el.getAttribute('data-growth-block-ref'),10)].ref = e.target.value; });
+    });
+    document.querySelectorAll('[data-growth-block-remove]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        d.blocks.splice(parseInt(btn.getAttribute('data-growth-block-remove'),10), 1);
+        render();
+      });
+    });
+    const addBlockBtn = document.getElementById('addGrowthBlockBtn');
+    if(addBlockBtn) addBlockBtn.addEventListener('click', function(){ d.blocks.push({ type:'p', text:'' }); render(); });
+
+    const saveBtn = document.getElementById('saveGrowthTopicBtn');
+    if(saveBtn) saveBtn.addEventListener('click', async function(){
+      const title = (d.title||'').trim();
+      if(!title){ showToast('Give the topic a title first.'); return; }
+      const blocks = d.blocks.map(function(b){
+        return b.type === 'verse' ? { type:'verse', text:(b.text||'').trim(), ref:(b.ref||'').trim() } : { type:b.type, text:(b.text||'').trim() };
+      }).filter(function(b){ return b.text; });
+      if(!blocks.length){ showToast('Add at least one block with some text.'); return; }
+      saveBtn.disabled = true;
+      try{
+        await addGrowthTopic(title, blocks);
+        showToast('Saved &ldquo;'+title+'&rdquo; to the Discipleship Path.');
+        adminGrowthTopicDraft = null;
+        render();
+      }catch(e){
+        showToast('Couldn&rsquo;t save that topic &mdash; check you&rsquo;re still signed in as an Admin.');
+        saveBtn.disabled = false;
+      }
+    });
+    const cancelBtn = document.getElementById('cancelGrowthTopicBtn');
+    if(cancelBtn) cancelBtn.addEventListener('click', function(){ adminGrowthTopicDraft = null; render(); });
+  }
+
   function renderAdmin(){
     if(!state.isAdmin){ state.view='landing'; render(); return; }
     main.innerHTML =
@@ -3995,10 +4140,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<h3>Reports</h3>' +
         '<p>Posts and profiles reported by anyone in Fellowship &mdash; block/report was built in from day one, per Jared&rsquo;s call.</p>' +
         renderAdminReportsSection() +
+      '</div>' +
+      '<div class="session-card">' +
+        '<h3>Discipleship Path Topics</h3>' +
+        '<p>The Spiritual Growth feature&rsquo;s 9 built-in topics always show first; anything added here shows after them, to every signed-in user, in the order added.</p>' +
+        renderAdminGrowthTopicsSection() +
       '</div>';
 
     document.getElementById('adminBackBtn').addEventListener('click', function(){
       stopAdminChurchesWatch(); stopAdminUsersWatch(); stopPendingReportsWatch(); stopDirectoryWatch(); adminChurchDraft = null; adminEditingChurchId = null;
+      adminGrowthTopicDraft = null; adminGrowthTopicRemoveConfirmId = null;
       state.view='landing'; render(); window.scrollTo(0,0);
     });
 
@@ -4030,6 +4181,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     attachAdminBetaFormHandlers();
     attachAdminSongUsageHandlers();
     attachAdminReportsHandlers();
+    attachAdminGrowthTopicsHandlers();
   }
 
   // Song usage tracking [2026-09-24] -- see adminUsageQuery's own comment
@@ -6448,6 +6600,23 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     ] }
   ];
 
+  // Expanding Discipleship Path [2026-09-28] -- "bro growth means continual.
+  // why does it end after the last lesson?" -> confirmed: "yep I want an
+  // expanding path." The 9 topics above stay exactly as they are (milestones
+  // are keyed by topic `key`, so nothing about them can change without
+  // breaking someone's existing progress); new topics an Admin authors
+  // instead live in Firestore's growthTopics collection (state.
+  // spiritualGrowthCustomTopics, kept live by the unconditional
+  // watchGrowthTopics() call near watchSongs()) and get merged in here, at
+  // read time, rather than migrated into the hardcoded array. Every place
+  // that used to read SPIRITUAL_GROWTH_TOPICS directly now reads through
+  // this instead, so a custom topic behaves identically to a built-in one
+  // everywhere -- the Path list, the "every topic done" checks, the topic
+  // detail screen, and the Journal's "from: <topic>" lookup.
+  function allSpiritualGrowthTopics(){
+    return SPIRITUAL_GROWTH_TOPICS.concat(state.spiritualGrowthCustomTopics || []);
+  }
+
   function renderSgBlocks(blocks){
     return blocks.map(function(b){
       if(b.type === 'label') return '<p class="sg-label">'+escapeHtml(b.text)+'</p>';
@@ -6519,10 +6688,18 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // visit; see renderSpiritualGrowthInvitation() below for the matching
     // change to the screen itself.
     const alreadyProfessed = !!(state.spiritualGrowth && state.spiritualGrowth.professedAt);
+    // [2026-09-28] Jared: "growth means continual. why does it end after
+    // the last lesson?" -- the Path card's own description now reflects
+    // whether every topic is already marked read, same treatment as the
+    // Invitation card above; see renderSpiritualGrowthPath() below for the
+    // matching "growth doesn't stop here" card shown once the Path itself
+    // is fully read.
+    const pathMilestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
+    const pathAllDone = allSpiritualGrowthTopics().every(function(t){ return !!(pathMilestones[t.key] && pathMilestones[t.key].completedAt); });
     const NAV = [
       { screen:'invitation', title:'The Gospel Invitation', desc: alreadyProfessed ? 'Revisit the gospel message, any time you’d like.' : 'Would you like to know God personally?' },
       { screen:'confirmation', title:'You Can Be Sure', desc:'What just happened, and why you can be sure of it.' },
-      { screen:'path', title:'Discipleship Path', desc:'Milestone topics for a new believer, at your own pace.' },
+      { screen:'path', title:'Discipleship Path', desc: pathAllDone ? 'You’ve read every topic here -- growth keeps going below.' : 'Milestone topics for a new believer, at your own pace.' },
       { screen:'journal', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' }
     ];
     return (
@@ -6588,12 +6765,25 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
   function renderSpiritualGrowthPath(){
     const milestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
+    // [2026-09-28] Jared: "bro growth means continual. why does it end
+    // after the last lesson?" -- these nine topics are a deliberately
+    // finite set of one-time foundational milestones (assurance, baptism,
+    // etc.), not an endless feed, so the LIST itself still has a real end.
+    // What was missing is what happens once you reach it: the screen used
+    // to just sit there as a completed checklist with nowhere to go next.
+    // Finishing every topic now surfaces a second card pointing onward to
+    // the two genuinely ongoing parts of this feature -- the Journal
+    // (write any time) and the app's existing daily Devotionals -- instead
+    // of the path just quietly stopping. See attachSpiritualGrowthPathHandlers()
+    // for the two new buttons' handlers.
+    const allTopics = allSpiritualGrowthTopics();
+    const allDone = allTopics.every(function(t){ return !!(milestones[t.key] && milestones[t.key].completedAt); });
     return (
       '<div class="about-section-card">' +
         '<p class="about-section-title">Discipleship Path</p>' +
         '<p class="about-section-intro">Short topics, most-foundational first -- read them in any order, at your own pace. Tap one to begin.</p>' +
         '<div class="about-feature-list">' +
-          SPIRITUAL_GROWTH_TOPICS.map(function(t){
+          allTopics.map(function(t){
             const done = !!(milestones[t.key] && milestones[t.key].completedAt);
             return '<button type="button" class="about-feature-item" data-sg-topic="'+t.key+'" style="width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer;">' +
               '<span class="about-feature-check" aria-hidden="true" style="'+(done?'':'background:var(--border);color:var(--ink-soft);')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg></span>' +
@@ -6601,11 +6791,25 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '</button>';
           }).join('') +
         '</div>' +
-      '</div>'
+      '</div>' +
+      (allDone ?
+        '<div class="about-section-card" style="margin-top:16px;">' +
+          '<span class="devotional-icon" aria-hidden="true" style="width:44px;height:44px;">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;">'+icon('sprout')+'</svg>' +
+          '</span>' +
+          '<p class="about-section-title">Growth Doesn&rsquo;t Stop Here</p>' +
+          '<p class="about-section-intro">You&rsquo;ve been through every topic on this path &mdash; but that&rsquo;s not the finish line, it&rsquo;s the foundation. You can always come back and re-read any topic above. In the meantime, growth keeps going here:</p>' +
+          '<div style="display:flex;flex-direction:column;gap:10px;align-items:center;margin-top:6px;">' +
+            '<button type="button" class="btn btn-primary" id="sgToJournalFromPathBtn" style="width:100%;max-width:360px;">WRITE IN YOUR JOURNAL</button>' +
+            '<button type="button" class="switch-account" id="sgToDevotionalsFromPathBtn">Read today&rsquo;s devotional &rarr;</button>' +
+          '</div>' +
+        '</div>'
+      : '')
     );
   }
   function renderSpiritualGrowthTopic(){
-    const topic = SPIRITUAL_GROWTH_TOPICS.find(function(t){ return t.key === spiritualGrowthActiveTopicKey; }) || SPIRITUAL_GROWTH_TOPICS[0];
+    const allTopics = allSpiritualGrowthTopics();
+    const topic = allTopics.find(function(t){ return t.key === spiritualGrowthActiveTopicKey; }) || allTopics[0];
     const milestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
     const done = !!(milestones[topic.key] && milestones[topic.key].completedAt);
     return (
@@ -6636,7 +6840,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         (entries.length ?
           '<div class="about-feature-list" style="margin-top:22px;">' +
             entries.map(function(e){
-              const topic = e.milestoneKey ? SPIRITUAL_GROWTH_TOPICS.find(function(t){ return t.key === e.milestoneKey; }) : null;
+              const topic = e.milestoneKey ? allSpiritualGrowthTopics().find(function(t){ return t.key === e.milestoneKey; }) : null;
               return '<div class="about-feature-item" style="align-items:flex-start;">' +
                 '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('heart')+'</svg></span>' +
                 '<div style="flex:1;min-width:0;">' +
@@ -6682,13 +6886,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.querySelectorAll('[data-sg-topic]').forEach(function(btn){
       btn.addEventListener('click', function(){ goToSgScreen('topic', btn.getAttribute('data-sg-topic')); });
     });
+    const toJournalBtn = document.getElementById('sgToJournalFromPathBtn');
+    if(toJournalBtn) toJournalBtn.addEventListener('click', function(){ goToSgScreen('journal'); });
+    const toDevotionalsBtn = document.getElementById('sgToDevotionalsFromPathBtn');
+    // Devotionals is a separate top-level screen, not one of Spiritual
+    // Growth's own five -- this deliberately exits the feature entirely
+    // (state.view='devotionals') rather than calling goToSgScreen(), same
+    // as any other cross-feature link elsewhere in the app.
+    if(toDevotionalsBtn) toDevotionalsBtn.addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
   }
   function attachSpiritualGrowthTopicHandlers(){
     const crumb = document.getElementById('sgToPathCrumb');
     if(crumb) crumb.addEventListener('click', function(e){ e.preventDefault(); goToSgScreen('path'); });
     const markBtn = document.getElementById('sgMarkDoneBtn');
     if(markBtn) markBtn.addEventListener('click', function(){
-      const topic = SPIRITUAL_GROWTH_TOPICS.find(function(t){ return t.key === spiritualGrowthActiveTopicKey; });
+      const topic = allSpiritualGrowthTopics().find(function(t){ return t.key === spiritualGrowthActiveTopicKey; });
       if(!topic) return;
       const milestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
       const done = !!(milestones[topic.key] && milestones[topic.key].completedAt);

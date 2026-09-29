@@ -810,6 +810,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // run yet -- caught as a real "Cannot access before initialization" crash
   // on first load during testing.
   let landingSocialWatchesStarted = false;
+  // Same early declaration + same reentrancy reason as landingSocialWatchesStarted
+  // just above -- guards ensureLandingGrowthWatchesStarted() (added when Prayer
+  // Wall + featured Testimonies moved onto the landing page, see that function's
+  // own comment further down).
+  let landingGrowthWatchesStarted = false;
   function stopHostRoomsWatch(){ if(unsubHostRooms){ unsubHostRooms(); unsubHostRooms = null; } }
   function startHostRoomsWatch(){
     stopHostRoomsWatch();
@@ -1179,13 +1184,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // wired the exact same way (openSpiritualGrowth() starts all of them
   // together, restoreLastViewIfNeeded()'s 'spiritual-growth' case re-opens
   // the whole hub the same way on a page reload).
+  //
+  // [2026-09-29] Jared: "I think prayer wall should be part of the main
+  // page along with featured testimonies." These two watches are now ALSO
+  // started from the landing page (see ensureLandingGrowthWatchesStarted()
+  // below), so each callback's re-render check grew a second view to match
+  // -- same "only re-render on a screen that actually shows this data"
+  // guard as before, just two screens wide now instead of one.
   let unsubTestimonies = null;
   function stopTestimoniesWatch(){ if(unsubTestimonies){ unsubTestimonies(); unsubTestimonies = null; } }
   function startTestimoniesWatch(){
     stopTestimoniesWatch();
     unsubTestimonies = watchTestimonies(function(list){
       state.testimonies = list;
-      if(state.view === 'spiritual-growth') render();
+      if(state.view === 'spiritual-growth' || state.view === 'landing') render();
     });
   }
   let unsubPublicPrayerRequests = null;
@@ -1198,12 +1210,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     stopPrayerWallWatch();
     unsubPublicPrayerRequests = watchPublicPrayerRequests(function(list){
       state.publicPrayerRequests = list;
-      if(state.view === 'spiritual-growth') render();
+      if(state.view === 'spiritual-growth' || state.view === 'landing') render();
     });
     if(!state.user) { state.myPrayerRequests = []; return; }
     unsubMyPrayerRequests = watchMyPrayerRequests(state.user.uid, function(list){
       state.myPrayerRequests = list;
-      if(state.view === 'spiritual-growth') render();
+      if(state.view === 'spiritual-growth' || state.view === 'landing') render();
     });
   }
   // Merges publicPrayerRequests + myPrayerRequests, de-duped by id (a
@@ -1214,6 +1226,24 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     state.publicPrayerRequests.forEach(function(r){ byId.set(r.id, r); });
     state.myPrayerRequests.forEach(function(r){ byId.set(r.id, r); });
     return Array.from(byId.values()).sort(function(a, b){ return toMillis(b.createdAt) - toMillis(a.createdAt); });
+  }
+  // Landing page preview [2026-09-29] -- Jared: "I think prayer wall should
+  // be part of the main page along with featured testimonies." A small
+  // highlight reel, not the full wall: prayer requests just reuse the same
+  // newest-first merge the full Prayer Wall already computes; testimonies
+  // are genuinely "featured" (most Amens first, newest as the tiebreak)
+  // rather than duplicating what RECENT already shows two cards up in the
+  // Fellowship preview.
+  function landingPrayerWallPreview(){
+    return prayerWallRequests().slice(0, 3);
+  }
+  function landingFeaturedTestimonies(){
+    const list = (state.testimonies || []).slice();
+    list.sort(function(a, b){
+      const diff = itemLikeCount('testimonies', b) - itemLikeCount('testimonies', a);
+      return diff !== 0 ? diff : (toMillis(b.createdAt) - toMillis(a.createdAt));
+    });
+    return list.slice(0, 3);
   }
   let unsubReadingPlan = null;
   function stopReadingPlanWatch(){ if(unsubReadingPlan){ unsubReadingPlan(); unsubReadingPlan = null; } }
@@ -3364,6 +3394,131 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     '</div>';
   }
 
+  // Prayer Wall + Featured Testimonies on landing [2026-09-29] -- Jared:
+  // "I think prayer wall should be part of the main page along with
+  // featured testimonies." Two small preview cards, same shape as
+  // renderLandingFellowshipSection() just above (a header row with an
+  // OPEN ... -> link, a short list, an empty state) -- reusing
+  // .about-feature-item for each row (the same class Testimony Wall/Prayer
+  // Wall themselves already use for this exact row shape) and the real
+  // data-testimony-amen/data-prayer-pray attributes, so a tap here is the
+  // same live Amen/praying-for-this action as on the full wall, not a
+  // separate copy (attachSpiritualGrowthTestimoniesHandlers()/
+  // attachSpiritualGrowthPrayerWallHandlers() get called from renderLanding()
+  // below, right alongside attachFeedActionHandlers() -- both already guard
+  // every element lookup with `if(el)`, so wiring them here even though the
+  // compose-form ids they also look for aren't in this trimmed markup is
+  // safe).
+  function renderLandingGrowthSection(signedIn){
+    if(!signedIn){
+      return '<div class="session-card">' +
+        '<h3>Prayer &amp; Testimonies</h3>' +
+        '<p>Post a prayer request, or see how God is working in this congregation &mdash; sign in above to join in.</p>' +
+      '</div>';
+    }
+    function prayerRow(r){
+      const liked = isLikedByMe('prayerRequests', r.id);
+      const count = itemLikeCount('prayerRequests', r);
+      return '<div class="about-feature-item" style="align-items:flex-start;">' +
+        personAvatar(r.authorUid, 36) +
+        '<div style="flex:1;min-width:0;">' +
+          '<p class="devotional-reader-text" style="margin:0;">'+escapeHtml(r.requestText)+'</p>' +
+          '<p class="hint" style="margin:6px 0 0;">'+escapeHtml(r.authorName||'Someone')+' &middot; '+timeAgo(toMillis(r.createdAt))+(r.isPrivate?' &middot; Private to you':'')+'</p>' +
+          (!r.isPrivate ? '<button type="button" class="switch-account" data-prayer-pray="'+escapeAttr(r.id)+'" style="margin-top:6px;'+(liked?'font-weight:700;':'')+'">'+(liked?'🙏 PRAYING':'🙏 I&rsquo;M PRAYING')+(count?(' &middot; '+count):'')+'</button>' : '') +
+        '</div>' +
+      '</div>';
+    }
+    function testimonyRow(t){
+      const liked = isLikedByMe('testimonies', t.id);
+      const count = itemLikeCount('testimonies', t);
+      return '<div class="about-feature-item" style="align-items:flex-start;">' +
+        personAvatar(t.authorUid, 36) +
+        '<div style="flex:1;min-width:0;">' +
+          (t.title ? '<p style="margin:0 0 4px;font-weight:700;">'+escapeHtml(t.title)+'</p>' : '') +
+          '<p class="devotional-reader-text" style="margin:0;">'+escapeHtml(t.text)+'</p>' +
+          '<p class="hint" style="margin:6px 0 0;">'+escapeHtml(t.authorName||'Someone')+' &middot; '+timeAgo(toMillis(t.createdAt))+'</p>' +
+          '<button type="button" class="switch-account" data-testimony-amen="'+escapeAttr(t.id)+'" style="margin-top:6px;'+(liked?'font-weight:700;':'')+'">'+(liked?'🙌 AMEN':'🙌 SAY AMEN')+(count?(' &middot; '+count):'')+'</button>' +
+        '</div>' +
+      '</div>';
+    }
+    const prayers = landingPrayerWallPreview();
+    const testimonies = landingFeaturedTestimonies();
+    return '<div class="session-card">' +
+      '<div class="landing-section-head">' +
+        '<h3>Prayer Wall</h3>' +
+        '<button type="button" class="switch-account" id="landingOpenPrayerWallBtn">OPEN PRAYER WALL &rarr;</button>' +
+      '</div>' +
+      (prayers.length ?
+        '<div class="about-feature-list">' + prayers.map(prayerRow).join('') + '</div>' :
+        '<p class="hint" style="text-align:center;padding:12px 0;">No prayer requests yet &mdash; be the first to post one.</p>') +
+    '</div>' +
+    '<div class="session-card" style="margin-top:14px;">' +
+      '<div class="landing-section-head">' +
+        '<h3>Featured Testimonies</h3>' +
+        '<button type="button" class="switch-account" id="landingOpenTestimoniesBtn">OPEN TESTIMONY WALL &rarr;</button>' +
+      '</div>' +
+      (testimonies.length ?
+        '<div class="about-feature-list">' + testimonies.map(testimonyRow).join('') + '</div>' :
+        '<p class="hint" style="text-align:center;padding:12px 0;">No testimonies shared yet &mdash; be the first.</p>') +
+    '</div>';
+  }
+
+  // Landing page hub redesign [2026-09-29] -- Jared: "can you rearrange the
+  // main page? Make it look like a real hub" -- confirmed direction: keep
+  // what's live at the top exactly where it is (Verse, Active Sessions,
+  // Fellowship preview, Prayer Wall/Testimonies preview all stay put), and
+  // turn everything below that into a grouped hub of tiles instead of the
+  // old stack of big btn-ghost buttons + a small text-link row.
+  //
+  // Reuses the exact tile look Jared already approved for the Spiritual
+  // Growth home hub (.growth-tile/.growth-tile-grid, aliased in styles.css
+  // to the generic .hub-tile/.hub-tile-grid names used here -- see that
+  // CSS's own comment) rather than inventing a second near-identical
+  // component. Unlike Growth's tiles, these have no description line --
+  // 11 one-word destinations across 3 groups reads better dense, like a
+  // real app-launcher, than padded out with explanatory sentences these
+  // destinations don't need.
+  //
+  // Every tile keeps its EXACT original id (openBibleBtn, plansBtn, etc.)
+  // -- only the surrounding markup/grouping changed, so every click
+  // handler renderLanding() already wires up (some unconditionally, e.g.
+  // plansBtn/openBibleBtn -- always-visible tiles only, so that's still
+  // safe) keeps working unchanged.
+  function renderLandingHubGroup(title, tiles){
+    const visible = tiles.filter(function(t){ return t.show; });
+    if(!visible.length) return '';
+    return '<div class="hub-group">' +
+      '<p class="hub-group-title">'+escapeHtml(title)+'</p>' +
+      '<div class="hub-tile-grid">' +
+        visible.map(function(t){
+          return '<button type="button" class="hub-tile" id="'+t.id+'">' +
+            '<span class="hub-tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon(t.icon)+'</svg></span>' +
+            '<p class="hub-tile-title">'+escapeHtml(t.label)+'</p>' +
+          '</button>';
+        }).join('') +
+      '</div>' +
+    '</div>';
+  }
+  function renderLandingHubSection(signedIn){
+    return renderLandingHubGroup('Bible & Teaching', [
+      { id:'openBibleBtn', icon:'book', label:'Bible (KJV / Tagalog)', show:true },
+      { id:'openDevotionalsBtn', icon:'sun', label:'Daily Devotionals', show:true },
+      { id:'openSermonArchiveBtn', icon:'mic', label:'Sermon Archive', show:true }
+    ]) +
+    renderLandingHubGroup('Community', [
+      { id:'openEventsCalendarBtn', icon:'calendar', label:'Events Calendar', show:true },
+      { id:'messagesBtn', icon:'messenger', label:'Messages', show:signedIn },
+      { id:'landingShortsBtn', icon:'video', label:'Shorts', show:signedIn },
+      { id:'landingExploreBtn', icon:'compass', label:'Explore', show:signedIn }
+    ]) +
+    renderLandingHubGroup('Tools', [
+      { id:'openMediaLibraryFromHomeBtn', icon:'image', label:'Media Library', show:canHost() },
+      { id:'reviewRequestsBtn', icon:'flag', label:'Song Requests', show:(state.isEditor || hasFullAccess()) },
+      { id:'plansBtn', icon:'tag', label:'Plans & Pricing', show:true },
+      { id:'adminBtn', icon:'gear', label:'Admin Tools', show:state.isAdmin }
+    ]);
+  }
+
   // Proactive enable-notifications banner [2026-09-17] -- Jared: "I think
   // there should be a prompt to allow notifications for phones, PCs, and
   // allow background activity as well." Before this, the ONLY way to
@@ -3396,6 +3551,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function renderLanding(){
     ensureLandingSocialWatchesStarted();
     ensureLandingActiveSessionsWatchStarted();
+    ensureLandingGrowthWatchesStarted();
     const verse = todaysVerse();
     const signedIn = !!state.user;
     // [Bug found 2026-09-22] Jared: "when relogging back in, it asked for my
@@ -3492,39 +3648,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // Bible (which has no tab of its own) and the smaller utility links.
       renderLandingFellowshipSection(signedIn) +
 
-      '<button class="btn btn-ghost btn-lg btn-block" id="openBibleBtn" style="margin-top:14px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>OPEN THE BIBLE (KJV / TAGALOG)</button>' +
-      '<button class="btn btn-ghost btn-lg btn-block" id="openDevotionalsBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>DAILY DEVOTIONALS</button>' +
-      // Sermon Archive [2026-09-28] -- a big Home button, same treatment as
-      // Bible/Devotionals just above (public content, no sign-in required,
-      // deserves the same "impossible to miss" placement rather than being
-      // buried only inside the host-only Sermons screen).
-      '<button class="btn btn-ghost btn-lg btn-block" id="openSermonArchiveBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg>SERMON ARCHIVE</button>' +
-      // Events Calendar ["BUILD THEM ALL NOW" batch 4, 2026-09-28] -- same
-      // "big Home button" treatment as Sermon Archive just above (public
-      // read, no sign-in required to browse). Small Groups and Church
-      // Directory deliberately do NOT get a Home button -- they're
-      // reachable via the sidebar/hamburger only, same tier as Explore or
-      // Media Library, since browsing them isn't quite as universally
-      // relevant on first landing as a dated calendar of what's coming up.
-      '<button class="btn btn-ghost btn-lg btn-block" id="openEventsCalendarBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('calendar')+'</svg>EVENTS CALENDAR</button>' +
-      // Media Library, promoted to its own Home button [2026-09-24, Jared:
-      // "let's add it as a separate section as well just like devotionals
-      // (of course this will only appear to those who have host access)"
-      // -- then, separately, "i can't find the media library section" once
-      // the notification/upload-tray/back-forward work shipped without
-      // this]. Before this it was reachable ONLY via a small link buried
-      // inside the Host Hub card (renderHostHub(), below) -- easy to miss
-      // entirely if you'd never opened Host Hub for another reason. Mirrors
-      // the Bible/Devotionals buttons just above exactly (same style, same
-      // "big button on Home" treatment); canHost()-gated since it's a
-      // host-only tool, same gate the Host Hub link itself already used.
-      (canHost() ? ('<button class="btn btn-ghost btn-lg btn-block" id="openMediaLibraryFromHomeBtn" style="margin-top:10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('image')+'</svg>MEDIA LIBRARY</button>') : '') +
-      '<p style="text-align:center;margin-top:14px;">' +
-      (signedIn ? '<button class="switch-account" id="messagesBtn">MESSAGES</button> &middot; <button class="switch-account" id="landingShortsBtn">SHORTS</button> &middot; <button class="switch-account" id="landingExploreBtn">EXPLORE</button> &middot; ' : '') +
-      '<button class="switch-account" id="plansBtn">PLANS &amp; PRICING</button>' +
-      ((state.isEditor || hasFullAccess()) ? ' &middot; <button class="switch-account" id="reviewRequestsBtn">SONG REQUESTS</button>' : '') +
-      (state.isAdmin ? ' &middot; <button class="switch-account" id="adminBtn">ADMIN TOOLS</button>' : '') +
-      '</p>';
+      // Prayer Wall + Featured Testimonies [2026-09-29] -- Jared: "I think
+      // prayer wall should be part of the main page along with featured
+      // testimonies." Right after Fellowship, same "preview card, OPEN ...
+      // link to the full thing" shape.
+      renderLandingGrowthSection(signedIn) +
+
+      // Hub redesign [2026-09-29] -- Jared: "can you rearrange the main
+      // page? Make it look like a real hub." Replaces the old stack of big
+      // btn-ghost buttons (Bible/Devotionals/Sermon Archive/Events
+      // Calendar/Media Library) plus the small MESSAGES · SHORTS · EXPLORE
+      // · PLANS & PRICING · SONG REQUESTS · ADMIN TOOLS text-link row with
+      // one grouped tile hub -- see renderLandingHubSection()'s own comment
+      // for the full reasoning and exactly which id maps to which tile.
+      renderLandingHubSection(signedIn);
 
     const goFav = document.getElementById('goFavBtn');
     if(goFav) goFav.addEventListener('click', function(){ state.showFavoritesOnly=true; state.view='list'; render(); window.scrollTo(0,0); });
@@ -3537,6 +3674,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
     const landingOpenFellowshipBtn = document.getElementById('landingOpenFellowshipBtn');
     if(landingOpenFellowshipBtn) landingOpenFellowshipBtn.addEventListener('click', function(){ openFellowshipFeed(); });
+    const landingOpenPrayerWallBtn = document.getElementById('landingOpenPrayerWallBtn');
+    if(landingOpenPrayerWallBtn) landingOpenPrayerWallBtn.addEventListener('click', function(){ openSpiritualGrowthScreen('prayer-wall'); });
+    const landingOpenTestimoniesBtn = document.getElementById('landingOpenTestimoniesBtn');
+    if(landingOpenTestimoniesBtn) landingOpenTestimoniesBtn.addEventListener('click', function(){ openSpiritualGrowthScreen('testimonies'); });
     // Active Sessions [2026-09-24] -- resume/open reuse the exact same
     // resumeAsHost()/joinAsCoHost() My Sessions already uses; JOIN reuses
     // attemptJoin(), same as the Public Rooms list on the Join screen.
@@ -3553,7 +3694,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     document.querySelectorAll('[data-landing-feed-tab]').forEach(function(btn){
       btn.addEventListener('click', function(){ state.landingFeedTab = btn.getAttribute('data-landing-feed-tab'); render(); });
     });
-    if(signedIn){ attachFeedActionHandlers(); }
+    if(signedIn){
+      attachFeedActionHandlers();
+      // Prayer Wall/Testimonies preview [2026-09-29] -- same live actions as
+      // the full walls (see renderLandingGrowthSection()'s own comment).
+      // Both attach functions also look for compose-form ids
+      // (newTestimonyBtn, prayerTextInput, etc.) that this trimmed preview
+      // never renders -- already `if(el)`-guarded there, so that's a no-op.
+      attachSpiritualGrowthTestimoniesHandlers();
+      attachSpiritualGrowthPrayerWallHandlers();
+    }
     document.querySelectorAll('[data-open-profile]').forEach(function(btn){
       btn.addEventListener('click', function(){ openProfileView(btn.getAttribute('data-open-profile')); });
     });
@@ -7261,6 +7411,18 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     spiritualGrowthJournalDraftTopicKey = null;
     testimonyComposerOpen = false; prayerComposerOpen = false; prayerRequestRemoveConfirmId = null;
     render(); window.scrollTo(0,0);
+  }
+  // Jump straight into one Growth sub-screen from OUTSIDE Spiritual Growth
+  // [2026-09-29] -- used by the landing page's Prayer Wall/Testimony Wall
+  // preview cards' "OPEN ..." buttons. Just a thin wrapper around the two
+  // existing, already-tested functions (same sign-in gate and same watch/
+  // history setup openSpiritualGrowth() always does) rather than a third
+  // copy of that setup logic -- costs one extra throwaway render of the
+  // 'home' screen before landing on `screen`, which is cheap next to
+  // duplicating this feature's whole state reset by hand.
+  function openSpiritualGrowthScreen(screen){
+    openSpiritualGrowth();
+    if(state.view === 'spiritual-growth') goToSgScreen(screen);
   }
   // Pops one step off spiritualGrowthHistory (one screen back); with
   // nothing left to pop -- i.e. BACK from 'home' -- exits the whole
@@ -14852,6 +15014,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     landingSocialWatchesStarted = true;
     startFeedPostsWatch();
     startDirectoryWatch();
+  }
+  // Prayer Wall + Testimonies preview on landing [2026-09-29] -- same
+  // "start once per app session, guarded by a flag" pattern as
+  // ensureLandingSocialWatchesStarted() just above, for the same reason
+  // (landing is reached from dozens of places, not one click handler).
+  // Directory is already covered by ensureLandingSocialWatchesStarted()
+  // (both preview cards show other people's avatars/names, same as the
+  // full Prayer Wall/Testimony Wall screens do) so this only needs the two
+  // watches themselves.
+  function ensureLandingGrowthWatchesStarted(){
+    if(landingGrowthWatchesStarted || !state.user) return;
+    landingGrowthWatchesStarted = true;
+    startTestimoniesWatch();
+    startPrayerWallWatch();
   }
 
   // Active Sessions on the landing page [2026-09-24] -- Jared: "add a

@@ -2200,33 +2200,53 @@ body.stage-page .appfoot{ display:none; }
   .sg-verse p{ margin:0 0 4px; }
   .sg-verse cite{ display:block; font-style:normal; font-weight:700; font-size:.82rem; color:var(--wine); }
 
-  /* Spiritual Growth home hub, tile layout [2026-09-29] -- Jared, looking
-     at the live "Walking With God" screen: "I think this would be better
-     with tiles." This is a NEW, dedicated component (not a reskin of the
-     shared .about-feature-item row, which is also used for plain
-     descriptive bullet lists elsewhere -- e.g. About and Devotionals --
-     that should stay rows). Same design tokens as the rest of the app. */
-  .growth-tile-grid{
+  /* Tile hub component [2026-09-29] -- born as the Spiritual Growth home
+     hub's tile layout (Jared, looking at the live "Walking With God"
+     screen: "I think this would be better with tiles"), then reused
+     app-wide for the landing page's hub redesign ("can you rearrange the
+     main page? Make it look like a real hub") -- see renderLandingHubSection()
+     in app.js for that second use. Selectors cover BOTH the original
+     .growth-tile* names (Growth's own markup still uses them, unchanged)
+     and the generic .hub-tile* names (used by anything else built after
+     this point, so future call-sites aren't stuck writing "growth" for a
+     component that's no longer Growth-specific) -- same rules either way.
+     NOT a reskin of the shared .about-feature-item row, which is also used
+     for plain descriptive bullet lists elsewhere -- e.g. About and
+     Devotionals -- that should stay rows. Same design tokens as the rest
+     of the app throughout. */
+  .growth-tile-grid, .hub-tile-grid{
     display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px;
   }
-  .growth-tile{
+  .growth-tile, .hub-tile{
     display:flex; flex-direction:column; align-items:center; text-align:center; gap:8px;
     background:var(--surface); border:1px solid var(--border); border-radius:16px;
     padding:20px 14px; cursor:pointer;
     transition:border-color .15s ease, background-color .15s ease, transform .08s ease;
   }
-  .growth-tile:hover{ border-color:var(--gold); background:var(--surface-2); }
-  .growth-tile:active{ transform:scale(.98); }
-  .growth-tile-icon{
+  .growth-tile:hover, .hub-tile:hover{ border-color:var(--gold); background:var(--surface-2); }
+  .growth-tile:active, .hub-tile:active{ transform:scale(.98); }
+  .growth-tile-icon, .hub-tile-icon{
     width:44px; height:44px; border-radius:13px; background:var(--pine-tint); color:var(--pine);
     display:flex; align-items:center; justify-content:center; flex:none;
   }
-  .growth-tile-icon svg{ width:22px; height:22px; }
-  .growth-tile-title{ font-weight:700; color:var(--wine); font-size:.98rem; line-height:1.3; margin:0; }
+  .growth-tile-icon svg, .hub-tile-icon svg{ width:22px; height:22px; }
+  .growth-tile-title, .hub-tile-title{ font-weight:700; color:var(--wine); font-size:.98rem; line-height:1.3; margin:0; }
   .growth-tile-desc{ color:var(--ink-soft); font-size:.8rem; line-height:1.4; margin:0; }
   @media (max-width:420px){
-    .growth-tile-grid{ grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:10px; }
-    .growth-tile{ padding:16px 10px; }
+    .growth-tile-grid, .hub-tile-grid{ grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:10px; }
+    .growth-tile, .hub-tile{ padding:16px 10px; }
+  }
+
+  /* Landing hub groups [2026-09-29] -- one labeled group per category
+     (Bible & Teaching / Community / Tools), each its own tile grid above.
+     Kept minimal on purpose: a small uppercase label + spacing, matching
+     .sg-label's own "small subheading" treatment elsewhere in this file
+     rather than inventing a heavier header style. */
+  .hub-group{ margin-top:22px; }
+  .hub-group:first-child{ margin-top:0; }
+  .hub-group-title{
+    font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--gold-strong); margin:0 0 10px;
   }
 
   /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============
@@ -2730,10 +2750,10 @@ body.stage-page .appfoot{ display:none; }
      card/actions (renderFeedPostCard()/attachFeedActionHandlers()) so a
      like/comment/save tapped here is the same live post as in the full
      Fellowship tab, not a separate copy. */
-  .landing-fellowship-head{
+  .landing-fellowship-head, .landing-section-head{
     display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;
   }
-  .landing-fellowship-head h3{ margin:0; }
+  .landing-fellowship-head h3, .landing-section-head h3{ margin:0; }
   .landing-fellowship-preview .switch-account{ margin:0; padding:8px 0; }
   .fellowship-preview-tabs{
     display:flex; gap:4px; margin-bottom:14px; padding:4px;

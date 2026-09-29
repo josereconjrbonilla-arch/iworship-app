@@ -2200,6 +2200,35 @@ body.stage-page .appfoot{ display:none; }
   .sg-verse p{ margin:0 0 4px; }
   .sg-verse cite{ display:block; font-style:normal; font-weight:700; font-size:.82rem; color:var(--wine); }
 
+  /* Spiritual Growth home hub, tile layout [2026-09-29] -- Jared, looking
+     at the live "Walking With God" screen: "I think this would be better
+     with tiles." This is a NEW, dedicated component (not a reskin of the
+     shared .about-feature-item row, which is also used for plain
+     descriptive bullet lists elsewhere -- e.g. About and Devotionals --
+     that should stay rows). Same design tokens as the rest of the app. */
+  .growth-tile-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px;
+  }
+  .growth-tile{
+    display:flex; flex-direction:column; align-items:center; text-align:center; gap:8px;
+    background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    padding:20px 14px; cursor:pointer;
+    transition:border-color .15s ease, background-color .15s ease, transform .08s ease;
+  }
+  .growth-tile:hover{ border-color:var(--gold); background:var(--surface-2); }
+  .growth-tile:active{ transform:scale(.98); }
+  .growth-tile-icon{
+    width:44px; height:44px; border-radius:13px; background:var(--pine-tint); color:var(--pine);
+    display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .growth-tile-icon svg{ width:22px; height:22px; }
+  .growth-tile-title{ font-weight:700; color:var(--wine); font-size:.98rem; line-height:1.3; margin:0; }
+  .growth-tile-desc{ color:var(--ink-soft); font-size:.8rem; line-height:1.4; margin:0; }
+  @media (max-width:420px){
+    .growth-tile-grid{ grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:10px; }
+    .growth-tile{ padding:16px 10px; }
+  }
+
   /* ============ FELLOWSHIP REDESIGN [2026-09-09] ============
      Jared: "make the fellowship part look like an actual social media
      feed... a hamburger menu... profile pic next to the logo... Shorts...

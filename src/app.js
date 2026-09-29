@@ -7340,12 +7340,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '</span>' +
         '<p class="about-section-title">Walking With God</p>' +
         '<p class="about-section-intro">Four simple stages, at your own pace -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a private journal for reflecting day by day.</p>' +
-        '<div class="about-feature-list">' +
+        '<div class="growth-tile-grid">' +
           NAV.map(function(n){
-            return '<button type="button" class="about-feature-item" data-sg-nav="'+n.screen+'" style="width:100%;text-align:left;">' +
-              '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon(n.icon)+'</svg></span>' +
-              '<p><strong>'+escapeHtml(n.title)+'</strong> &mdash; '+escapeHtml(n.desc)+'</p>' +
-              '<span class="about-feature-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span>' +
+            return '<button type="button" class="growth-tile" data-sg-nav="'+n.screen+'">' +
+              '<span class="growth-tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon(n.icon)+'</svg></span>' +
+              '<p class="growth-tile-title">'+escapeHtml(n.title)+'</p>' +
+              '<p class="growth-tile-desc">'+escapeHtml(n.desc)+'</p>' +
             '</button>';
           }).join('') +
         '</div>' +

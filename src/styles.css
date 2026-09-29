@@ -2745,8 +2745,9 @@ body.stage-page .appfoot{ display:none; }
 
   /* ============ HOMEPAGE FELLOWSHIP PREVIEW [2026-09-10] ============
      Jared: "having fellowship as the main attraction is better. like recent
-     posts, trending posts." A compact RECENT/TRENDING-toggled 3-post
-     preview on the redesigned landing hub -- reuses the real feed post
+     posts, trending posts." A compact RECENT/TRENDING-toggled preview
+     (trimmed to 2 posts as of the 2026-09-29 "too much scrolling" pass,
+     was 3) on the redesigned landing hub -- reuses the real feed post
      card/actions (renderFeedPostCard()/attachFeedActionHandlers()) so a
      like/comment/save tapped here is the same live post as in the full
      Fellowship tab, not a separate copy. */
@@ -2764,6 +2765,28 @@ body.stage-page .appfoot{ display:none; }
     color:var(--ink-soft); font-weight:700; font-size:.78rem; letter-spacing:.04em; cursor:pointer;
   }
   .fellowship-preview-tab-active{ background:var(--wine); color:var(--gold-tint); }
+
+  /* Landing preview columns [2026-09-29] -- Jared: "too much scrolling
+     going on" -> "use columns and trim the previews." Prayer Wall and
+     Featured Testimonies are naturally similar-sized preview cards (short
+     lists, not rich media like Fellowship's post cards), so they're the
+     pair that becomes two side-by-side columns on anything wider than a
+     phone -- same 900px tier .hymn-list/.plans-grid already use for their
+     own desktop reflow, so "wider screen -> more columns" stays one
+     consistent rule across the app rather than a one-off breakpoint here.
+     Plain stacked flow (one column) below that width -- a phone gains
+     nothing from forcing these into a cramped half-width pair. */
+  .landing-preview-pair{ margin-top:14px; margin-bottom:24px; display:flex; flex-direction:column; gap:14px; }
+  @media (min-width: 900px){
+    .landing-preview-pair{ display:grid; grid-template-columns:1fr 1fr; align-items:start; gap:14px; }
+  }
+  /* .session-card's own margin-bottom:24px (its normal between-cards
+     spacing everywhere else) would otherwise stack on TOP of this
+     wrapper's own gap/margin-bottom between these two specific cards --
+     zeroed here so the wrapper alone controls spacing, same fix
+     .plans-grid .plan-card{margin-bottom:0} already applies for its own
+     grid context above. */
+  .landing-preview-pair .session-card{ margin-bottom:0; }
 
   /* Practice Mode [2026-09-28, "BUILD THEM ALL NOW" batch 2] -- a plain
      circle that briefly brightens on every metronome tick (practiceMetronomeTick()

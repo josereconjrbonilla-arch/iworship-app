@@ -1234,8 +1234,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // are genuinely "featured" (most Amens first, newest as the tiebreak)
   // rather than duplicating what RECENT already shows two cards up in the
   // Fellowship preview.
+  //
+  // [2026-09-29, "too much scrolling"] Trimmed from 3 to LANDING_PREVIEW_LIMIT
+  // (2) per every landing preview (this one, Testimonies, and Fellowship's
+  // own landingFeedPreviewPosts() below) -- one shared constant so all three
+  // stay in lockstep if this ever gets tuned again.
+  const LANDING_PREVIEW_LIMIT = 2;
   function landingPrayerWallPreview(){
-    return prayerWallRequests().slice(0, 3);
+    return prayerWallRequests().slice(0, LANDING_PREVIEW_LIMIT);
   }
   function landingFeaturedTestimonies(){
     const list = (state.testimonies || []).slice();
@@ -1243,7 +1249,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       const diff = itemLikeCount('testimonies', b) - itemLikeCount('testimonies', a);
       return diff !== 0 ? diff : (toMillis(b.createdAt) - toMillis(a.createdAt));
     });
-    return list.slice(0, 3);
+    return list.slice(0, LANDING_PREVIEW_LIMIT);
   }
   let unsubReadingPlan = null;
   function stopReadingPlanWatch(){ if(unsubReadingPlan){ unsubReadingPlan(); unsubReadingPlan = null; } }
@@ -3312,11 +3318,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // query -- trendingPosts() already re-sorts state.feedPosts, same as
   // Explore does), reusing renderFeedPostCard()/attachFeedActionHandlers()
   // so liking/commenting works right from the home hub, not just the feed.
-  function landingFeedPreviewPosts(){
-    const source = state.landingFeedTab === 'trending'
+  function landingFeedPreviewSource(){
+    return state.landingFeedTab === 'trending'
       ? trendingPosts()
       : state.feedPosts.filter(function(p){ return !isBlockedByMe(p.authorUid); });
-    return source.slice(0, 3);
+  }
+  function landingFeedPreviewPosts(){
+    return landingFeedPreviewSource().slice(0, LANDING_PREVIEW_LIMIT);
+  }
+  // "Too much scrolling" [2026-09-29] -- whether there's more beyond this
+  // trimmed preview, so renderLandingFellowshipSection() only shows its new
+  // SEE MORE button when it would actually lead somewhere new (not a dead
+  // tap when the preview already shows everything there is).
+  function landingFeedPreviewHasMore(){
+    return landingFeedPreviewSource().length > LANDING_PREVIEW_LIMIT;
   }
   // Active Sessions on the landing page [2026-09-24] -- Jared: "add a
   // feature where we can see which sessions are currently active especially
@@ -3380,6 +3395,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '</div>';
     }
     const posts = landingFeedPreviewPosts();
+    // "Too much scrolling" [2026-09-29] -- trimmed to LANDING_PREVIEW_LIMIT
+    // (2, was 3); a SEE MORE button now sits right under the shortened
+    // list (only when there's genuinely more beyond it) so the same
+    // destination the header's OPEN FELLOWSHIP link already offers is also
+    // reachable right where the list runs out, not just up top.
+    const hasMore = landingFeedPreviewHasMore();
     return '<div class="session-card landing-fellowship-preview">' +
       '<div class="landing-fellowship-head">' +
         '<h3>Fellowship</h3>' +
@@ -3391,6 +3412,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '</div>' +
       (posts.length ? posts.map(renderFeedPostCard).join('') :
         '<p class="hint" style="text-align:center;padding:18px 0;">'+(state.landingFeedTab==='trending'?'Nothing trending yet.':'No posts yet')+' &mdash; be the first to share something with your church family.</p>') +
+      (hasMore ? '<button type="button" class="btn btn-ghost btn-block" id="landingFellowshipSeeMoreBtn" style="margin-top:10px;">SEE MORE</button>' : '') +
     '</div>';
   }
 
@@ -3443,23 +3465,40 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     }
     const prayers = landingPrayerWallPreview();
     const testimonies = landingFeaturedTestimonies();
-    return '<div class="session-card">' +
-      '<div class="landing-section-head">' +
-        '<h3>Prayer Wall</h3>' +
-        '<button type="button" class="switch-account" id="landingOpenPrayerWallBtn">OPEN PRAYER WALL &rarr;</button>' +
+    // "Too much scrolling" [2026-09-29] -- Jared: "use columns and trim the
+    // previews. If possible, add a see more button." Three changes here:
+    // (1) both lists already trimmed to LANDING_PREVIEW_LIMIT upstream in
+    // landingPrayerWallPreview()/landingFeaturedTestimonies(); (2) a SEE
+    // MORE button under each list, only when there's genuinely more beyond
+    // it; (3) the two cards are now wrapped in .landing-preview-pair, which
+    // stacks them (same as before) on phone width but lays them out as two
+    // side-by-side columns from the app's existing 900px desktop
+    // breakpoint (see styles.css, same tier .hymn-list/.plans-grid already
+    // use) -- cutting real scroll height on anything wider than a phone,
+    // where they were previously stretched full-width for no reason.
+    const morePrayers = prayerWallRequests().length > prayers.length;
+    const moreTestimonies = (state.testimonies||[]).length > testimonies.length;
+    return '<div class="landing-preview-pair">' +
+      '<div class="session-card">' +
+        '<div class="landing-section-head">' +
+          '<h3>Prayer Wall</h3>' +
+          '<button type="button" class="switch-account" id="landingOpenPrayerWallBtn">OPEN PRAYER WALL &rarr;</button>' +
+        '</div>' +
+        (prayers.length ?
+          '<div class="about-feature-list">' + prayers.map(prayerRow).join('') + '</div>' :
+          '<p class="hint" style="text-align:center;padding:12px 0;">No prayer requests yet &mdash; be the first to post one.</p>') +
+        (morePrayers ? '<button type="button" class="btn btn-ghost btn-block" id="landingPrayerWallSeeMoreBtn" style="margin-top:10px;">SEE MORE</button>' : '') +
       '</div>' +
-      (prayers.length ?
-        '<div class="about-feature-list">' + prayers.map(prayerRow).join('') + '</div>' :
-        '<p class="hint" style="text-align:center;padding:12px 0;">No prayer requests yet &mdash; be the first to post one.</p>') +
-    '</div>' +
-    '<div class="session-card" style="margin-top:14px;">' +
-      '<div class="landing-section-head">' +
-        '<h3>Featured Testimonies</h3>' +
-        '<button type="button" class="switch-account" id="landingOpenTestimoniesBtn">OPEN TESTIMONY WALL &rarr;</button>' +
+      '<div class="session-card">' +
+        '<div class="landing-section-head">' +
+          '<h3>Featured Testimonies</h3>' +
+          '<button type="button" class="switch-account" id="landingOpenTestimoniesBtn">OPEN TESTIMONY WALL &rarr;</button>' +
+        '</div>' +
+        (testimonies.length ?
+          '<div class="about-feature-list">' + testimonies.map(testimonyRow).join('') + '</div>' :
+          '<p class="hint" style="text-align:center;padding:12px 0;">No testimonies shared yet &mdash; be the first.</p>') +
+        (moreTestimonies ? '<button type="button" class="btn btn-ghost btn-block" id="landingTestimoniesSeeMoreBtn" style="margin-top:10px;">SEE MORE</button>' : '') +
       '</div>' +
-      (testimonies.length ?
-        '<div class="about-feature-list">' + testimonies.map(testimonyRow).join('') + '</div>' :
-        '<p class="hint" style="text-align:center;padding:12px 0;">No testimonies shared yet &mdash; be the first.</p>') +
     '</div>';
   }
 
@@ -3678,6 +3717,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(landingOpenPrayerWallBtn) landingOpenPrayerWallBtn.addEventListener('click', function(){ openSpiritualGrowthScreen('prayer-wall'); });
     const landingOpenTestimoniesBtn = document.getElementById('landingOpenTestimoniesBtn');
     if(landingOpenTestimoniesBtn) landingOpenTestimoniesBtn.addEventListener('click', function(){ openSpiritualGrowthScreen('testimonies'); });
+    // SEE MORE buttons [2026-09-29] -- same destinations as the OPEN ...
+    // links just above, just also reachable right where each trimmed
+    // preview list runs out (see renderLandingFellowshipSection()/
+    // renderLandingGrowthSection()'s own comments).
+    const landingFellowshipSeeMoreBtn = document.getElementById('landingFellowshipSeeMoreBtn');
+    if(landingFellowshipSeeMoreBtn) landingFellowshipSeeMoreBtn.addEventListener('click', function(){ openFellowshipFeed(); });
+    const landingPrayerWallSeeMoreBtn = document.getElementById('landingPrayerWallSeeMoreBtn');
+    if(landingPrayerWallSeeMoreBtn) landingPrayerWallSeeMoreBtn.addEventListener('click', function(){ openSpiritualGrowthScreen('prayer-wall'); });
+    const landingTestimoniesSeeMoreBtn = document.getElementById('landingTestimoniesSeeMoreBtn');
+    if(landingTestimoniesSeeMoreBtn) landingTestimoniesSeeMoreBtn.addEventListener('click', function(){ openSpiritualGrowthScreen('testimonies'); });
     // Active Sessions [2026-09-24] -- resume/open reuse the exact same
     // resumeAsHost()/joinAsCoHost() My Sessions already uses; JOIN reuses
     // attemptJoin(), same as the Public Rooms list on the Join screen.

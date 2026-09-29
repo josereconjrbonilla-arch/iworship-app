@@ -1461,3 +1461,92 @@ happens, same as Worship Team Scheduling's rules needed one in batch 2). Live Ca
 (the rest of batch 3) is still pending Jared's vendor-choice answer; batch 5 (Accessibility
 & Reach: Kids Ministry Mode, plus the flagged Full App Translation scoping question) is
 tracked and still to come.
+
+## "BUILD THEM ALL NOW" batch 3, part 2: Live Captions [2026-09-29]
+
+The rest of batch 3 (Sermons & Teaching) -- the deck's **Live Captions** idea, held back
+from part 1 pending a real vendor decision. Three options were researched and presented
+(Web Speech API vs. Google Cloud Speech-to-Text vs. AssemblyAI) with their actual
+trade-offs; Jared picked **Web Speech API**, the free option built into Chrome/Edge/Safari
+with no Cloud Function or billing dependency, over the two paid cloud APIs.
+
+**What it is.** A LIVE CAPTIONS toggle on the host's presenter toolbar (gated to
+`iHaveControl`, same as STREAM LINK/TEXT SIZE right next to it, since starting/stopping
+this is a live-session control, not roster management). Turning it on starts the browser's
+own `SpeechRecognition` engine listening to the host's microphone; the transcribed text
+appears as a bar across the bottom of both the Projector screen (`.stage-caption-bar`, an
+overlay so it never crowds out the slide itself) and every congregant's own session-view
+screen (`.session-caption-bar`, a plain card since there's no slide underneath it there). A
+LANGUAGE toggle (ENGLISH/FILIPINO) lets the host switch which language the recognizer
+listens for mid-session, persisted locally (`cv:captionLang`, same convention as
+`cv:mode`/`cv:scale`) so it survives a reload.
+
+**No `firestore.rules` change needed at all.** The three new room-doc fields this feature
+needed (`liveCaptionOn`, `liveCaptionText`, `liveCaptionLang`) are already covered by the
+existing `rooms/{code}` update rule -- any host or the current `controllerUid` can already
+patch any field on the room doc except `hostUid`/`coHostUids`/`controllerUid` themselves,
+the same wide-open pattern `currentSermonId`/`stageOverride`/everything else already relies
+on. Verified by direct read of that rule before writing a single line of feature code, not
+assumed.
+
+**Performance design, worked out before writing any code, not discovered as a bug after.**
+The app's existing `applyRoomSnapshot()` triggers a full, unconditional `render()` on
+every single room-doc change -- fine for something that changes a few times a minute
+(picking a new song section, toggling a stage override), but continuous speech recognition
+can fire dozens of interim results a minute, and naively writing every one of them to the
+room doc would mean re-rendering the HOST screen, the PROJECTOR screen, and every
+congregant's session-view screen that often -- real flicker/jank risk on exactly the screen
+(the projector) a whole congregation is looking at. So interim (not-yet-final) results are
+shown ONLY on the host's own device, via a direct, targeted `textContent` write
+(`updateLiveCaptionInterimDisplay()`) that completely bypasses `render()`. Only FINAL
+results ever reach the room doc, and even those are debounced 400ms (this app's existing
+shared `debounce()` helper, same one `debouncedRenderListInPlace()` uses) so a burst of
+back-to-back final results the recognizer sometimes fires in quick succession coalesces
+into one write instead of several.
+
+**Two Web Speech API quirks, worked around and disclosed rather than silently ignored** (the
+two things the vendor research flagged up front): the API auto-stops after roughly 60
+seconds of silence -- worked around by `recognition.onend` transparently restarting it as
+long as the host hasn't explicitly turned captions off (`liveCaptionsShouldRun`), so a quiet
+stretch mid-service (prayer, a pause before the next point) never silently ends captions
+without anyone noticing; and it only listens for one language at a time -- worked around by
+the EN/FIL toggle above, which stops and restarts recognition with the new language rather
+than pretending to support both simultaneously. The in-app panel also discloses in plain
+language, right where the host turns this on, that the microphone is transcribed via the
+browser's own built-in speech service (e.g. Google's, on Chrome) and that nothing is
+recorded or saved -- since this is real audio leaving the device to a third-party service,
+that's a disclosure worth the host (and, transitively, their congregation) actually seeing,
+not just knowing implicitly from picking Option A.
+
+**Cleanup hook.** Navigating away from the host screen by ANY means -- the BACK button,
+browser back/forward, signing out, reloading into a different resumed view, not just an
+explicit toggle-off -- stops any running `SpeechRecognition` instance, via the same
+`lastRenderedView`-based mechanism this session's Practice Mode batch already established
+for its own metronome/autoscroll cleanup. Without this, leaving the host screen mid-session
+would leave the microphone listening in the background with no way to stop it.
+
+**What this round verified, and what it could NOT.** `node --check` and a real
+`npm run build` both passed clean. The new toolbar button, language toggle, and both
+caption-bar CSS classes were also rendered in a real headless Chromium browser (not just
+read as strings) to confirm the HTML actually parses into the right structure (both
+language buttons present and clickable, the interim-text element present, the caption bar
+picking up its `position:absolute`/dark-overlay styling from `styles.css` correctly), and
+the full app was loaded in that same browser to confirm the build boots cleanly with this
+code included (no new console errors beyond this sandbox's already-known lack of real
+internet/Firebase reachability). **What it could NOT verify: actual microphone input,
+real `SpeechRecognition` transcription accuracy in either language, or a real multi-device
+Firestore broadcast** -- this sandbox has no microphone, no real Google account to complete
+sign-in with, and no way to open a second device against the same live room. **Recommend
+Jared, after his next deploy, test this directly: start a session, tap LIVE CAPTIONS, allow
+microphone access when the browser asks, say a few sentences, and confirm the caption bar
+appears and updates on a second phone/device watching the same session (both the Projector
+view and an ordinary joined session); then try the FILIPINO toggle and confirm it actually
+switches what it's listening for; then leave the host screen without turning captions off
+and confirm (e.g. via the browser's own mic-in-use indicator) that it actually stops.**
+
+`src/app.js`, `src/styles.css` (`firestore.rules` unchanged -- see above). Delivered to
+Jared's connected folder and committed locally; **not yet confirmed by him** -- needs the
+usual `npm run build` + Netlify deploy. This closes out batch 3 (Sermons & Teaching, both
+parts) in full; batch 5 (Accessibility & Reach: Kids Ministry Mode, plus the flagged Full
+App Translation scoping question) is tracked and still to come, alongside this session's
+now-confirmed, open-ended UI-modernization pass across the rest of the app's tabs/screens.

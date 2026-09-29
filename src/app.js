@@ -3140,6 +3140,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // every one of Practice Mode's own re-renders (BPM/speed taps) while
       // the view itself hasn't changed.
       if(lastRenderedView === 'practice' && state.view !== 'practice'){ stopPracticeMetronome(); stopPracticeScroll(); }
+      // Live Captions cleanup [2026-09-29] -- same reasoning as Practice
+      // Mode just above: catches navigating away from the host screen by
+      // ANY means (browser back, sign-out, reloading into a different
+      // resumed view), not just the LIVE CAPTIONS button's own toggle-off,
+      // so a running SpeechRecognition instance (and the microphone
+      // indicator that comes with it) never keeps going silently once the
+      // host screen itself is gone.
+      if(lastRenderedView === 'session-host' && state.view !== 'session-host'){ stopLiveCaptions(); }
       lastRenderedView = state.view;
       main.classList.remove('view-fade-in');
       void main.offsetWidth; // force a reflow so the removal above actually "takes" before re-adding
@@ -7309,14 +7317,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // is fully read.
     const pathMilestones = (state.spiritualGrowth && state.spiritualGrowth.milestones) || {};
     const pathAllDone = allSpiritualGrowthTopics().every(function(t){ return !!(pathMilestones[t.key] && pathMilestones[t.key].completedAt); });
+    // [2026-09-29] Each row now carries its OWN leading icon (heart/check/
+    // sprout/folder/calendar/chat/mic) instead of every row showing the
+    // same generic chevron in that slot -- see the new .about-feature-
+    // chevron trailing indicator below for what actually communicates
+    // "this row navigates somewhere," matching a normal modern nav-row
+    // convention (leading icon = what it is, trailing chevron = you can
+    // tap it) rather than overloading one slot with both jobs.
     const NAV = [
-      { screen:'invitation', title:'The Gospel Invitation', desc: alreadyProfessed ? 'Revisit the gospel message, any time you’d like.' : 'Would you like to know God personally?' },
-      { screen:'confirmation', title:'You Can Be Sure', desc:'What just happened, and why you can be sure of it.' },
-      { screen:'path', title:'Discipleship Path', desc: pathAllDone ? 'You’ve read every topic here -- growth keeps going below.' : 'Milestone topics for a new believer, at your own pace.' },
-      { screen:'journal', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' },
-      { screen:'reading-plan', title:'Bible Reading Plan', desc:'A daily reading schedule with a streak counter, in KJV or Tagalog.' },
-      { screen:'testimonies', title:'Testimony Wall', desc:'See how God is working in this congregation, and share your own.' },
-      { screen:'prayer-wall', title:'Prayer Wall', desc:'Post a request, or let someone know you’re praying for theirs.' }
+      { screen:'invitation', icon:'heart', title:'The Gospel Invitation', desc: alreadyProfessed ? 'Revisit the gospel message, any time you’d like.' : 'Would you like to know God personally?' },
+      { screen:'confirmation', icon:'check', title:'You Can Be Sure', desc:'What just happened, and why you can be sure of it.' },
+      { screen:'path', icon:'sprout', title:'Discipleship Path', desc: pathAllDone ? 'You’ve read every topic here -- growth keeps going below.' : 'Milestone topics for a new believer, at your own pace.' },
+      { screen:'journal', icon:'folder', title:'My Journal', desc:'A private, ongoing space -- just between you and God.' },
+      { screen:'reading-plan', icon:'calendar', title:'Bible Reading Plan', desc:'A daily reading schedule with a streak counter, in KJV or Tagalog.' },
+      { screen:'testimonies', icon:'chat', title:'Testimony Wall', desc:'See how God is working in this congregation, and share your own.' },
+      { screen:'prayer-wall', icon:'mic', title:'Prayer Wall', desc:'Post a request, or let someone know you’re praying for theirs.' }
     ];
     return (
       '<div class="about-section-card">' +
@@ -7327,9 +7342,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p class="about-section-intro">Four simple stages, at your own pace -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a private journal for reflecting day by day.</p>' +
         '<div class="about-feature-list">' +
           NAV.map(function(n){
-            return '<button type="button" class="about-feature-item" data-sg-nav="'+n.screen+'" style="width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer;">' +
-              '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span>' +
+            return '<button type="button" class="about-feature-item" data-sg-nav="'+n.screen+'" style="width:100%;text-align:left;">' +
+              '<span class="about-feature-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon(n.icon)+'</svg></span>' +
               '<p><strong>'+escapeHtml(n.title)+'</strong> &mdash; '+escapeHtml(n.desc)+'</p>' +
+              '<span class="about-feature-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span>' +
             '</button>';
           }).join('') +
         '</div>' +
@@ -7401,9 +7417,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<div class="about-feature-list">' +
           allTopics.map(function(t){
             const done = !!(milestones[t.key] && milestones[t.key].completedAt);
-            return '<button type="button" class="about-feature-item" data-sg-topic="'+t.key+'" style="width:100%;text-align:left;background:none;border:none;padding:0;cursor:pointer;">' +
+            return '<button type="button" class="about-feature-item" data-sg-topic="'+t.key+'" style="width:100%;text-align:left;">' +
               '<span class="about-feature-check" aria-hidden="true" style="'+(done?'':'background:var(--border);color:var(--ink-soft);')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('check')+'</svg></span>' +
               '<p><strong>'+escapeHtml(t.title)+'</strong>'+(done?' &mdash; completed':'')+'</p>' +
+              '<span class="about-feature-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span>' +
             '</button>';
           }).join('') +
         '</div>' +
@@ -10441,6 +10458,128 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // toggle-panel convention as hostManageOpen/hostManageQuery above.
   let hostStreamLinkOpen = false;
   let hostStreamLinkInput = '';
+  // Live Captions ["BUILD THEM ALL NOW" batch 3, 2026-09-29] -- Web Speech
+  // API, per Jared's pick after reviewing the vendor research (free, no
+  // Cloud Function/billing dependency, built into Chrome/Edge/Safari;
+  // its two known limitations -- an ~60s-of-silence auto-stop and one
+  // language at a time -- are worked around/disclosed below rather than
+  // silently ignored). liveCaptionsRecognition/liveCaptionsShouldRun are
+  // pure runtime state (never persisted, never put in `state` itself --
+  // a raw SpeechRecognition object isn't serializable and has no business
+  // surviving a render()); liveCaptionsLang is the one bit that DOES
+  // persist locally (same safeGet/safeSet convention as cv:mode/cv:scale
+  // above) so a host's chosen caption language survives a reload. The
+  // actual live text is NOT kept in local state at all -- interim results
+  // go straight to a DOM node via updateLiveCaptionInterimDisplay() below
+  // (bypassing render() entirely), and FINAL results are the only thing
+  // ever written to the room doc (see broadcastCaptionText's own comment)
+  // -- deliberately avoiding a render() on every single interim result,
+  // which would otherwise fire many times a minute during continuous
+  // speech and needlessly re-render the whole host screen (and, far more
+  // importantly, the actual PROJECTOR display the congregation is
+  // watching, and every congregant's own session-view screen) each time.
+  const LIVE_CAPTIONS_SUPPORTED = (typeof window !== 'undefined') && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  let liveCaptionsLang = safeGet('cv:captionLang', 'en'); // 'en' | 'fil'
+  let liveCaptionsRecognition = null;
+  let liveCaptionsShouldRun = false; // true only while the HOST wants captions running -- lets onend tell "the engine's own silence timeout fired, restart it" apart from "we stopped this on purpose, leave it stopped"
+  function updateLiveCaptionInterimDisplay(text){
+    const el = document.getElementById('liveCaptionInterimText');
+    if(el) el.textContent = text || 'Listening…';
+  }
+  // Debounced (not fired straight from onresult) so a burst of back-to-back
+  // final results (the recognizer sometimes fires several in quick
+  // succession) coalesces into one room write instead of several -- same
+  // "one shared debounce() helper, not a bespoke timer" convention as
+  // debouncedRenderListInPlace() above.
+  const broadcastCaptionText = debounce(function(code, text){
+    updateRoom(code, { liveCaptionText: text }).catch(function(){});
+  }, 400);
+  function startLiveCaptions(){
+    const code = state.activeRoomCode;
+    if(!code) return;
+    if(!LIVE_CAPTIONS_SUPPORTED){
+      showToast('Live Captions needs a browser with built-in speech recognition &mdash; try Chrome, Edge, or Safari.');
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = liveCaptionsLang === 'fil' ? 'fil-PH' : 'en-US';
+    recognition.onresult = function(event){
+      let finalText = '', interimText = '';
+      for(let i = event.resultIndex; i < event.results.length; i++){
+        const res = event.results[i];
+        if(res.isFinal) finalText += res[0].transcript;
+        else interimText += res[0].transcript;
+      }
+      if(finalText.trim()) broadcastCaptionText(code, finalText.trim());
+      updateLiveCaptionInterimDisplay(interimText.trim());
+    };
+    recognition.onerror = function(event){
+      // 'no-speech' fires constantly during ordinary pauses between
+      // sentences -- not a real error, onend's own restart below handles
+      // it exactly like a clean stop would. Only an actual permissions/
+      // hardware problem should stop captions outright rather than
+      // quietly retrying forever.
+      if(event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed'){
+        liveCaptionsShouldRun = false;
+        showToast('Live Captions needs microphone access &mdash; check this browser&rsquo;s site permissions, then try again.');
+        render();
+      }
+    };
+    recognition.onend = function(){
+      // The researched, disclosed workaround for the Web Speech API's own
+      // ~60-second-of-silence auto-stop: restart transparently as long as
+      // the host hasn't explicitly turned this off, so a quiet stretch
+      // mid-service (prayer, a pause before the next point) never silently
+      // ends captions without anyone noticing.
+      if(liveCaptionsShouldRun){
+        try{ recognition.start(); }catch(e){ /* already running -- browsers sometimes fire onend just before a start() we already issued */ }
+      }
+    };
+    liveCaptionsShouldRun = true;
+    liveCaptionsRecognition = recognition;
+    try{
+      recognition.start();
+    }catch(e){
+      showToast('Couldn&rsquo;t start Live Captions &mdash; try again.');
+      liveCaptionsShouldRun = false;
+      liveCaptionsRecognition = null;
+      return;
+    }
+    updateRoom(code, { liveCaptionOn: true, liveCaptionLang: liveCaptionsLang, liveCaptionText: '' }).catch(function(){
+      showToast('Live Captions started, but couldn&rsquo;t tell viewers yet &mdash; try toggling it off and on again.');
+    });
+    render();
+  }
+  function stopLiveCaptions(){
+    liveCaptionsShouldRun = false;
+    if(liveCaptionsRecognition){
+      try{ liveCaptionsRecognition.stop(); }catch(e){}
+      liveCaptionsRecognition = null;
+    }
+    if(state.activeRoomCode){
+      updateRoom(state.activeRoomCode, { liveCaptionOn: false, liveCaptionText: '' }).catch(function(){});
+    }
+    render();
+  }
+  function setLiveCaptionsLang(lang){
+    if(lang !== 'en' && lang !== 'fil') return;
+    if(liveCaptionsLang === lang) return;
+    liveCaptionsLang = lang;
+    safeSet('cv:captionLang', lang);
+    if(liveCaptionsShouldRun){
+      // Restart with the new recognition language -- a brief, one-time
+      // captions-off/captions-on blip for viewers while it reconnects,
+      // same acceptable tradeoff as any other "change a live setting"
+      // action in this app (e.g. stage overrides).
+      stopLiveCaptions();
+      startLiveCaptions();
+    } else {
+      render();
+    }
+  }
   // Ad hoc Bible verse presenting [2026-09-04] -- Jared: "add an ability for
   // the host to present bible verses at will." Distinct from a verse baked
   // into a prepared sermon slide (a 'verse'-preset text block inserted via
@@ -12554,6 +12693,42 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
   }
 
+  // Live Captions [2026-09-29] -- shown right under the toolbar whenever
+  // captions are on (or being started -- see liveCaptionsShouldRun's own
+  // comment below on why that local flag, not just room.liveCaptionOn, is
+  // what gates this: the very first render after tapping the toggle
+  // happens before updateRoom()'s write has round-tripped back down
+  // through the room snapshot). Host-only -- this is the presenter's own
+  // language switch and a live word-by-word confirmation that speech
+  // really is being picked up, not something a congregant ever sees (they
+  // get the finished caption bar instead, see renderSessionProjector()/
+  // renderSessionView()).
+  function renderLiveCaptionsPanel(){
+    return '<div class="session-card">' +
+      '<p class="control-label uc" style="margin-bottom:10px;">Live Captions</p>' +
+      (!LIVE_CAPTIONS_SUPPORTED ?
+        '<p class="hint" style="margin:0;">This browser doesn&rsquo;t support built-in speech recognition. Try Chrome, Edge, or Safari instead.</p>' :
+        (
+          '<p class="hint" style="margin:0 0 12px;">Your device&rsquo;s microphone is transcribed right in this browser (using its own built-in speech service, e.g. Google on Chrome) and the text is sent to the projector and everyone&rsquo;s phones a few words at a time. Nothing is recorded or saved.</p>' +
+          '<div style="display:flex;gap:10px;align-items:center;">' +
+            '<span class="hint" style="margin:0;">LANGUAGE</span>' +
+            '<div class="content-segmented" style="flex:1;">' +
+              '<button class="segment-btn'+(liveCaptionsLang==='en'?' active':'')+'" id="captionLangEnBtn"><span>ENGLISH</span></button>' +
+              '<button class="segment-btn'+(liveCaptionsLang==='fil'?' active':'')+'" id="captionLangFilBtn"><span>FILIPINO</span></button>' +
+            '</div>' +
+          '</div>' +
+          '<p style="text-align:center;margin:14px 0 0;color:var(--ink-soft);font-size:.95rem;min-height:1.4em;" id="liveCaptionInterimText">Listening&hellip;</p>'
+        )
+      ) +
+    '</div>';
+  }
+  function attachLiveCaptionsHandlers(){
+    const enBtn = document.getElementById('captionLangEnBtn');
+    if(enBtn) enBtn.addEventListener('click', function(){ setLiveCaptionsLang('en'); });
+    const filBtn = document.getElementById('captionLangFilBtn');
+    if(filBtn) filBtn.addEventListener('click', function(){ setLiveCaptionsLang('fil'); });
+  }
+
   // Join QR code [2026-09-24] -- Jared: "QR code: that's a yes for me,
   // make that work please." Encodes the exact same '?join=<code>' deep
   // link goToJoinScreenWithCode()/the startup routing block already
@@ -12670,6 +12845,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const controlsHtml =
       (hostManageOpen ? renderHostManagePanel(room) : '') +
       (hostStreamLinkOpen ? renderStreamLinkPanel(room) : '') +
+      ((liveCaptionsShouldRun || room.liveCaptionOn) ? renderLiveCaptionsPanel() : '') +
       (!iHaveControl ?
         ('<div class="session-card" style="border-color:var(--ink-soft);">' +
           '<p class="control-label uc" style="margin-bottom:6px;">Watch-only for now</p>' +
@@ -12743,6 +12919,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         // comment above. Gated to iHaveControl -- setting/clearing this is
         // a live-session control, not a roster-management action like HOSTS.
         (iHaveControl ? ('<button type="button" class="icon-tool-btn'+(hostStreamLinkOpen?' active':'')+'" id="streamLinkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('link')+'</svg><span>STREAM LINK</span><kbd class="icon-tool-kbd">K</kbd></button>') : '') +
+        // Live Captions [2026-09-29] -- Jared picked the Web Speech API
+        // (free, no billing dependency) over Google Cloud Speech-to-Text/
+        // AssemblyAI after vendor research. Gated to iHaveControl -- same
+        // "live-session control" reasoning as STREAM LINK just above, since
+        // starting/stopping this talks straight to the room doc too. The
+        // button itself always renders when iHaveControl (even on a
+        // browser without SpeechRecognition) so a host on an unsupported
+        // browser gets a clear toast explaining why, instead of the
+        // feature just silently not existing.
+        (iHaveControl ? ('<button type="button" class="icon-tool-btn'+(room.liveCaptionOn?' active':'')+'" id="liveCaptionsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('mic')+'</svg><span>'+(room.liveCaptionOn?'CAPTIONS ON':'LIVE CAPTIONS')+'</span><kbd class="icon-tool-kbd">V</kbd></button>') : '') +
         // Co-hosting [2026-09-05]: owner-only -- manages coHostUids and
         // hands controllerUid to whichever one of them should be presenting
         // right now (see renderHostManagePanel()).
@@ -13006,6 +13192,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const streamLinkBtn = document.getElementById('streamLinkBtn');
     if(streamLinkBtn) streamLinkBtn.addEventListener('click', function(){ hostStreamLinkOpen = !hostStreamLinkOpen; render(); });
     attachStreamLinkHandlers();
+    const liveCaptionsBtn = document.getElementById('liveCaptionsBtn');
+    if(liveCaptionsBtn) liveCaptionsBtn.addEventListener('click', function(){
+      if(liveCaptionsShouldRun || room.liveCaptionOn) stopLiveCaptions(); else startLiveCaptions();
+    });
+    attachLiveCaptionsHandlers();
     document.getElementById('chatFabBtn').addEventListener('click', function(){ hostChatOpen = !hostChatOpen; render(); });
     const chatCloseBtn = document.getElementById('chatFloatingCloseBtn');
     if(chatCloseBtn) chatCloseBtn.addEventListener('click', function(){ hostChatOpen = false; render(); });
@@ -13548,6 +13739,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         ) : '<div class="slide-card"><p class="lyric-line" style="color:var(--ink-soft);">Waiting for the host to choose a song&hellip;</p></div>'
       )) +
 
+      // Live Captions [2026-09-29] -- same room.liveCaptionOn/liveCaptionText
+      // gate as the projector's .stage-caption-bar just above, styled for a
+      // phone-width card instead of an overlay bar.
+      (room.liveCaptionOn && room.liveCaptionText ? '<div class="session-caption-bar">'+escapeHtml(room.liveCaptionText)+'</div>' : '') +
+
       renderChatSection() +
 
       '<button class="btn btn-ghost btn-block" id="leaveSessionBtn" style="margin-top:24px;">LEAVE SESSION</button>';
@@ -13600,6 +13796,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<button type="button" class="stage-fullscreen-btn" id="stageFullscreenBtn" aria-label="'+(isFull?'Exit full screen':'Enter full screen, hide the header')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon(isFull?'compress':'expand')+'</svg></button>' +
         '<button type="button" class="stage-exit-btn" id="stageExitBtn" aria-label="Exit projector view">&times;</button>' +
         renderStageSlide(projectorContent, 'projector') +
+        // Live Captions [2026-09-29] -- only the FINAL, debounced text ever
+        // reaches here (see broadcastCaptionText()'s own comment on why
+        // interim results are never room-doc writes): this bar updates at
+        // most a couple of times a second, never per-keystroke, so it can't
+        // cause the flicker/jank a naive every-interim-result write would
+        // risk on the screen the whole congregation is watching.
+        (room.liveCaptionOn && room.liveCaptionText ? '<div class="stage-caption-bar">'+escapeHtml(room.liveCaptionText)+'</div>' : '') +
         (showVeil ? '<div class="stage-pending-veil" aria-hidden="true"><span class="stage-pending-spinner"></span></div>' : '') +
       '</div>';
     const exitBtn = document.getElementById('stageExitBtn');
@@ -14127,7 +14330,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // Livestream link [2026-09-24]: 'l' was already chart Link, so this
       // uses 'k' (lin'k') instead, same "move one letter in" precedent as
       // LOGO above.
-      'k':'streamLinkBtn'
+      'k':'streamLinkBtn',
+      // Live Captions [2026-09-29]: 'c' was already chat, so this uses 'v'
+      // (as in "voice") instead.
+      'v':'liveCaptionsBtn'
     };
     const id = idByKey[e.key.toLowerCase()];
     if(!id) return;

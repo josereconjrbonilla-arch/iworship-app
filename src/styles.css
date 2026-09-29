@@ -366,7 +366,27 @@
   .landing-hero{ text-align:center; padding:18px 6px 6px; }
   .landing-greeting{ font-size:2.1rem; }
   .landing-sub{ color:var(--ink-soft); margin-top:10px; font-size:1.08rem; max-width:52ch; margin-left:auto; margin-right:auto; }
-  .switch-account{ background:none; border:none; color:var(--wine); font-weight:700; font-size:.85rem; cursor:pointer; margin-top:10px; padding:8px; }
+  /* [Modernization pass 2026-09-29 -- same audit as .notif-row/.about-
+     feature-item above.] .switch-account is used at 50+ call sites across
+     nearly every screen (SERMONS/MEDIA LIBRARY/PROGRAMS row-links,
+     sign-out, "manage my sessions," and more) -- real, primary actions
+     rendered with zero interactive feedback: bold wine text and nothing
+     else, no different from a plain hyperlink. Deliberately did NOT turn
+     this into a full bordered card the way .about-feature-item became --
+     several of its 50+ call sites are genuinely secondary/tertiary
+     actions (a small "sign out" link, an inline toggle) where a heavy
+     card would be the wrong visual weight, and this sandbox has no way
+     to visually review all 50+ contexts before shipping a layout change
+     that risky. What EVERY call site can safely get, regardless of
+     context, is real tap feedback: a background wash on hover and a
+     slight press-down on active, with rounded corners so the wash reads
+     as a deliberate button-ish hit target instead of a link underline. */
+  .switch-account{
+    background:none; border:none; color:var(--wine); font-weight:700; font-size:.85rem; cursor:pointer;
+    margin-top:10px; padding:8px 10px; border-radius:10px; transition:background-color .15s ease, transform .08s ease;
+  }
+  .switch-account:hover{ background:var(--wine-tint); }
+  .switch-account:active{ transform:scale(.97); }
 
   .verse-card{
     position:relative; background:var(--surface); border:1px solid var(--border); border-radius:22px;
@@ -1275,6 +1295,26 @@
     border:1px solid var(--border); background:var(--surface); color:var(--ink-soft);
     font-size:1.4rem; line-height:1; cursor:pointer;
   }
+  /* Live Captions ["BUILD THEM ALL NOW" batch 3, 2026-09-29] -- a classic
+     closed-caption bar pinned to the bottom edge of the projector view
+     (position:absolute so it sits on top regardless of .stage-view's own
+     centered flex content, same layering trick .stage-exit-btn above
+     already uses), dark/semi-transparent so it reads over any slide
+     background, light/large/bold text matching how real broadcast
+     captions look. .session-caption-bar is the same idea for a
+     congregant's own phone (renderSessionView) -- not absolutely
+     positioned there, since that screen scrolls normally with chat below
+     it rather than being a fixed full-viewport display. */
+  .stage-caption-bar{
+    position:absolute; left:0; right:0; bottom:0; z-index:5;
+    background:rgba(0,0,0,.72); color:#fff; padding:18px 32px;
+    font-family:Tahoma, Verdana, 'Segoe UI', sans-serif; font-weight:700;
+    font-size:clamp(1.1rem, 2.4vw, 1.6rem); line-height:1.4; text-align:center;
+  }
+  .session-caption-bar{
+    background:#1a1a1a; color:#fff; border-radius:14px; padding:14px 18px;
+    font-weight:700; font-size:1.05rem; line-height:1.4; text-align:center; margin:-8px 0 18px;
+  }
   /* Fade transition [2026-09-06] -- Jared: "can we add a quick fade
      transition to any change in the live view?" Wraps renderStageSlide()'s
      output (both the ?stage= projector and the split-screen host stage
@@ -2091,15 +2131,48 @@ body.stage-page .appfoot{ display:none; }
   .about-section-intro{
     font-size:1rem; line-height:1.65; color:var(--ink-soft); text-align:left; margin:0 0 18px;
   }
-  .about-feature-list{ display:flex; flex-direction:column; gap:14px; text-align:left; }
-  .about-feature-item{ display:flex; align-items:flex-start; gap:10px; }
+  /* [2026-09-29] Jared: "in the growth tab, the sections are all in
+     hyperlinks. Make the interface... more modern and user friendly" --
+     .about-feature-item used to be a bare flex row (no background, no
+     border, no padding) with a bold wine-colored title, which read exactly
+     like a plain text hyperlink list rather than something tappable. Now a
+     real card row (surface background, border, radius, padding) with a
+     hover/active state on the CLICKABLE usages specifically (the two
+     Spiritual Growth nav lists render these as real <button> elements;
+     the About screen's own feature bullets render plain <div>s, so the
+     `button.about-feature-item` hover/cursor rules below correctly leave
+     those alone) -- one shared CSS component, so every screen already
+     using it (About, Spiritual Growth's home nav, Discipleship Path,
+     Testimony/Prayer Wall intro copy) gets the same modernized look at
+     once, all in one place, matching this app's existing "one shared class
+     per component" convention rather than a screen-by-screen patch. See
+     renderSpiritualGrowthHome()/renderSpiritualGrowthPath() in app.js for
+     the matching per-row icon + trailing chevron this same change added
+     there, so a clickable row now actually LOOKS clickable instead of
+     relying on a leading icon slot doing double duty as a fake chevron. */
+  .about-feature-list{ display:flex; flex-direction:column; gap:10px; text-align:left; }
+  .about-feature-item{
+    display:flex; align-items:center; gap:12px;
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:14px 16px;
+  }
   .about-feature-item p{ margin:0; line-height:1.55; color:var(--ink); }
   .about-feature-item strong{ color:var(--wine); }
+  button.about-feature-item{
+    cursor:pointer; transition:border-color .15s ease, background-color .15s ease, transform .08s ease;
+  }
+  button.about-feature-item:hover{ border-color:var(--gold); background:var(--surface-2); }
+  button.about-feature-item:active{ transform:scale(.99); }
   .about-feature-check{
-    flex:none; width:22px; height:22px; border-radius:50%; margin-top:2px;
+    flex:none; width:36px; height:36px; border-radius:11px; margin-top:0;
     background:var(--pine-tint); color:var(--pine); display:flex; align-items:center; justify-content:center;
   }
-  .about-feature-check svg{ width:13px; height:13px; }
+  .about-feature-check svg{ width:17px; height:17px; }
+  .about-feature-chevron{
+    flex:none; width:20px; height:20px; margin-left:auto; color:var(--ink-soft);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .about-feature-chevron svg{ width:16px; height:16px; }
   .about-section-teaser-badge{
     display:inline-block; padding:6px 16px; border-radius:999px; background:var(--wine);
     color:var(--gold-tint); font-size:.75rem; font-weight:800; letter-spacing:.06em;
@@ -2527,10 +2600,24 @@ body.stage-page .appfoot{ display:none; }
   }
   .person-row:last-child{ border-bottom:none; }
 
-  /* Notifications list. */
-  .notif-row{ display:flex; align-items:center; gap:12px; padding:14px 8px; border-bottom:1px solid var(--border); }
+  /* Notifications list. [Modernization pass 2026-09-29 -- Jared: "make the
+     interface of each section more modern and user friendly," same
+     "looks like a hyperlink, not a button" audit that fixed the Growth
+     tab's nav rows. Every row here is fully clickable (see
+     renderNotifications()'s own click handler on every
+     [data-open-notif-actor] row) but had zero visual sign of that --
+     no cursor, no hover, no active-press feedback, nothing but a plain
+     divider between rows. Added exactly that, without changing the
+     existing unread-tint/divider layout underneath it. */
+  .notif-row{
+    display:flex; align-items:center; gap:12px; padding:14px 8px; border-bottom:1px solid var(--border);
+    cursor:pointer; border-radius:12px; transition:background-color .15s ease;
+  }
   .notif-row:last-child{ border-bottom:none; }
+  .notif-row:hover{ background:var(--surface-2); }
+  .notif-row:active{ transform:scale(.99); }
   .notif-row-unread{ background:var(--wine-tint); border-radius:12px; }
+  .notif-row-unread:hover{ background:var(--wine-tint); filter:brightness(.97); }
 
   /* ============ SETTINGS [2026-09-10] ============
      Jared: "settings will cover preferences, password, account switching/

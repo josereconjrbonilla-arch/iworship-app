@@ -10732,8 +10732,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // sentences -- not a real error, onend's own restart below handles
       // it exactly like a clean stop would. Only an actual permissions/
       // hardware problem should stop captions outright rather than
-      // quietly retrying forever.
-      if(event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed'){
+      // quietly retrying forever. Guarded the same way onend is below --
+      // see that comment for why a stale instance must never touch shared
+      // state just because it still fires an event.
+      if((event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed') && liveCaptionsRecognition === recognition){
         liveCaptionsShouldRun = false;
         showToast('Live Captions needs microphone access &mdash; check this browser&rsquo;s site permissions, then try again.');
         render();
@@ -10745,7 +10747,30 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // the host hasn't explicitly turned this off, so a quiet stretch
       // mid-service (prayer, a pause before the next point) never silently
       // ends captions without anyone noticing.
-      if(liveCaptionsShouldRun){
+      //
+      // [Bug fix 2026-09-30, Jared: "the captions froze upon switching
+      // languages"] `recognition.stop()` is ASYNC -- it doesn't tear the
+      // engine down the instant it's called, `onend` fires some moments
+      // later. setLiveCaptionsLang() used to call stopLiveCaptions() then
+      // immediately startLiveCaptions() back to back, so a language switch
+      // created a brand new `recognition` instance (and set
+      // liveCaptionsShouldRun back to true) WHILE the old one was still in
+      // the middle of shutting down. When the OLD instance's own onend
+      // finally fired, this check used to read only the shared
+      // liveCaptionsShouldRun flag -- which was true again by then -- so
+      // the orphaned OLD instance would restart ITSELF too, alongside the
+      // new one already running. Two competing recognition sessions on the
+      // same tab immediately conflict and re-fire onend on each other,
+      // each restart re-triggering the next almost instantly -- a runaway
+      // synchronous restart loop that pegs the tab's main thread solid,
+      // which is exactly what a "Page Unresponsive" freeze looks like.
+      // Comparing against liveCaptionsRecognition (which startLiveCaptions()
+      // below always points at the CURRENT instance, and stopLiveCaptions()
+      // now clears to null before it even calls .stop() -- see that
+      // function) means a superseded instance's onend can never mistake
+      // itself for the one still meant to be running, no matter how the
+      // async timing lands.
+      if(liveCaptionsShouldRun && liveCaptionsRecognition === recognition){
         try{ recognition.start(); }catch(e){ /* already running -- browsers sometimes fire onend just before a start() we already issued */ }
       }
     };
@@ -10767,8 +10792,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function stopLiveCaptions(){
     liveCaptionsShouldRun = false;
     if(liveCaptionsRecognition){
-      try{ liveCaptionsRecognition.stop(); }catch(e){}
+      // Clear this BEFORE calling .stop() (not after) -- .stop() is async,
+      // and the old instance's own onend handler checks
+      // `liveCaptionsRecognition === recognition` (see startLiveCaptions())
+      // to know whether it's still the current one. Clearing first means
+      // that check already fails the instant a caller (e.g.
+      // setLiveCaptionsLang()) moves on to start a replacement, regardless
+      // of how long the real shutdown takes to actually finish.
+      const old = liveCaptionsRecognition;
       liveCaptionsRecognition = null;
+      try{ old.stop(); }catch(e){}
     }
     if(state.activeRoomCode){
       updateRoom(state.activeRoomCode, { liveCaptionOn: false, liveCaptionText: '' }).catch(function(){});

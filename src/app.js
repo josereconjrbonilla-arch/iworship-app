@@ -10787,11 +10787,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // is current now.
       if(state.activeRoomCode !== code || !liveTranslationOn || captionToTranslateTargetLang() !== targetLang) return;
       updateRoom(code, { liveTranslationText: result.translated }).catch(function(){});
-    }).catch(function(){
+    }).catch(function(err){
       // Best-effort supplementary text -- a failed translation call (API
       // not enabled yet, network hiccup, momentarily over quota) just
       // leaves whatever translation was last shown rather than erroring
       // loudly over something that isn't the primary caption feed.
+      //
+      // [Bug fix 2026-09-30, Jared: "live captions appear but they don't
+      // translate"] This used to swallow the error completely -- not even
+      // a console log -- which made it impossible to tell WHY translation
+      // wasn't working versus just not having tried yet. Logging it (not
+      // a user-facing toast -- still deliberately non-interrupting for a
+      // live service) means opening the browser console during a failed
+      // attempt now actually shows the real reason instead of nothing.
+      console.error('[iworship] live translation failed:', (err && err.message) || err);
     });
   }, 400);
   function startLiveCaptions(){

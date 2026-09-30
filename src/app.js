@@ -1438,10 +1438,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
   function startSocialWatches(uid){
     stopSocialWatches();
-    unsubMyLikes = watchMyLikes(uid, function(keys){ state.myLikedKeys = keys; render(); });
-    unsubMySaved = watchMySaved(uid, function(list){ state.mySavedKeys = new Set(list.map(function(s){ return s.kind+':'+s.itemId; })); render(); });
-    unsubMyFollowing = watchMyFollowing(uid, function(set){ state.myFollowing = set; render(); });
-    unsubNotifications = watchNotifications(uid, function(list){ state.notifications = list; render(); });
+    unsubMyLikes = watchMyLikes(uid, function(keys){ state.myLikedKeys = keys; scheduleRender(); });
+    unsubMySaved = watchMySaved(uid, function(list){ state.mySavedKeys = new Set(list.map(function(s){ return s.kind+':'+s.itemId; })); scheduleRender(); });
+    unsubMyFollowing = watchMyFollowing(uid, function(set){ state.myFollowing = set; scheduleRender(); });
+    unsubNotifications = watchNotifications(uid, function(list){ state.notifications = list; scheduleRender(); });
     unsubForegroundPush = watchForegroundPush(function(payload){
       const body = (payload && payload.notification && (payload.notification.body || payload.notification.title))
         || (payload && payload.data && (payload.data.body || payload.data.title))
@@ -1559,7 +1559,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
               state.profile = serverProfile;
               state.profileLoaded = true;
               syncChurchWatch(serverProfile);
-              render();
+              scheduleRender();
             }).catch(function(e){
               console.error('[iworship-debug] direct server fetch FAILED', e && e.code, e && e.message, e);
               // Leave it to the listener/timer -- a failed one-shot isn't
@@ -1571,7 +1571,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
               console.debug('[iworship-debug] 15s ultimate fallback FIRED -- neither the listener nor the direct fetch confirmed in time, forcing profileLoaded with', profile);
               state.profile = profile;
               state.profileLoaded = true;
-              render();
+              scheduleRender();
             }, 15000);
           }
           return;
@@ -1591,7 +1591,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           directorySelfHealedForUid = user.uid;
           ensureDirectoryEntry(user.uid, profile).catch(function(){});
         }
-        render();
+        scheduleRender();
       });
       startSocialWatches(user.uid);
       // Resuming straight into a hosted session on page load (see the
@@ -1626,16 +1626,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       }
       checkIsEditor(user.uid).then(function(isEditor){
         state.isEditor = isEditor;
-        render();
+        scheduleRender();
       }).catch(function(){ /* not on the list, or offline -- Musicians tab just stays hidden */ });
       checkIsAdmin(user.uid).then(function(isAdmin){
         state.isAdmin = isAdmin;
-        render();
+        scheduleRender();
       }).catch(function(){ /* not an admin, or offline -- Admin Tools just stays hidden */ });
     } else {
       state.profile = null;
       state.church = null;
-      render();
+      scheduleRender();
     }
   });
   }); // end deferred watchAuth registration (queueMicrotask above)
@@ -1664,7 +1664,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // the routing block already defaulted it to ('landing'), same as
       // renderDetail()'s own snap-back guard would do for a live navigation.
     }
-    render();
+    scheduleRender();
   });
 
   /* ============ SPIRITUAL GROWTH: CUSTOM TOPICS ============ */
@@ -1678,7 +1678,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // below for where this gets merged with the hardcoded built-in topics.
   watchGrowthTopics(function(topics){
     state.spiritualGrowthCustomTopics = topics;
-    if(state.view === 'spiritual-growth' || state.view === 'admin') render();
+    if(state.view === 'spiritual-growth' || state.view === 'admin') scheduleRender();
   });
 
   /* ============ THEME ============ */
@@ -3215,6 +3215,55 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         threadBodyAfter.scrollTop = threadBodyWasAtBottom ? threadBodyAfter.scrollHeight : threadBodyScroll;
       }
     }
+  }
+  // Batches multiple background-data render() requests landing in the same
+  // tick into a single actual render() [2026-09-30 -- Jared: "it's not just
+  // the live captions freezing, it's the app itself"]. Root cause found by
+  // tracing what actually runs on a fresh sign-in/reload: watchAuth()'s
+  // callback alone fans out into watchProfile(), checkIsEditor(),
+  // checkIsAdmin(), and startSocialWatches() (which itself starts FIVE more
+  // independent onSnapshot listeners -- myLikes/mySaved/myFollowing/
+  // notifications/DM-threads/group-chats), plus watchSongs() and
+  // watchGrowthTopics() running unconditionally alongside all of that. Every
+  // one of those is a SEPARATE Firestore listener that calls render() on its
+  // own the instant its first snapshot arrives -- and onSnapshot guarantees
+  // an immediate first callback, so on a real backend these commonly land
+  // within the same event-loop turn (or a couple of ticks) of each other,
+  // not spread out. Each render() is a full main.innerHTML rebuild of
+  // whatever view is on screen plus renderHeaderChrome()'s own cascade of
+  // sub-renders -- so a burst of 8-10 of these back to back, all on one
+  // sign-in or reconnect, is real synchronous main-thread work with nothing
+  // to interrupt it, which is exactly what trips Chrome's "Page
+  // Unresponsive" watchdog (a period of blocked main thread, not an
+  // infinite loop -- consistent with Jared's report that this isn't tied to
+  // hosting a session specifically: this cascade runs for anyone signed in,
+  // session or not). Resuming straight into an active hosted session on
+  // reload piles SIX MORE watchers (sermons/media/programs/directory) onto
+  // the exact same burst, which is the likely reason the first reports of
+  // this were seen on the Host screen specifically -- that just made an
+  // already-bad burst worse on top of an already-heavy view to rebuild.
+  // scheduleRender() coalesces any of these background watchers' render()
+  // calls that land in the same microtask-queue flush into ONE real
+  // render() using the final state, instead of one full rebuild per
+  // listener. Deliberately NOT used for user-initiated render() calls (a
+  // click handler, a view change) -- those still render synchronously so
+  // the screen updates the instant someone taps something, and several of
+  // those call sites do a window.scrollTo()/focus() right after render()
+  // that depends on it having already run.
+  // Verified: node --check + a full `npm run build` pass after this change
+  // (this sandbox has no live Firestore, so the actual coalescing under a
+  // real burst of snapshots couldn't be exercised here -- if occasional
+  // freezes keep happening after this ships, the next useful thing to
+  // capture is roughly how long since the app was opened/reconnected when
+  // it happens).
+  let renderScheduled = false;
+  function scheduleRender(){
+    if(renderScheduled) return;
+    renderScheduled = true;
+    Promise.resolve().then(function(){
+      renderScheduled = false;
+      render();
+    });
   }
   function renderCurrentView(){
     // See styles.css's "main.main-full-bleed" comment -- only the
@@ -15163,7 +15212,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // notifications watch just above it.
     unsubMyDmThreads = watchMyDmThreads(state.user.uid, function(threads){
       state.myDmThreads = threads;
-      render();
+      scheduleRender();
     });
   }
   let unsubDmMessages = null;
@@ -15199,7 +15248,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // [v36] Same app-wide change as startMyDmThreadsWatch() above.
     unsubMyGroupChats = watchMyGroupChats(state.user.uid, function(groups){
       state.myGroupChats = groups;
-      render();
+      scheduleRender();
     });
   }
   let unsubGroupChat = null;

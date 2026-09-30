@@ -10746,13 +10746,34 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const el = document.getElementById('liveCaptionInterimText');
     if(el) el.textContent = text || 'Listening…';
   }
+  // Host-visible diagnostics [2026-10-01, Jared: "nope not working" after
+  // several rounds of console-screenshot debugging] -- instead of asking
+  // the host to catch a fleeting console line, the Live Captions card
+  // itself now says, in plain words, exactly which step the pipeline got
+  // to: how many finished sentences the speech engine has produced, and
+  // what happened to the last translation (sending / done / the real
+  // error). Written straight to its own element (not via render()) so a
+  // status change never re-renders the whole host screen mid-service.
+  let liveFinalCount = 0;
+  let liveCaptionStatus = '';
+  function setLiveCaptionStatus(msg){
+    liveCaptionStatus = msg;
+    const el = document.getElementById('liveCaptionStatusText');
+    if(el) el.textContent = liveCaptionStatusLine();
+  }
+  function liveCaptionStatusLine(){
+    return 'Finished sentences heard: ' + liveFinalCount + (liveCaptionStatus ? ' \u00b7 ' + liveCaptionStatus : '');
+  }
   // Debounced (not fired straight from onresult) so a burst of back-to-back
   // final results (the recognizer sometimes fires several in quick
   // succession) coalesces into one room write instead of several -- same
   // "one shared debounce() helper, not a bespoke timer" convention as
   // debouncedRenderListInPlace() above.
   const broadcastCaptionText = debounce(function(code, text){
-    updateRoom(code, { liveCaptionText: text }).catch(function(){});
+    updateRoom(code, { liveCaptionText: text }).catch(function(err){
+      console.error('[iworship] live caption send failed:', (err && err.message) || err);
+      setLiveCaptionStatus('Couldn\u2019t send caption: ' + ((err && err.message) || err));
+    });
   }, 400);
   // Live translation [2026-09-30] -- Jared: "can there be a live
   // translator? From tagalog to english or vice versa." Rides the exact
@@ -10779,14 +10800,26 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return liveCaptionsLang === 'fil' ? 'en' : 'tl';
   }
   const broadcastTranslation = debounce(function(code, text, targetLang){
+    setLiveCaptionStatus('Translating\u2026');
     translateCaption(text, targetLang).then(function(result){
       // Guard against a slow translation call resolving after the host
       // left the room, turned translation back off, or switched caption
       // language mid-flight (which changes targetLang) -- an out-of-date
       // result landing late should just be dropped, not overwrite whatever
       // is current now.
-      if(state.activeRoomCode !== code || !liveTranslationOn || captionToTranslateTargetLang() !== targetLang) return;
-      updateRoom(code, { liveTranslationText: result.translated }).catch(function(){});
+      if(state.activeRoomCode !== code || !liveTranslationOn || captionToTranslateTargetLang() !== targetLang){
+        setLiveCaptionStatus('Translation skipped (settings changed mid-sentence)');
+        return;
+      }
+      if(!result || !result.translated){
+        setLiveCaptionStatus('Translation came back empty');
+        return;
+      }
+      setLiveCaptionStatus('Translated \u2713');
+      updateRoom(code, { liveTranslationText: result.translated }).catch(function(err){
+        console.error('[iworship] live translation send failed:', (err && err.message) || err);
+        setLiveCaptionStatus('Couldn\u2019t send translation: ' + ((err && err.message) || err));
+      });
     }).catch(function(err){
       // Best-effort supplementary text -- a failed translation call (API
       // not enabled yet, network hiccup, momentarily over quota) just
@@ -10801,6 +10834,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // live service) means opening the browser console during a failed
       // attempt now actually shows the real reason instead of nothing.
       console.error('[iworship] live translation failed:', (err && err.message) || err);
+      setLiveCaptionStatus('Translation failed: ' + ((err && err.code) ? err.code + ' \u2014 ' : '') + ((err && err.message) || err));
     });
   }, 400);
   function startLiveCaptions(){
@@ -10810,6 +10844,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       showToast('Live Captions needs a browser with built-in speech recognition &mdash; try Chrome, Edge, or Safari.');
       return;
     }
+    liveFinalCount = 0; liveCaptionStatus = ''; // fresh diagnostics per start
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
     recognition.continuous = true;
@@ -10823,6 +10858,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         else interimText += res[0].transcript;
       }
       if(finalText.trim()){
+        liveFinalCount++;
+        setLiveCaptionStatus(liveTranslationOn ? 'Sending to translator\u2026' : 'Caption sent');
         broadcastCaptionText(code, finalText.trim());
         if(liveTranslationOn) broadcastTranslation(code, finalText.trim(), captionToTranslateTargetLang());
       }
@@ -13116,6 +13153,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '<span>Also show a live translation into '+(liveCaptionsLang==='fil'?'English':'Filipino')+'</span>' +
           '</label>' +
           '<p style="text-align:center;margin:14px 0 0;color:var(--ink-soft);font-size:.95rem;min-height:1.4em;" id="liveCaptionInterimText">Listening&hellip;</p>' +
+          '<p class="hint" style="text-align:center;margin:8px 0 0;font-size:.8rem;" id="liveCaptionStatusText">'+escapeHtml(liveCaptionStatusLine())+'</p>' +
           // Host-visible mirror [2026-09-30, Jared: "a full stencen right
           // here. didn't work" -- he'd spoken a real sentence and watched
           // this card's OWN interim line update, but the interim line only

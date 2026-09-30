@@ -11,10 +11,7 @@
     "seed": "node scripts/seed-firestore.mjs",
     "login": "firebase login",
     "deploy": "vite build && firebase deploy --only hosting",
-    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
-    "netlify:login": "netlify login",
-    "netlify:link": "netlify link",
-    "deploy:netlify": "vite build && netlify deploy --prod"
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes"
   },
   "dependencies": {
     "firebase": "^12.0.0"
@@ -23,7 +20,6 @@
     "vite": "^6.0.0",
     "vite-plugin-pwa": "^0.21.0",
     "firebase-admin": "^13.0.0",
-    "firebase-tools": "^13.0.0",
-    "netlify-cli": "^27.10.2"
+    "firebase-tools": "^13.0.0"
   }
 }

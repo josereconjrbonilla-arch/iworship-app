@@ -15,3 +15,6 @@ dist.zip
 # source we own; devotionals.json (the actual built output, in
 # src/content/ and functions/) IS committed as normal.
 .devotional-cache/
+
+# Local Netlify folder
+.netlify

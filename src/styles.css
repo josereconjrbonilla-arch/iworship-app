@@ -1315,6 +1315,20 @@
     background:#1a1a1a; color:#fff; border-radius:14px; padding:14px 18px;
     font-weight:700; font-size:1.05rem; line-height:1.4; text-align:center; margin:-8px 0 18px;
   }
+  /* Live translation [2026-09-30] -- a second, visually subordinate line
+     inside the same caption bar/card (italic, lighter weight, a hairline
+     divider above it) so it reads as "here's the translation of that" --
+     never its own separate bar, and never in place of the original-
+     language line above it. */
+  .stage-caption-translation{
+    margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.25);
+    font-weight:400; font-style:italic; opacity:.85;
+    font-size:clamp(.95rem, 2vw, 1.3rem);
+  }
+  .session-caption-translation{
+    margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.2);
+    font-weight:400; font-style:italic; opacity:.85; font-size:.95rem;
+  }
   /* Fade transition [2026-09-06] -- Jared: "can we add a quick fade
      transition to any change in the live view?" Wraps renderStageSlide()'s
      output (both the ?stage= projector and the split-screen host stage

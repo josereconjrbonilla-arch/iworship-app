@@ -1300,6 +1300,18 @@ export async function convertPptxToSlideshow(storagePath, title) {
   return result.data; // { mediaId, slideCount }
 }
 
+// Live Captions' translator [2026-09-30] -- see translateCaption in
+// functions/index.js for the full design (why Google Cloud Translation,
+// why it needs no stored secret, what it costs). targetLang is 'en' or
+// 'tl' (Google's own language codes -- app.js's captionToTranslateTargetLang()
+// does the 'fil'-to-'tl' mapping before calling this, so this file stays a
+// thin, unopinionated wrapper like every other function here).
+export async function translateCaption(text, targetLang) {
+  const fn = httpsCallable(functionsClient, 'translateCaption');
+  const result = await fn({ text, targetLang });
+  return result.data; // { translated }
+}
+
 export async function deleteMediaFile(storagePath) {
   await deleteObject(storageRef(storage, storagePath));
 }

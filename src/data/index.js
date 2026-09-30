@@ -70,7 +70,7 @@ export const {
   shareProgram, unshareProgram, watchProgramsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
   shareMedia, unshareMedia, watchMediaSharedWithMe,
-  uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow,
+  uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow, translateCaption,
   createMediaFolder, updateMediaFolder, deleteMediaFolder, watchMyMediaFolders,
   createPost, deletePost, watchFeedPosts, watchUserPosts,
   submitReport, watchPendingReports, resolveReport,

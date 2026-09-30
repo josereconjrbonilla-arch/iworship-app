@@ -31,6 +31,19 @@ const { getStorage } = require('firebase-admin/storage');
 // it's declared directly in package.json (see that file's own comment)
 // since this is the first place this codebase calls it by name.
 const { GoogleAuth } = require('google-auth-library');
+// Live translation [2026-09-30] -- see translateCaption's own comment
+// further down for the full design. Google Cloud Translation (Basic/v2),
+// not Google Cloud Speech-to-Text -- this only translates TEXT (the final
+// caption line Live Captions already produced for free via the browser's
+// own Web Speech API), it never touches audio, so it inherits none of
+// Speech-to-Text's per-minute cost from the vendor research done for Live
+// Captions itself. `new Translate()` with no options authenticates as
+// this function's own runtime service account (Application Default
+// Credentials) and infers the project id from the runtime environment --
+// no API key or secret to store, same shape as convertPptxToSlideshow's
+// google-auth-library usage above.
+const { Translate } = require('@google-cloud/translate').v2;
+const translateClient = new Translate();
 // Devotionals [2026-09-24] -- see dailyDevotionalNotify's own comment
 // further down. This file is written by scripts/build-devotionals.mjs
 // (run locally -- this Node runtime has no outbound web access, so the
@@ -847,4 +860,66 @@ exports.convertPptxToSlideshow = onCall({ timeoutSeconds: 300, memory: '512MiB' 
   await bucket.file(storagePath).delete().catch(() => {});
 
   return { mediaId, slideCount: slideBase64.length };
+});
+
+// ------------------------------------------------------------- translateCaption
+// Live Captions' translator [2026-09-30] -- Jared: "can there be a live
+// translator? From tagalog to english or vice versa." Unlike Live Captions
+// itself (Web Speech API, free, entirely in-browser -- see that feature's
+// own vendor research in claude/architecture-and-decisions.md), there's no
+// free or built-in way to translate text in a browser, so this calls
+// Google Cloud Translation -- picked over Microsoft Azure Translator
+// specifically because this project already has a Blaze-billed GCP
+// project with Cloud Functions deployed to it (confirmed active, not
+// assumed -- see the Storage/Blaze note elsewhere in this codebase), so
+// there's no NEW billing relationship to set up, just one more API on the
+// same project, authenticated the same no-secret-to-store way
+// convertPptxToSlideshow already does above.
+//
+// REQUIRES the "Cloud Translation API" to be enabled for this project in
+// the Google Cloud Console (console.cloud.google.com -> APIs & Services ->
+// Library -> search "Cloud Translation API" -> Enable, project
+// iworship-ph) -- a separate one-time step from Blaze billing itself,
+// same disclosed-not-assumed treatment this codebase gives every other
+// external dependency. This function fails with a clear, catchable
+// message if that hasn't been done yet, rather than the client guessing
+// why translation silently doesn't work.
+//
+// Kept intentionally tiny and stateless (no Firestore read/write at all)
+// -- the client decides WHEN to call this (debounced off the exact same
+// final-caption-text stream that already feeds the room doc's
+// liveCaptionText, see broadcastTranslation() in app.js) and what to do
+// with the result (write it to the room doc's liveTranslationText itself).
+// Cost note, disclosed to Jared before this was built: Google Cloud
+// Translation's Basic tier is priced per character translated, with a
+// free allotment each month (currently the first 500,000 characters) --
+// for one church's debounced final-caption stream during a normal
+// service, this is expected to land well within that free tier, but nothing
+// here enforces a hard cap, so unusually heavy use (many rooms, many hours)
+// would start incurring a small real cost past it.
+exports.translateCaption = onCall(async (request) => {
+  requireAuth(request); // any signed-in account -- this only translates text the HOST's own client already chose to send, same trust level as the room doc writes it accompanies
+  const { text, targetLang } = request.data || {};
+
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new HttpsError('invalid-argument', 'text is required.');
+  }
+  if (text.length > 2000) {
+    throw new HttpsError('invalid-argument', 'That text is implausibly long for one caption line.');
+  }
+  // 'en' (English) and 'tl' (Tagalog) are Google Cloud Translation's own
+  // language codes -- 'tl' specifically, NOT the 'fil' BCP-47 tag Live
+  // Captions' SpeechRecognition uses for the same language (that
+  // distinction lives client-side, see captionToTranslateTargetLang() in
+  // app.js -- this function only ever sees the already-mapped 'tl').
+  if (targetLang !== 'en' && targetLang !== 'tl') {
+    throw new HttpsError('invalid-argument', 'targetLang must be "en" or "tl".');
+  }
+
+  try {
+    const [translated] = await translateClient.translate(text, targetLang);
+    return { translated };
+  } catch (e) {
+    throw new HttpsError('internal', 'Translation failed: ' + ((e && e.message) || 'unknown error') + ' -- if this is the first attempt, check that the Cloud Translation API is enabled for this project in the Google Cloud Console.');
+  }
 });

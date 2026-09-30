@@ -39,7 +39,7 @@ import {
   shareProgram, unshareProgram, watchProgramsSharedWithMe,
   createMedia, updateMedia, deleteMedia, watchMyMedia, watchMedia,
   shareMedia, unshareMedia, watchMediaSharedWithMe,
-  uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow,
+  uploadMediaFile, deleteMediaFile, uploadPptxSourceFile, convertPptxToSlideshow, translateCaption,
   createMediaFolder, updateMediaFolder, deleteMediaFolder, watchMyMediaFolders,
   createPost, deletePost, watchFeedPosts, watchUserPosts,
   submitReport, watchPendingReports, resolveReport,
@@ -10754,6 +10754,46 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   const broadcastCaptionText = debounce(function(code, text){
     updateRoom(code, { liveCaptionText: text }).catch(function(){});
   }, 400);
+  // Live translation [2026-09-30] -- Jared: "can there be a live
+  // translator? From tagalog to english or vice versa." Rides the exact
+  // same final-caption-text stream as broadcastCaptionText() just above
+  // (same debounce() helper, same 400ms window, same "coalesce a burst of
+  // final results into one call" reasoning) -- this just ALSO calls the
+  // translateCaption Cloud Function (functions/index.js) when the host has
+  // opted in, and writes the result to its own liveTranslationText room
+  // field rather than overwriting liveCaptionText, so viewers see BOTH the
+  // original words and the translation rather than one replacing the
+  // other (Jared's original ask was for a translator alongside captions,
+  // not instead of them -- and showing both means anyone who understands
+  // the spoken language directly isn't stuck reading a machine translation
+  // of their own language). liveTranslationOn is local+persisted, same
+  // convention as liveCaptionsLang above; the room doc's own
+  // liveTranslationOn field is what viewers' render paths actually gate
+  // on, same split as liveCaptionsShouldRun vs room.liveCaptionOn.
+  let liveTranslationOn = safeGet('cv:translationOn', '0') === '1';
+  // Google Cloud Translation's own language codes ('tl' for Tagalog), NOT
+  // the 'fil-PH' BCP-47 tag SpeechRecognition needs -- translates to
+  // whichever language ISN'T currently being captioned, so a Tagalog
+  // sermon gets an English translation line and vice versa.
+  function captionToTranslateTargetLang(){
+    return liveCaptionsLang === 'fil' ? 'en' : 'tl';
+  }
+  const broadcastTranslation = debounce(function(code, text, targetLang){
+    translateCaption(text, targetLang).then(function(result){
+      // Guard against a slow translation call resolving after the host
+      // left the room, turned translation back off, or switched caption
+      // language mid-flight (which changes targetLang) -- an out-of-date
+      // result landing late should just be dropped, not overwrite whatever
+      // is current now.
+      if(state.activeRoomCode !== code || !liveTranslationOn || captionToTranslateTargetLang() !== targetLang) return;
+      updateRoom(code, { liveTranslationText: result.translated }).catch(function(){});
+    }).catch(function(){
+      // Best-effort supplementary text -- a failed translation call (API
+      // not enabled yet, network hiccup, momentarily over quota) just
+      // leaves whatever translation was last shown rather than erroring
+      // loudly over something that isn't the primary caption feed.
+    });
+  }, 400);
   function startLiveCaptions(){
     const code = state.activeRoomCode;
     if(!code) return;
@@ -10773,7 +10813,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         if(res.isFinal) finalText += res[0].transcript;
         else interimText += res[0].transcript;
       }
-      if(finalText.trim()) broadcastCaptionText(code, finalText.trim());
+      if(finalText.trim()){
+        broadcastCaptionText(code, finalText.trim());
+        if(liveTranslationOn) broadcastTranslation(code, finalText.trim(), captionToTranslateTargetLang());
+      }
       updateLiveCaptionInterimDisplay(interimText.trim());
     };
     recognition.onerror = function(event){
@@ -10833,7 +10876,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       liveCaptionsRecognition = null;
       return;
     }
-    updateRoom(code, { liveCaptionOn: true, liveCaptionLang: liveCaptionsLang, liveCaptionText: '' }).catch(function(){
+    updateRoom(code, {
+      liveCaptionOn: true, liveCaptionLang: liveCaptionsLang, liveCaptionText: '',
+      liveTranslationOn: liveTranslationOn, liveTranslationText: ''
+    }).catch(function(){
       showToast('Live Captions started, but couldn&rsquo;t tell viewers yet &mdash; try toggling it off and on again.');
     });
     render();
@@ -10853,7 +10899,24 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       try{ old.stop(); }catch(e){}
     }
     if(state.activeRoomCode){
-      updateRoom(state.activeRoomCode, { liveCaptionOn: false, liveCaptionText: '' }).catch(function(){});
+      updateRoom(state.activeRoomCode, { liveCaptionOn: false, liveCaptionText: '', liveTranslationOn: false, liveTranslationText: '' }).catch(function(){});
+    }
+    render();
+  }
+  // Live translation on/off toggle [2026-09-30] -- independent of
+  // start/stop captions themselves (a host can turn translation on or off
+  // mid-service without interrupting the caption feed), but writes the
+  // room doc immediately either way so viewers' gating on
+  // room.liveTranslationOn stays in sync without waiting on the next final
+  // caption. Turning ON while captions aren't running yet just sets the
+  // local preference -- the room field gets written the next time
+  // startLiveCaptions() runs (see its own updateRoom() call above).
+  function setLiveTranslationOn(on){
+    liveTranslationOn = !!on;
+    safeSet('cv:translationOn', liveTranslationOn ? '1' : '0');
+    if(state.activeRoomCode && liveCaptionsShouldRun){
+      updateRoom(state.activeRoomCode, liveTranslationOn ? { liveTranslationOn: true } : { liveTranslationOn: false, liveTranslationText: '' })
+        .catch(function(){ showToast('Couldn&rsquo;t update the translator &mdash; try again.'); });
     }
     render();
   }
@@ -13010,6 +13073,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
               '<button class="segment-btn'+(liveCaptionsLang==='fil'?' active':'')+'" id="captionLangFilBtn"><span>FILIPINO</span></button>' +
             '</div>' +
           '</div>' +
+          // Live translation [2026-09-30] -- a plain checkbox row rather
+          // than its own segmented control, since there's only one other
+          // language to translate TO (whichever one isn't being
+          // captioned) -- see captionToTranslateTargetLang()'s own
+          // comment. Reflects liveTranslationOn (the local preference),
+          // not room.liveTranslationOn, same reasoning renderLiveCaptionsPanel's own
+          // gating comment above gives for liveCaptionsShouldRun vs
+          // room.liveCaptionOn: the very first render after tapping this
+          // happens before the write round-trips back down.
+          '<label class="check-row" style="margin-top:12px;display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+            '<input type="checkbox" id="liveTranslationToggle"'+(liveTranslationOn?' checked':'')+'>' +
+            '<span>Also show a live translation into '+(liveCaptionsLang==='fil'?'English':'Filipino')+'</span>' +
+          '</label>' +
           '<p style="text-align:center;margin:14px 0 0;color:var(--ink-soft);font-size:.95rem;min-height:1.4em;" id="liveCaptionInterimText">Listening&hellip;</p>'
         )
       ) +
@@ -13020,6 +13096,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(enBtn) enBtn.addEventListener('click', function(){ setLiveCaptionsLang('en'); });
     const filBtn = document.getElementById('captionLangFilBtn');
     if(filBtn) filBtn.addEventListener('click', function(){ setLiveCaptionsLang('fil'); });
+    const translationToggle = document.getElementById('liveTranslationToggle');
+    if(translationToggle) translationToggle.addEventListener('change', function(){ setLiveTranslationOn(translationToggle.checked); });
   }
 
   // Join QR code [2026-09-24] -- Jared: "QR code: that's a yes for me,
@@ -14034,8 +14112,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
       // Live Captions [2026-09-29] -- same room.liveCaptionOn/liveCaptionText
       // gate as the projector's .stage-caption-bar just above, styled for a
-      // phone-width card instead of an overlay bar.
-      (room.liveCaptionOn && room.liveCaptionText ? '<div class="session-caption-bar">'+escapeHtml(room.liveCaptionText)+'</div>' : '') +
+      // phone-width card instead of an overlay bar. Live translation
+      // [2026-09-30] rides inside the same card as a second, visually
+      // subordinate line -- see broadcastTranslation()'s own comment (near
+      // Live Captions in app.js) for why this is additive, not a
+      // replacement for the original-language line above it.
+      (room.liveCaptionOn && room.liveCaptionText ? ('<div class="session-caption-bar">'+escapeHtml(room.liveCaptionText)+
+        (room.liveTranslationOn && room.liveTranslationText ? '<div class="session-caption-translation">'+escapeHtml(room.liveTranslationText)+'</div>' : '') +
+      '</div>') : '') +
 
       renderChatSection() +
 
@@ -14095,7 +14179,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         // most a couple of times a second, never per-keystroke, so it can't
         // cause the flicker/jank a naive every-interim-result write would
         // risk on the screen the whole congregation is watching.
-        (room.liveCaptionOn && room.liveCaptionText ? '<div class="stage-caption-bar">'+escapeHtml(room.liveCaptionText)+'</div>' : '') +
+        (room.liveCaptionOn && room.liveCaptionText ? ('<div class="stage-caption-bar">'+escapeHtml(room.liveCaptionText)+
+          (room.liveTranslationOn && room.liveTranslationText ? '<div class="stage-caption-translation">'+escapeHtml(room.liveTranslationText)+'</div>' : '') +
+        '</div>') : '') +
         (showVeil ? '<div class="stage-pending-veil" aria-hidden="true"><span class="stage-pending-spinner"></span></div>' : '') +
       '</div>';
     const exitBtn = document.getElementById('stageExitBtn');

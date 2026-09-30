@@ -1318,6 +1318,14 @@ export async function convertPptxToSlideshow(storagePath, title) {
   throw new Error('PowerPoint conversion needs the real (non-demo) app -- it runs on a server, not in this browser.');
 }
 
+// Live Captions' translator [2026-09-30] -- same "honestly rejects rather
+// than pretending" reasoning as convertPptxToSlideshow() just above: there's
+// no local/offline way to call a real translation service, so demo mode
+// surfaces this as a clear, catchable error instead of faking a result.
+export async function translateCaption(text, targetLang) {
+  throw new Error('Live translation needs the real (non-demo) app -- it calls a server, not this browser.');
+}
+
 // --------------------------------------------------------- Media Folders
 // [2026-09-06] See firestore-data-layer.js's matching comment for the full
 // design. Demo-mode twin, same localStorage+BroadcastChannel pattern as

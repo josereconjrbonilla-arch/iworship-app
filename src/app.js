@@ -10822,16 +10822,35 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     recognition.onerror = function(event){
       // 'no-speech' fires constantly during ordinary pauses between
       // sentences -- not a real error, onend's own restart below handles
-      // it exactly like a clean stop would. Only an actual permissions/
-      // hardware problem should stop captions outright rather than
-      // quietly retrying forever. Guarded the same way onend is below --
-      // see that comment for why a stale instance must never touch shared
-      // state just because it still fires an event.
-      if((event.error === 'not-allowed' || event.error === 'audio-capture' || event.error === 'service-not-allowed') && liveCaptionsRecognition === recognition){
-        liveCaptionsShouldRun = false;
-        showToast('Live Captions needs microphone access &mdash; check this browser&rsquo;s site permissions, then try again.');
-        render();
-      }
+      // it exactly like a clean stop would.
+      if(event.error === 'no-speech') return;
+      // Stale instance (already superseded by a stop/restart elsewhere) --
+      // same guard as onend below, so an old instance's leftover event can
+      // never touch shared state or show a toast about something no longer
+      // running.
+      if(liveCaptionsRecognition !== recognition) return;
+      // [Bug fix 2026-09-30, Jared: "stuck on listening," reproduced even in
+      // English with translation off] Every OTHER error code used to be
+      // silently ignored here -- onend's own unconditional restart (below)
+      // would just call recognition.start() again, forever, with zero
+      // feedback to the host. That's indistinguishable from "still
+      // listening" on screen even when the engine can't actually recognize
+      // anything at all (most likely cause: this feature needs to reach
+      // Google's speech service over the internet -- it is NOT fully
+      // on-device -- so a flaky/blocked connection surfaces as a silent
+      // 'network' error and an infinite quiet retry loop, not a visible
+      // failure). Every remaining error code now stops the retry loop and
+      // tells the host something real, in plain language, instead of
+      // leaving them staring at "Listening..." with no way to know why.
+      const LIVE_CAPTION_ERROR_MESSAGES = {
+        'network': 'Live Captions couldn&rsquo;t reach the speech service &mdash; check your internet connection, then try again.',
+        'language-not-supported': 'This browser doesn&rsquo;t support speech recognition in that language &mdash; try the other language.',
+        'bad-grammar': 'Live Captions hit an internal error and stopped &mdash; try again.',
+        'aborted': 'Live Captions stopped unexpectedly &mdash; try again.'
+      };
+      liveCaptionsShouldRun = false;
+      showToast(LIVE_CAPTION_ERROR_MESSAGES[event.error] || ('Live Captions stopped (error: '+event.error+') &mdash; try again.'));
+      render();
     };
     recognition.onend = function(){
       // The researched, disclosed workaround for the Web Speech API's own

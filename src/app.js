@@ -13084,10 +13084,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // happens before updateRoom()'s write has round-tripped back down
   // through the room snapshot). Host-only -- this is the presenter's own
   // language switch and a live word-by-word confirmation that speech
-  // really is being picked up, not something a congregant ever sees (they
-  // get the finished caption bar instead, see renderSessionProjector()/
-  // renderSessionView()).
-  function renderLiveCaptionsPanel(){
+  // really is being picked up. It also mirrors the finished caption line
+  // and its translation (added 2026-09-30, see renderLiveCaptionsPanel()'s
+  // own comment) so the host can confirm both are actually working
+  // without opening the projector or a congregant's phone.
+  function renderLiveCaptionsPanel(room){
     return '<div class="session-card">' +
       '<p class="control-label uc" style="margin-bottom:10px;">Live Captions</p>' +
       (!LIVE_CAPTIONS_SUPPORTED ?
@@ -13114,7 +13115,27 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '<input type="checkbox" id="liveTranslationToggle"'+(liveTranslationOn?' checked':'')+'>' +
             '<span>Also show a live translation into '+(liveCaptionsLang==='fil'?'English':'Filipino')+'</span>' +
           '</label>' +
-          '<p style="text-align:center;margin:14px 0 0;color:var(--ink-soft);font-size:.95rem;min-height:1.4em;" id="liveCaptionInterimText">Listening&hellip;</p>'
+          '<p style="text-align:center;margin:14px 0 0;color:var(--ink-soft);font-size:.95rem;min-height:1.4em;" id="liveCaptionInterimText">Listening&hellip;</p>' +
+          // Host-visible mirror [2026-09-30, Jared: "a full stencen right
+          // here. didn't work" -- he'd spoken a real sentence and watched
+          // this card's OWN interim line update, but the interim line only
+          // ever shows in-progress speech, never the finished caption or
+          // its translation -- those only ever got written to the
+          // projector bar (.stage-caption-bar) and a congregant's phone
+          // (.session-caption-bar), so there was never anywhere on the
+          // host's own screen to confirm translation is actually working
+          // without opening a second window. This block is the exact same
+          // room.liveCaptionText/liveTranslationText fields the projector
+          // and phones read, just mirrored here too -- same
+          // session-caption-bar/-translation classes so it visibly reads
+          // as "this is what they're seeing," not a third, different-
+          // looking caption UI.
+          (room && room.liveCaptionOn && room.liveCaptionText ? (
+            '<p class="hint uc" style="margin:16px 0 6px;font-size:.75rem;letter-spacing:.03em;">What the projector &amp; phones are showing now</p>' +
+            '<div class="session-caption-bar" style="margin:0;">'+escapeHtml(room.liveCaptionText)+
+              (room.liveTranslationOn && room.liveTranslationText ? '<div class="session-caption-translation">'+escapeHtml(room.liveTranslationText)+'</div>' : '') +
+            '</div>'
+          ) : '')
         )
       ) +
     '</div>';
@@ -13244,7 +13265,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const controlsHtml =
       (hostManageOpen ? renderHostManagePanel(room) : '') +
       (hostStreamLinkOpen ? renderStreamLinkPanel(room) : '') +
-      ((liveCaptionsShouldRun || room.liveCaptionOn) ? renderLiveCaptionsPanel() : '') +
+      ((liveCaptionsShouldRun || room.liveCaptionOn) ? renderLiveCaptionsPanel(room) : '') +
       (!iHaveControl ?
         ('<div class="session-card" style="border-color:var(--ink-soft);">' +
           '<p class="control-label uc" style="margin-bottom:6px;">Watch-only for now</p>' +

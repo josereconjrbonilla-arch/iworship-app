@@ -3256,7 +3256,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // freezes keep happening after this ships, the next useful thing to
   // capture is roughly how long since the app was opened/reconnected when
   // it happens).
-  let renderScheduled = false;
+  var renderScheduled = false; // var, not let: demo mode fires watchAuth() synchronously during module load, before this line runs -- a let here was a TDZ crash (blank screen) in demo mode
   function scheduleRender(){
     if(renderScheduled) return;
     renderScheduled = true;
@@ -14378,6 +14378,23 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function fitStageLines(){
     const stageView = document.querySelector('.stage-view');
     if(!stageView) return;
+    // Live Captions bar [2026-10-02, Jared: approved fixing "a long Bible
+    // verse can run underneath the caption bar"] -- .stage-caption-bar is
+    // position:absolute at the bottom of this view, so it took no room in
+    // the layout: the verse/lyrics were centered and sized against the FULL
+    // height and could sit right under the bar (a long verse's reference
+    // line got covered). Reserve the bar's real height as extra bottom
+    // padding instead -- the content then centers in the space above the
+    // bar, and the budget below (which already subtracts padding) shrinks
+    // the text to fit that smaller space. Reset first so the stylesheet's
+    // own padding is what we add to, and so turning captions off restores
+    // it exactly.
+    stageView.style.paddingBottom = '';
+    const captionBar = stageView.querySelector('.stage-caption-bar');
+    if(captionBar){
+      const basePad = parseFloat(getComputedStyle(stageView).paddingBottom) || 0;
+      stageView.style.paddingBottom = (basePad + captionBar.offsetHeight + 16) + 'px';
+    }
     const linesEl = stageView.querySelector('.stage-lines');
     if(!linesEl) return; // "waiting for the host..." state has no lines to fit
     const first = stageView.querySelector('.stage-label') || linesEl;

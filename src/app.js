@@ -97,6 +97,24 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       t = setTimeout(function(){ fn.apply(ctx, args); }, wait);
     };
   }
+  // Throttle with a trailing call [2026-10-02] -- runs fn at most once per
+  // `wait` ms, and always runs once more with the LATEST arguments after a
+  // burst ends. Unlike debounce() above, a steady stream of calls (live
+  // speech that never pauses) can't starve it: it keeps firing every `wait`
+  // ms instead of waiting forever for a quiet gap.
+  function throttleTrailing(fn, wait){
+    let last = 0, t = null, pendingArgs = null;
+    return function(){
+      pendingArgs = arguments;
+      const now = Date.now(), remaining = wait - (now - last);
+      if(remaining <= 0){
+        clearTimeout(t); t = null; last = now;
+        const a = pendingArgs; pendingArgs = null; fn.apply(null, a);
+      } else if(!t){
+        t = setTimeout(function(){ t = null; last = Date.now(); const a = pendingArgs; pendingArgs = null; if(a) fn.apply(null, a); }, remaining);
+      }
+    };
+  }
 
   /* ============ TOPICAL THEMES ============ */
   function themeLabel(key){ const t = THEMES.find(function(t){return t.key===key;}); return t ? t.label : key; }
@@ -10779,17 +10797,35 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // succession) coalesces into one room write instead of several -- same
   // "one shared debounce() helper, not a bespoke timer" convention as
   // debouncedRenderListInPlace() above.
-  const broadcastCaptionText = debounce(function(code, text){
+  // [2026-10-02, Jared: "when the speech speed is fast, the caption and
+  // translator can't catch up"] Was debounce(400) on FINAL results only.
+  // Fast, nonstop speech (no pauses) means the speech engine may not
+  // finalize anything for a minute or more -- so nothing reached the
+  // projector until one giant paragraph landed all at once. Now the
+  // in-progress words are sent too, throttled (at most every 1.2s, so the
+  // room doc stays near Firestore's ~1 write/sec guidance), and only the
+  // most recent words are sent -- see LIVE_CAPTION_WORDS below.
+  const broadcastCaptionText = throttleTrailing(function(code, text){
     updateRoom(code, { liveCaptionText: text }).catch(function(err){
       console.error('[iworship] live caption send failed:', (err && err.message) || err);
       setLiveCaptionStatus('Couldn\u2019t send caption: ' + ((err && err.message) || err));
     });
-  }, 400);
+  }, 1200);
+  // How much of the speech the projector/phones show at once: roughly two
+  // lines on a projector. Older words scroll off, like TV captions, instead
+  // of the caption bar growing into a wall of text over the slide.
+  const LIVE_CAPTION_WORDS = 24;
+  function lastWords(text, n){
+    const w = String(text||'').trim().split(/\s+/).filter(Boolean);
+    return w.slice(Math.max(0, w.length - n)).join(' ');
+  }
+  let liveCaptionCommitted = ''; // recent FINAL words, trimmed to a short rolling window
+  let lastTranslatedText = '';   // skip re-translating text that hasn't changed
+  let liveTranslationSeq = 0, liveTranslationAppliedSeq = 0;
   // Live translation [2026-09-30] -- Jared: "can there be a live
-  // translator? From tagalog to english or vice versa." Rides the exact
-  // same final-caption-text stream as broadcastCaptionText() just above
-  // (same debounce() helper, same 400ms window, same "coalesce a burst of
-  // final results into one call" reasoning) -- this just ALSO calls the
+  // translator? From tagalog to english or vice versa." Rides the same
+  // caption stream as broadcastCaptionText() above (throttled, see its
+  // 2026-10-02 note) -- this just ALSO calls the
   // translateCaption Cloud Function (functions/index.js) when the host has
   // opted in, and writes the result to its own liveTranslationText room
   // field rather than overwriting liveCaptionText, so viewers see BOTH the
@@ -10809,9 +10845,20 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function captionToTranslateTargetLang(){
     return liveCaptionsLang === 'fil' ? 'en' : 'tl';
   }
-  const broadcastTranslation = debounce(function(code, text, targetLang){
+  // Same throttle idea as broadcastCaptionText, slower (every 4.5s -- Jared chose the slower, cheaper rate 2026-10-02): each
+  // call is a paid Cloud Translation request, and translating a few words
+  // at a time with no context reads badly, so it translates the current
+  // ~2-line window as a whole and skips identical repeats.
+  const broadcastTranslation = throttleTrailing(function(code, text, targetLang){
+    if(text === lastTranslatedText) return;
+    lastTranslatedText = text;
+    const seq = ++liveTranslationSeq;
     setLiveCaptionStatus('Translating\u2026');
     translateCaption(text, targetLang).then(function(result){
+      // A slower, older request finishing after a newer one must not put
+      // stale words back on screen.
+      if(seq < liveTranslationAppliedSeq) return;
+      liveTranslationAppliedSeq = seq;
       // Guard against a slow translation call resolving after the host
       // left the room, turned translation back off, or switched caption
       // language mid-flight (which changes targetLang) -- an out-of-date
@@ -10846,7 +10893,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       console.error('[iworship] live translation failed:', (err && err.message) || err);
       setLiveCaptionStatus('Translation failed: ' + ((err && err.code) ? err.code + ' \u2014 ' : '') + ((err && err.message) || err));
     });
-  }, 400);
+  }, 4500);
   function startLiveCaptions(){
     const code = state.activeRoomCode;
     if(!code) return;
@@ -10855,6 +10902,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       return;
     }
     liveFinalCount = 0; liveCaptionStatus = ''; // fresh diagnostics per start
+    liveCaptionCommitted = ''; lastTranslatedText = '';
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
     recognition.continuous = true;
@@ -10869,11 +10917,18 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       }
       if(finalText.trim()){
         liveFinalCount++;
-        setLiveCaptionStatus(liveTranslationOn ? 'Sending to translator\u2026' : 'Caption sent');
-        broadcastCaptionText(code, finalText.trim());
-        if(liveTranslationOn) broadcastTranslation(code, finalText.trim(), captionToTranslateTargetLang());
+        liveCaptionCommitted = lastWords(liveCaptionCommitted + ' ' + finalText, LIVE_CAPTION_WORDS * 2);
       }
-      updateLiveCaptionInterimDisplay(interimText.trim());
+      // What everyone sees: the newest words, finished or still in
+      // progress -- so fast speech shows up as it's spoken instead of
+      // waiting for a pause.
+      const showing = lastWords(liveCaptionCommitted + ' ' + interimText, LIVE_CAPTION_WORDS);
+      if(showing){
+        if(!liveTranslationOn) setLiveCaptionStatus('Caption sent'); // with translation on, broadcastTranslation() reports its own progress
+        broadcastCaptionText(code, showing);
+        if(liveTranslationOn) broadcastTranslation(code, showing, captionToTranslateTargetLang());
+      }
+      updateLiveCaptionInterimDisplay(lastWords(interimText, LIVE_CAPTION_WORDS * 2));
     };
     recognition.onerror = function(event){
       // 'no-speech' fires constantly during ordinary pauses between

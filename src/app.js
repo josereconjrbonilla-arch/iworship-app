@@ -7230,6 +7230,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         { title:'Scripture built right in', desc:'A complete Bible in English (King James Version) and Tagalog (Ang Dating Biblia, 1905) -- switch languages any time, in the Bible tab or live on stage.' },
         { title:'Daily Devotionals', desc:'A fresh Spurgeon "Morning and Evening" reading posts automatically every day, or browse any day of the year.' },
         { title:'Built for a real church team', desc:'A self-service Church Team Roster, role-based access from Senior Pastor down to Musician, and a Song Requests queue for anyone to suggest a hymn.' },
+        { title:'Practice Mode', desc:'Chords and transpose like Play Mode, plus a built-in metronome and hands-free autoscroll so the team can rehearse at tempo.' },
+        { title:'Worship Team Schedule', desc:'Leaders assign who serves on which date and role; each person confirms or declines right in the app.' },
         { title:'Wherever you meet', desc:'Installable right onto an Android phone, works mid-service even with no signal, and fits any screen from a phone to a church PC.' }
       ] },
     { key:'host', label:'Host', icon:'monitor', tagline:'Running the live service, start to finish',
@@ -7239,6 +7241,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         { title:'Split screen for hosts', desc:'Controls, a staged Preview of what’s coming next, and the real Live display, all together on one screen.' },
         { title:'Everything you might project', desc:'Songs, sermon slides, and Bible verses -- switch between any of them live, from the same host screen.' },
         { title:'A real sermon builder', desc:'Drag-and-drop text and image blocks, custom backgrounds, and a built-in Bible verse lookup while building a slide.' },
+        { title:'Live Captions & translation', desc:'The preacher’s words as live captions on the projector and every phone, in English or Filipino -- with an optional second line translating Tagalog to English or English to Tagalog.' },
+        { title:'Sermon Archive', desc:'Publish past sermons with the date and a short summary, so anyone can read them slide by slide later -- no sign-in needed.' },
         { title:'Media & AVP, one stop shop', desc:'Photos, video, slideshows, a direct PowerPoint upload, or a live Google Slides/Canva embed -- whatever the service needs.' },
         { title:'A room that adapts', desc:'A QR code to join instantly, co-hosting, a private musician-only chart view, and the session recovers cleanly if a host’s connection drops.' },
         { title:'In-service chat & links', desc:'A floating chat with its own musicians-only channel, plus a livestream link pinned at the top for anyone who needs to open it.' }
@@ -7252,15 +7256,21 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         { title:'Real conversations', desc:'Direct messages and group chats, with read receipts and real push notifications -- even while the app is closed.' },
         { title:'A familiar inbox', desc:'A Messenger-style dropdown and dock make finding a conversation effortless, on desktop or mobile.' },
         { title:'Safe from day one', desc:'Block and report are built in, backed by a real Admin moderation queue.' },
+        { title:'Church Directory', desc:'Everyone in your own church in one list -- put a name to a face and reach out to someone new.' },
+        { title:'Small Groups', desc:'Browse Bible studies and small groups, see when and where they meet, and join or leave with one tap -- or start your own.' },
+        { title:'Events Calendar', desc:'Services, fellowships, and outreach all in one place, posted by church leaders, with past events clearly marked.' },
         { title:'Desktop & mobile', desc:'Each screen size gets its own design -- a real layout for a wide screen, and one built for a thumb.' }
       ] },
     { key:'spiritual-growth', label:'Spiritual Growth', icon:'heart', tagline:'A guided path for anyone new to faith',
-      intro:'A gentle, guided path for anyone new to faith -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a personal journal for reflecting day by day. Reachable from the menu once signed in.',
+      intro:'A gentle, guided path for anyone new to faith -- from a first gospel invitation, through the milestones of assurance, baptism, and joining a congregation, to a personal journal -- plus a Prayer Wall, a Testimony Wall, and a year-long Bible Reading Plan for every believer. Open the Growth tab once signed in.',
       features:[
         { title:'The Gospel Invitation', desc:'A stand-alone tract screen, always one tap away from the menu.' },
         { title:'You Can Be Sure', desc:'A short assurance screen for anyone who just professed faith -- or wants to revisit why they can be sure.' },
         { title:'A milestone-by-milestone Discipleship Path', desc:'Nine short topics, most-foundational first, each markable as read at your own pace.' },
-        { title:'A fully private journal', desc:'Reflections tied to a topic, or written freely anytime -- never visible to anyone else, not even a pastor or Admin.' }
+        { title:'A fully private journal', desc:'Reflections tied to a topic, or written freely anytime -- never visible to anyone else, not even a pastor or Admin.' },
+        { title:'Prayer Wall', desc:'Post a request -- private or shared with the church -- let others tap “I’m praying,” and mark it answered when God answers.' },
+        { title:'Testimony Wall', desc:'Share an answered prayer or turning point, and let the church say “Amen” -- the best-loved ones are featured on the home screen.' },
+        { title:'Bible Reading Plan', desc:'The whole Bible in a year, in KJV or Tagalog -- mark each day done, keep a streak, and pick up where you left off if you fall behind.' }
       ] }
   ];
   let aboutTab = 'hymnals';

@@ -2285,6 +2285,13 @@ body.stage-page .appfoot{ display:none; }
     .brand{ gap:8px; }
     .brand svg{ width:28px; height:22px; }
     .brand-name{ font-size:1.2rem; }
+    /* [2026-10-02] Jared, from his phone: the "WORSHIP & FELLOWSHIP"
+       tagline was ellipsis-cropped ("WORSHIP & FELLOWS..."). Same cause the
+       desktop breakpoint's own .brand-tag fix already found: the tagline's
+       wide .16em letter-spacing, which this phone breakpoint never
+       overrode. Tighter spacing + a touch smaller so it fits next to the
+       back button, bell, messages and avatar at phone width. */
+    .brand-tag{ font-size:.6rem; letter-spacing:.04em; }
     .header-avatar-btn .avatar-circle, .header-avatar-btn .avatar-fallback{ width:28px; height:28px; font-size:12px; }
   }
   .header-avatar-btn{

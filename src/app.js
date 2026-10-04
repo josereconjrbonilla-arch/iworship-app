@@ -10915,6 +10915,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // room doc stays near Firestore's ~1 write/sec guidance), and only the
   // most recent words are sent -- see LIVE_CAPTION_WORDS below.
   const broadcastCaptionText = throttleTrailing(function(code, text){
+    if(!liveCaptionsShouldRun) return; // a delayed (throttled) send must not write text back after captions were turned off
     updateRoom(code, { liveCaptionText: text }).catch(function(err){
       console.error('[iworship] live caption send failed:', (err && err.message) || err);
       setLiveCaptionStatus('Couldn\u2019t send caption: ' + ((err && err.message) || err));
@@ -10989,6 +10990,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // at a time with no context reads badly, so it translates the current
   // ~2-line window as a whole and skips identical repeats.
   const broadcastTranslation = throttleTrailing(function(code, text, targetLang){
+    if(!liveCaptionsShouldRun) return; // same: nothing after captions are off
     if(text === lastTranslatedText) return;
     lastTranslatedText = text;
     const seq = ++liveTranslationSeq;
@@ -11048,6 +11050,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     recognition.interimResults = true;
     recognition.lang = liveCaptionsLang === 'fil' ? 'fil-PH' : 'en-US';
     recognition.onresult = function(event){
+      // A stopped engine can still deliver a few last results -- ignore
+      // anything from an instance that's no longer the live one.
+      if(liveCaptionsRecognition !== recognition || !liveCaptionsShouldRun) return;
       // Rebuild from the FULL result list every time (not just the
       // changed ones) -- see mergeWords()'s note on why.
       // Only the last few results matter for a ~2-line caption, and the

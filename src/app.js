@@ -3204,7 +3204,19 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return true;
   }
 
+  // Re-entrancy guard [2026-10-04] -- safety net for the whole bug class
+  // behind the host-screen freeze (see the note in renderInner()'s view-
+  // change block): if anything ever calls render() while a render is
+  // already running, finish the current one and render once more right
+  // after, instead of recursing until the call stack overflows.
+  var renderDepth = 0; // var, not let: render() can run during module load before this line (same TDZ trap as renderScheduled)
   function render(){
+    if(renderDepth > 0){ scheduleRender(); return; }
+    renderDepth++;
+    try{ renderInner(); }
+    finally{ renderDepth--; }
+  }
+  function renderInner(){
     // Color theme sync -- see syncColorThemeFromProfile()'s own comment
     // near COLOR_THEMES. Cheap and idempotent, so it's safe to run on every
     // single render() regardless of what triggered it.
@@ -3305,7 +3317,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // check, so this only fires once per actual navigation away, not on
       // every one of Practice Mode's own re-renders (BPM/speed taps) while
       // the view itself hasn't changed.
-      if(lastRenderedView === 'practice' && state.view !== 'practice'){ stopPracticeMetronome(); stopPracticeScroll(); }
+      // [2026-10-04 freeze root cause] Record the new view FIRST, then run
+      // cleanups against the previous one. stopLiveCaptions() below calls
+      // render() itself -- and because lastRenderedView used to be updated
+      // only AFTER that call, the nested render() saw the view as "still
+      // changed", called stopLiveCaptions() again, which rendered again...
+      // endless recursion ("Maximum call stack size exceeded", caught by
+      // App diagnostics) every time a host left the host screen mid-session
+      // -- plus a burst of room writes with each loop. That was the freeze.
+      const prevRenderedView = lastRenderedView;
+      lastRenderedView = state.view;
+      if(prevRenderedView === 'practice' && state.view !== 'practice'){ stopPracticeMetronome(); stopPracticeScroll(); }
       // Live Captions cleanup [2026-09-29] -- same reasoning as Practice
       // Mode just above: catches navigating away from the host screen by
       // ANY means (browser back, sign-out, reloading into a different
@@ -3313,8 +3335,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // so a running SpeechRecognition instance (and the microphone
       // indicator that comes with it) never keeps going silently once the
       // host screen itself is gone.
-      if(lastRenderedView === 'session-host' && state.view !== 'session-host'){ stopLiveCaptions(); }
-      lastRenderedView = state.view;
+      if(prevRenderedView === 'session-host' && state.view !== 'session-host' && (liveCaptionsShouldRun || liveCaptionsRecognition)){ stopLiveCaptions({ fromRender: true }); }
       main.classList.remove('view-fade-in');
       void main.offsetWidth; // force a reflow so the removal above actually "takes" before re-adding
       main.classList.add('view-fade-in');
@@ -11249,7 +11270,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     });
     render();
   }
-  function stopLiveCaptions(){
+  function stopLiveCaptions(opts){
     diagLog('captions', 'off');
     liveCaptionsShouldRun = false;
     liveCaptionsLastStopAt = Date.now();
@@ -11268,7 +11289,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.activeRoomCode){
       updateRoom(state.activeRoomCode, { liveCaptionOn: false, liveCaptionText: '', liveTranslationOn: false, liveTranslationText: '' }).catch(function(){});
     }
-    render();
+    if(!(opts && opts.fromRender)) render(); // never re-enter render() from inside render() -- see the 2026-10-04 note there
   }
   // Live translation on/off toggle [2026-09-30] -- independent of
   // start/stop captions themselves (a host can turn translation on or off

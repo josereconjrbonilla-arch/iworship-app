@@ -498,9 +498,49 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     clearTimeout(stagePendingTimer);
     stagePendingTimer = null;
   }
+  // Captions-only fast path [2026-10-04, Jared: "app freezes occasionally
+  // while using captions on my phone"] Live captions now write to the room
+  // doc about once a second (plus the translation, plus a second snapshot
+  // per write for the server timestamp) -- and every room snapshot used to
+  // trigger a FULL render() of the whole screen on every device in the
+  // room. On a phone, rebuilding the entire host screen a couple of times
+  // a second is enough to stall it. When a snapshot changes nothing but the
+  // caption/translation text, just swap the text inside the caption bars
+  // that are already on screen instead.
+  const CAPTION_ONLY_KEYS = { liveCaptionText:1, liveTranslationText:1, updatedAt:1 };
+  function roomChangeIsCaptionOnly(prev, next){
+    if(!prev || !next) return false;
+    const keys = {};
+    Object.keys(prev).forEach(function(k){ keys[k] = 1; });
+    Object.keys(next).forEach(function(k){ keys[k] = 1; });
+    for(const k in keys){
+      if(CAPTION_ONLY_KEYS[k]) continue;
+      if(JSON.stringify(prev[k]) !== JSON.stringify(next[k])) return false;
+    }
+    return true;
+  }
+  function patchCaptionBars(room){
+    if(!room.liveCaptionOn || !room.liveCaptionText) return false; // bar appearing/disappearing needs a real render
+    const bars = document.querySelectorAll('.stage-caption-bar, .session-caption-bar');
+    if(!bars.length) return false;
+    bars.forEach(function(bar){
+      const isStage = bar.classList.contains('stage-caption-bar');
+      bar.innerHTML = escapeHtml(room.liveCaptionText) +
+        (room.liveTranslationOn && room.liveTranslationText ? '<div class="'+(isStage?'stage':'session')+'-caption-translation">'+escapeHtml(room.liveTranslationText)+'</div>' : '');
+    });
+    if(document.querySelector('.stage-view')) fitStageLines(); // bar height may have changed
+    return true;
+  }
   function applyRoomSnapshot(code, room, broadcast){
     state.roomLoading = false;
+    const prevRoom = state.room;
     state.room = room;
+    if(state.activeRoomCode === code && roomChangeIsCaptionOnly(prevRoom, room) && patchCaptionBars(room)){
+      if(broadcast && roomRelayChannel && state.view !== 'session-projector'){
+        roomRelayChannel.postMessage({ code: code, room: room });
+      }
+      return;
+    }
     // Projector text size room-sync [2026-09-25] -- see setStageFontScale's
     // own comment just above. Whenever a room snapshot carries a
     // stageFontScale (set by whichever device last touched the +/- buttons
@@ -10940,12 +10980,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     recognition.onresult = function(event){
       // Rebuild from the FULL result list every time (not just the
       // changed ones) -- see mergeWords()'s note on why.
+      // Only the last few results matter for a ~2-line caption, and the
+      // list keeps growing for as long as the engine runs (a whole sermon,
+      // between restarts) -- re-walking all of it several times a second
+      // was real, growing work on a phone. Bounded window + trimmed text.
+      const KEEP = LIVE_CAPTION_WORDS * 3;
       let sessionFinal = '', sessionAll = '', interimText = '';
-      for(let i = 0; i < event.results.length; i++){
+      for(let i = Math.max(0, event.results.length - 12); i < event.results.length; i++){
         const res = event.results[i], t = res[0].transcript;
-        sessionAll = mergeWords(sessionAll, t);
-        if(res.isFinal) sessionFinal = mergeWords(sessionFinal, t);
-        else interimText = mergeWords(interimText, t);
+        sessionAll = lastWords(mergeWords(sessionAll, t), KEEP);
+        if(res.isFinal) sessionFinal = lastWords(mergeWords(sessionFinal, t), KEEP);
+        else interimText = lastWords(mergeWords(interimText, t), KEEP);
       }
       if(sessionFinal !== liveCaptionSessionFinal){
         liveFinalCount++;

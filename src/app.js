@@ -10944,6 +10944,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // browser's complete result list on every update (so re-sent results
   // can't stack up), and pieces are joined with mergeWords(), which drops
   // any words a piece repeats from the end of what came before.
+  let liveCaptionsClassic = safeGet('cv:captionClassic', '0') === '1';
+  let liveCaptionClassicCommitted = '';
   const LIVE_CAPTIONS_ON_PHONE = (typeof navigator !== 'undefined') && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
   let liveCaptionsQuickFails = 0, liveCaptionsLastStopAt = 0; // see recognition.onend / startLiveCaptions
   let liveCaptionPrevSessions = ''; // finished words from before the engine's last auto-restart, short rolling window
@@ -11049,8 +11051,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       showToast('Live Captions needs a browser with built-in speech recognition &mdash; try Chrome, Edge, or Safari.');
       return;
     }
+    diagLog('captions', 'on' + (liveCaptionsClassic ? ' (classic)' : ''));
     liveFinalCount = 0; liveCaptionStatus = ''; // fresh diagnostics per start
-    liveCaptionPrevSessions = ''; liveCaptionSessionFinal = ''; lastTranslatedText = '';
+    liveCaptionPrevSessions = ''; liveCaptionSessionFinal = ''; lastTranslatedText = ''; liveCaptionClassicCommitted = '';
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
     recognition.continuous = true;
@@ -11060,6 +11063,30 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // A stopped engine can still deliver a few last results -- ignore
       // anything from an instance that's no longer the live one.
       if(liveCaptionsRecognition !== recognition || !liveCaptionsShouldRun) return;
+      // [2026-10-04 test switch] "Classic" = the exact Oct 2 caption logic
+      // Jared says never froze (append each finished piece, no
+      // re-merging), kept side by side so he can A/B on his own phone
+      // without a redeploy. See LIVE_CAPTIONS_CLASSIC.
+      if(liveCaptionsClassic){
+        let finalText = '', interimText = '';
+        for(let i = event.resultIndex; i < event.results.length; i++){
+          const res = event.results[i];
+          if(res.isFinal) finalText += res[0].transcript;
+          else interimText += res[0].transcript;
+        }
+        if(finalText.trim()){
+          liveFinalCount++;
+          liveCaptionClassicCommitted = lastWords(liveCaptionClassicCommitted + ' ' + finalText, LIVE_CAPTION_WORDS * 2);
+        }
+        const showingC = lastWords(liveCaptionClassicCommitted + ' ' + interimText, LIVE_CAPTION_WORDS);
+        if(showingC){
+          if(!liveTranslationOn) setLiveCaptionStatus('Caption sent');
+          broadcastCaptionText(code, showingC);
+          if(liveTranslationOn) broadcastTranslation(code, showingC, captionToTranslateTargetLang());
+        }
+        updateLiveCaptionInterimDisplay(lastWords(interimText, LIVE_CAPTION_WORDS * 2));
+        return;
+      }
       // Rebuild from the FULL result list every time (not just the
       // changed ones) -- see mergeWords()'s note on why.
       // Only the last few results matter for a ~2-line caption, and the
@@ -11183,6 +11210,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         // failures in a row captions turn themselves off with a message.
         const quick = (Date.now() - (recognition.__startedAt || 0)) < 1500;
         liveCaptionsQuickFails = quick ? liveCaptionsQuickFails + 1 : 0;
+        if(quick) diagLog('restart', 'mic ended right away (' + liveCaptionsQuickFails + ' in a row)');
         if(liveCaptionsQuickFails >= 6){
           showToast('Live Captions kept stopping on this device, so it was turned off &mdash; wait a moment and try again, or use the church laptop.');
           stopLiveCaptions();
@@ -11222,6 +11250,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     render();
   }
   function stopLiveCaptions(){
+    diagLog('captions', 'off');
     liveCaptionsShouldRun = false;
     liveCaptionsLastStopAt = Date.now();
     if(liveCaptionsRecognition){
@@ -13435,6 +13464,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             '<input type="checkbox" id="liveTranslationToggle"'+(liveTranslationOn?' checked':'')+'>' +
             '<span>Also show a live translation into '+(liveCaptionsLang==='fil'?'English':'Filipino')+'</span>' +
           '</label>' +
+          '<label class="check-row" style="margin-top:8px;display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+            '<input type="checkbox" id="liveCaptionClassicToggle"'+(liveCaptionsClassic?' checked':'')+'>' +
+            '<span>Classic caption mode (test)</span>' +
+          '</label>' +
           '<p style="text-align:center;margin:14px 0 0;color:var(--ink-soft);font-size:.95rem;min-height:1.4em;" id="liveCaptionInterimText">Listening&hellip;</p>' +
           '<p class="hint" style="text-align:center;margin:8px 0 0;font-size:.8rem;" id="liveCaptionStatusText">'+escapeHtml(liveCaptionStatusLine())+'</p>' +
           // Host-visible mirror [2026-09-30, Jared: "a full stencen right
@@ -13468,6 +13501,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(filBtn) filBtn.addEventListener('click', function(){ setLiveCaptionsLang('fil'); });
     const translationToggle = document.getElementById('liveTranslationToggle');
     if(translationToggle) translationToggle.addEventListener('change', function(){ setLiveTranslationOn(translationToggle.checked); });
+    const classicToggle = document.getElementById('liveCaptionClassicToggle');
+    if(classicToggle) classicToggle.addEventListener('change', function(){
+      liveCaptionsClassic = classicToggle.checked;
+      safeSet('cv:captionClassic', liveCaptionsClassic ? '1' : '0');
+      liveCaptionClassicCommitted = '';
+      diagLog('mode', 'classic captions ' + (liveCaptionsClassic ? 'ON' : 'OFF'));
+    });
   }
 
   // Join QR code [2026-09-24] -- Jared: "QR code: that's a yes for me,

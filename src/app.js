@@ -10937,6 +10937,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // browser's complete result list on every update (so re-sent results
   // can't stack up), and pieces are joined with mergeWords(), which drops
   // any words a piece repeats from the end of what came before.
+  let liveCaptionsQuickFails = 0, liveCaptionsLastStopAt = 0; // see recognition.onend / startLiveCaptions
   let liveCaptionPrevSessions = ''; // finished words from before the engine's last auto-restart, short rolling window
   let liveCaptionSessionFinal = ''; // finished words from the current engine run
   function mergeWords(acc, piece){
@@ -11143,19 +11144,48 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         // run's finished words over so the caption doesn't blank or jump.
         liveCaptionPrevSessions = lastWords(mergeWords(liveCaptionPrevSessions, liveCaptionSessionFinal), LIVE_CAPTION_WORDS * 2);
         liveCaptionSessionFinal = '';
-        try{ recognition.start(); }catch(e){ /* already running -- browsers sometimes fire onend just before a start() we already issued */ }
+        // [2026-10-04, Jared: "I turn captions on and off, app lags and
+        // completely freezes" on his Android phone] This used to restart
+        // INSTANTLY, every time. On a phone, if the microphone isn't free
+        // yet (e.g. the previous run is still shutting down after a quick
+        // off/on), the engine ends again immediately -- and the instant
+        // restart made that a start/stop/start loop many times a second
+        // (each one a beep) that can lock the phone up. Now a run that
+        // ends within 1.5s of starting counts as a quick failure: restarts
+        // back off (0.25s, 0.5s, 1s ... up to 4s), and after 6 quick
+        // failures in a row captions turn themselves off with a message.
+        const quick = (Date.now() - (recognition.__startedAt || 0)) < 1500;
+        liveCaptionsQuickFails = quick ? liveCaptionsQuickFails + 1 : 0;
+        if(liveCaptionsQuickFails >= 6){
+          showToast('Live Captions kept stopping on this device, so it was turned off &mdash; wait a moment and try again, or use the church laptop.');
+          stopLiveCaptions();
+          return;
+        }
+        const delay = quick ? Math.min(4000, 250 * Math.pow(2, liveCaptionsQuickFails - 1)) : 0;
+        setTimeout(function(){
+          if(!(liveCaptionsShouldRun && liveCaptionsRecognition === recognition)) return;
+          recognition.__startedAt = Date.now();
+          try{ recognition.start(); }catch(e){ /* already running -- browsers sometimes fire onend just before a start() we already issued */ }
+        }, delay);
       }
     };
     liveCaptionsShouldRun = true;
     liveCaptionsRecognition = recognition;
-    try{
-      recognition.start();
-    }catch(e){
-      showToast('Couldn&rsquo;t start Live Captions &mdash; try again.');
-      liveCaptionsShouldRun = false;
-      liveCaptionsRecognition = null;
-      return;
-    }
+    liveCaptionsQuickFails = 0;
+    // Give the microphone a moment to be released if captions were just
+    // turned off (quick off/on) -- starting while the old run is still
+    // shutting down is what made phones fail and loop (see onend's note).
+    const waitForMic = Math.max(0, 700 - (Date.now() - liveCaptionsLastStopAt));
+    setTimeout(function(){
+      if(!(liveCaptionsShouldRun && liveCaptionsRecognition === recognition)) return; // turned off again meanwhile
+      recognition.__startedAt = Date.now();
+      try{
+        recognition.start();
+      }catch(e){
+        showToast('Couldn&rsquo;t start Live Captions &mdash; try again.');
+        stopLiveCaptions();
+      }
+    }, waitForMic);
     updateRoom(code, {
       liveCaptionOn: true, liveCaptionLang: liveCaptionsLang, liveCaptionText: '',
       liveTranslationOn: liveTranslationOn, liveTranslationText: ''
@@ -11166,6 +11196,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
   function stopLiveCaptions(){
     liveCaptionsShouldRun = false;
+    liveCaptionsLastStopAt = Date.now();
     if(liveCaptionsRecognition){
       // Clear this BEFORE calling .stop() (not after) -- .stop() is async,
       // and the old instance's own onend handler checks

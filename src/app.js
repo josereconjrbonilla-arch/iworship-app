@@ -10819,7 +10819,36 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const w = String(text||'').trim().split(/\s+/).filter(Boolean);
     return w.slice(Math.max(0, w.length - n)).join(' ');
   }
-  let liveCaptionCommitted = ''; // recent FINAL words, trimmed to a short rolling window
+  // [2026-10-02 v2, Jared tested live: "the words duplicate and double.
+  // The translator gets confused"] The first fast-speech version kept a
+  // running buffer and APPENDED each final result to it. That doubles
+  // words whenever the browser repeats itself -- Chrome can re-send a
+  // result it already finalized, and on Android each "final" result often
+  // contains all the earlier words again. Now the text is REBUILT from the
+  // browser's complete result list on every update (so re-sent results
+  // can't stack up), and pieces are joined with mergeWords(), which drops
+  // any words a piece repeats from the end of what came before.
+  let liveCaptionPrevSessions = ''; // finished words from before the engine's last auto-restart, short rolling window
+  let liveCaptionSessionFinal = ''; // finished words from the current engine run
+  function mergeWords(acc, piece){
+    const a = String(acc||'').trim().split(/\s+/).filter(Boolean);
+    const p = String(piece||'').trim().split(/\s+/).filter(Boolean);
+    if(!p.length) return a.join(' ');
+    if(!a.length) return p.join(' ');
+    const norm = function(w){ return w.toLowerCase().replace(/[.,!?;:"'\u2019\u201c\u201d]/g, ''); };
+    const an = a.map(norm), pn = p.map(norm);
+    // The new piece already contains everything so far (Android-style
+    // cumulative result): take the piece.
+    if(pn.length >= an.length && an.every(function(w, i){ return w === pn[i]; })) return p.join(' ');
+    // Longest run of 2+ words where the end of `a` equals the start of
+    // `p` -- the repeated part. (2+, so a genuine "holy, holy" isn't eaten.)
+    for(let k = Math.min(an.length, pn.length); k >= 2; k--){
+      let same = true;
+      for(let i = 0; i < k; i++){ if(an[an.length - k + i] !== pn[i]){ same = false; break; } }
+      if(same) return a.concat(p.slice(k)).join(' ');
+    }
+    return a.concat(p).join(' ');
+  }
   let lastTranslatedText = '';   // skip re-translating text that hasn't changed
   let liveTranslationSeq = 0, liveTranslationAppliedSeq = 0;
   // Live translation [2026-09-30] -- Jared: "can there be a live
@@ -10902,27 +10931,30 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       return;
     }
     liveFinalCount = 0; liveCaptionStatus = ''; // fresh diagnostics per start
-    liveCaptionCommitted = ''; lastTranslatedText = '';
+    liveCaptionPrevSessions = ''; liveCaptionSessionFinal = ''; lastTranslatedText = '';
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = liveCaptionsLang === 'fil' ? 'fil-PH' : 'en-US';
     recognition.onresult = function(event){
-      let finalText = '', interimText = '';
-      for(let i = event.resultIndex; i < event.results.length; i++){
-        const res = event.results[i];
-        if(res.isFinal) finalText += res[0].transcript;
-        else interimText += res[0].transcript;
+      // Rebuild from the FULL result list every time (not just the
+      // changed ones) -- see mergeWords()'s note on why.
+      let sessionFinal = '', sessionAll = '', interimText = '';
+      for(let i = 0; i < event.results.length; i++){
+        const res = event.results[i], t = res[0].transcript;
+        sessionAll = mergeWords(sessionAll, t);
+        if(res.isFinal) sessionFinal = mergeWords(sessionFinal, t);
+        else interimText = mergeWords(interimText, t);
       }
-      if(finalText.trim()){
+      if(sessionFinal !== liveCaptionSessionFinal){
         liveFinalCount++;
-        liveCaptionCommitted = lastWords(liveCaptionCommitted + ' ' + finalText, LIVE_CAPTION_WORDS * 2);
+        liveCaptionSessionFinal = sessionFinal;
       }
       // What everyone sees: the newest words, finished or still in
       // progress -- so fast speech shows up as it's spoken instead of
       // waiting for a pause.
-      const showing = lastWords(liveCaptionCommitted + ' ' + interimText, LIVE_CAPTION_WORDS);
+      const showing = lastWords(mergeWords(liveCaptionPrevSessions, sessionAll), LIVE_CAPTION_WORDS);
       if(showing){
         if(!liveTranslationOn) setLiveCaptionStatus('Caption sent'); // with translation on, broadcastTranslation() reports its own progress
         broadcastCaptionText(code, showing);
@@ -10993,6 +11025,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // itself for the one still meant to be running, no matter how the
       // async timing lands.
       if(liveCaptionsShouldRun && liveCaptionsRecognition === recognition){
+        // The restarted engine begins a fresh result list -- carry this
+        // run's finished words over so the caption doesn't blank or jump.
+        liveCaptionPrevSessions = lastWords(mergeWords(liveCaptionPrevSessions, liveCaptionSessionFinal), LIVE_CAPTION_WORDS * 2);
+        liveCaptionSessionFinal = '';
         try{ recognition.start(); }catch(e){ /* already running -- browsers sometimes fire onend just before a start() we already issued */ }
       }
     };

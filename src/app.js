@@ -97,6 +97,72 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       t = setTimeout(function(){ fn.apply(ctx, args); }, wait);
     };
   }
+  /* ============ FREEZE DIAGNOSTICS [2026-10-04] ============
+     Jared: the installed Android app "stays stuck" on a projector/joined
+     session screen, even with captions off -- and it can't be reproduced
+     from the build sandbox. A frozen page can't report anything WHILE it's
+     frozen, so this leaves a trail instead: a heartbeat every 3s (screen,
+     memory), plus any error or long stall, kept in localStorage. On the
+     next launch, if the last heartbeat was never followed by the app being
+     put away normally, that trail is saved as the "last freeze" report and
+     shown in Settings -> App diagnostics, for Jared to screenshot. Small,
+     capped (30 events), never sent anywhere, and every access is wrapped so
+     it can never break the app itself. */
+  const DIAG_KEY = 'cv:diag', DIAG_REPORT_KEY = 'cv:diagLastFreeze';
+  function diagRead(){ try{ return JSON.parse(localStorage.getItem(DIAG_KEY) || '{}'); }catch(e){ return {}; } }
+  function diagWrite(d){ try{ localStorage.setItem(DIAG_KEY, JSON.stringify(d)); }catch(e){} }
+  function diagView(){ try{ return state.view + (state.activeRoomCode ? ' (in a session)' : ''); }catch(e){ return 'starting'; } }
+  function diagLog(type, msg){
+    const d = diagRead();
+    d.events = (d.events || []).slice(-29);
+    d.events.push({ t: Date.now(), type: type, msg: String(msg || '').slice(0, 200), view: diagView() });
+    diagWrite(d);
+  }
+  (function initDiagnostics(){
+    try{
+      const prev = diagRead();
+      if(prev.beat && prev.open && (Date.now() - prev.beat.t) < 24*60*60*1000){
+        localStorage.setItem(DIAG_REPORT_KEY, JSON.stringify({ beat: prev.beat, events: prev.events || [] }));
+      }
+      diagWrite({ open: true, events: [], beat: null });
+      setInterval(function(){
+        const d = diagRead();
+        const mem = (performance && performance.memory) ? Math.round(performance.memory.usedJSHeapSize/1048576) + ' MB' : 'n/a';
+        d.beat = { t: Date.now(), view: diagView(), mem: mem };
+        if(!document.hidden) d.open = true;
+        diagWrite(d);
+      }, 3000);
+      // Put away normally (switched apps, closed, locked) -> not a freeze.
+      document.addEventListener('visibilitychange', function(){
+        const d = diagRead(); d.open = !document.hidden; diagWrite(d);
+      });
+      window.addEventListener('pagehide', function(){ const d = diagRead(); d.open = false; diagWrite(d); });
+      window.addEventListener('error', function(e){ diagLog('error', (e && e.message) || 'error'); });
+      window.addEventListener('unhandledrejection', function(e){ diagLog('promise', (e && e.reason && (e.reason.message || e.reason)) || 'rejected'); });
+      if(typeof PerformanceObserver !== 'undefined'){
+        try{
+          new PerformanceObserver(function(list){
+            list.getEntries().forEach(function(en){ if(en.duration >= 700) diagLog('stall', Math.round(en.duration) + ' ms'); });
+          }).observe({ type: 'longtask', buffered: true });
+        }catch(e){}
+      }
+    }catch(e){}
+  })();
+  function renderDiagnosticsCard(){
+    let r = null;
+    try{ r = JSON.parse(localStorage.getItem(DIAG_REPORT_KEY) || 'null'); }catch(e){}
+    const when = function(t){ try{ return new Date(t).toLocaleString(); }catch(e){ return String(t); } };
+    return '<div class="session-card" style="margin-top:16px;">' +
+      '<p class="control-label uc" style="margin-bottom:6px;">App diagnostics</p>' +
+      (!r ? '<p class="hint" style="margin:0;">No freezes recorded on this device.</p>' :
+        '<p class="hint" style="margin:0 0 8px;">Last time the app got stuck: <strong>'+escapeHtml(when(r.beat.t))+'</strong> on <strong>'+escapeHtml(r.beat.view)+'</strong> (memory '+escapeHtml(r.beat.mem)+'). Take a screenshot of this card for troubleshooting.</p>' +
+        '<div style="font-family:monospace;font-size:.75rem;max-height:220px;overflow:auto;background:var(--surface-2, #f4ecd8);padding:8px;border-radius:8px;">' +
+          (r.events.length ? r.events.slice(-15).map(function(ev){ return escapeHtml(new Date(ev.t).toLocaleTimeString() + ' ' + ev.type + ' [' + ev.view + '] ' + ev.msg); }).join('<br>') : 'No errors or stalls were logged before it stopped.') +
+        '</div>' +
+        '<p style="margin:8px 0 0;"><button type="button" class="switch-account" id="diagClearBtn">CLEAR REPORT</button></p>') +
+    '</div>';
+  }
+
   // Throttle with a trailing call [2026-10-02] -- runs fn at most once per
   // `wait` ms, and always runs once more with the LATEST arguments after a
   // burst ends. Unlike debounce() above, a steady stream of calls (live
@@ -4198,11 +4264,14 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '</div>'
       ) : '') +
 
+      renderDiagnosticsCard() +
       '<p style="text-align:center;margin-top:6px;"><button type="button" class="switch-account" id="settingsAboutBtn">ABOUT IWORSHIP</button></p>' +
       '<p class="hint" style="text-align:center;margin-top:6px;">iWorship &mdash; worship &amp; fellowship for your congregation: hymns, live sessions, sermons, Bible, and community.</p>';
 
     document.getElementById('settingsBackBtn').addEventListener('click', function(){ state.view='landing'; render(); window.scrollTo(0,0); });
     document.getElementById('settingsAboutBtn').addEventListener('click', function(){ state.view='about'; render(); window.scrollTo(0,0); });
+    const diagClearBtn = document.getElementById('diagClearBtn');
+    if(diagClearBtn) diagClearBtn.addEventListener('click', function(){ try{ localStorage.removeItem(DIAG_REPORT_KEY); }catch(e){} render(); });
     document.querySelectorAll('[data-theme-pref]').forEach(function(btn){
       btn.addEventListener('click', function(){ setThemePreference(btn.getAttribute('data-theme-pref')); });
     });
@@ -13278,6 +13347,16 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p class="hint" style="margin:0;">This browser doesn&rsquo;t support built-in speech recognition. Try Chrome, Edge, or Safari instead.</p>' :
         (
           '<p class="hint" style="margin:0 0 12px;">Your device&rsquo;s microphone is transcribed right in this browser (using its own built-in speech service, e.g. Google on Chrome) and the text is sent to the projector and everyone&rsquo;s phones a few words at a time. Nothing is recorded or saved.</p>' +
+          // [2026-10-04, Jared: "browser keeps beeping and it turns on and
+          // off ... misses a lot of important words"] Phone browsers don't
+          // support truly continuous speech recognition: they stop after
+          // each phrase (with a system beep), and onend's auto-restart
+          // turns them back on (another beep) -- words spoken in that gap
+          // are lost, and a web page can't silence or avoid it. Desktop
+          // Chrome/Edge keep listening without stopping, so say so right
+          // where the host turns captions on.
+          (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'') ?
+            '<p class="hint" style="margin:0 0 12px;padding:10px 12px;border-radius:10px;background:var(--gold-tint, #f3e3a8);color:var(--wine-ink, #4A0D18);"><strong>Tip:</strong> phones stop and restart listening after every phrase (that&rsquo;s the beeping), so some words get missed. For the best captions, turn them on from the church laptop or computer &mdash; you can still control everything else from this phone.</p>' : '') +
           '<div style="display:flex;gap:10px;align-items:center;">' +
             '<span class="hint" style="margin:0;">LANGUAGE</span>' +
             '<div class="content-segmented" style="flex:1;">' +

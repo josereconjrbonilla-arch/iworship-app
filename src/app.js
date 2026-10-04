@@ -154,7 +154,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     const when = function(t){ try{ return new Date(t).toLocaleString(); }catch(e){ return String(t); } };
     return '<div class="session-card" style="margin-top:16px;">' +
       '<p class="control-label uc" style="margin-bottom:6px;">App diagnostics</p>' +
-      (!r ? '<p class="hint" style="margin:0;">No freezes recorded on this device.</p>' :
+      (!r ? ('<p class="hint" style="margin:0 0 8px;">No freezes recorded on this device.</p>' +
+          // Also show this run's own log -- a "freeze" where the app is
+          // slow but still technically alive never produces a report above,
+          // but its long stalls (700ms+) still land here.
+          (function(){ const ev = (diagRead().events || []).slice(-10); return ev.length ?
+            '<p class="hint" style="margin:0 0 4px;">Recent slowdowns and errors (this run):</p><div style="font-family:monospace;font-size:.75rem;max-height:160px;overflow:auto;background:var(--surface-2, #f4ecd8);padding:8px;border-radius:8px;">' +
+            ev.map(function(e){ return escapeHtml(new Date(e.t).toLocaleTimeString() + ' ' + e.type + ' [' + e.view + '] ' + e.msg); }).join('<br>') + '</div>' : ''; })()) :
         '<p class="hint" style="margin:0 0 8px;">Last time the app got stuck: <strong>'+escapeHtml(when(r.beat.t))+'</strong> on <strong>'+escapeHtml(r.beat.view)+'</strong> (memory '+escapeHtml(r.beat.mem)+'). Take a screenshot of this card for troubleshooting.</p>' +
         '<div style="font-family:monospace;font-size:.75rem;max-height:220px;overflow:auto;background:var(--surface-2, #f4ecd8);padding:8px;border-radius:8px;">' +
           (r.events.length ? r.events.slice(-15).map(function(ev){ return escapeHtml(new Date(ev.t).toLocaleTimeString() + ' ' + ev.type + ' [' + ev.view + '] ' + ev.msg); }).join('<br>') : 'No errors or stalls were logged before it stopped.') +
@@ -10938,6 +10944,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // browser's complete result list on every update (so re-sent results
   // can't stack up), and pieces are joined with mergeWords(), which drops
   // any words a piece repeats from the end of what came before.
+  const LIVE_CAPTIONS_ON_PHONE = (typeof navigator !== 'undefined') && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
   let liveCaptionsQuickFails = 0, liveCaptionsLastStopAt = 0; // see recognition.onend / startLiveCaptions
   let liveCaptionPrevSessions = ''; // finished words from before the engine's last auto-restart, short rolling window
   let liveCaptionSessionFinal = ''; // finished words from the current engine run
@@ -11067,14 +11074,29 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         if(res.isFinal) sessionFinal = lastWords(mergeWords(sessionFinal, t), KEEP);
         else interimText = lastWords(mergeWords(interimText, t), KEEP);
       }
-      if(sessionFinal !== liveCaptionSessionFinal){
+      const gotNewFinal = sessionFinal !== liveCaptionSessionFinal;
+      if(gotNewFinal){
         liveFinalCount++;
         liveCaptionSessionFinal = sessionFinal;
       }
       // What everyone sees: the newest words, finished or still in
       // progress -- so fast speech shows up as it's spoken instead of
       // waiting for a pause.
-      const showing = lastWords(mergeWords(liveCaptionPrevSessions, sessionAll), LIVE_CAPTION_WORDS);
+      //
+      // [2026-10-04, Jared: phone captions froze again, and "it worked fine
+      // before the fast-speech update"] That update sends in-progress words
+      // about once a second. Phones don't need it -- their speech engine
+      // stops after every phrase anyway, so finished phrases already arrive
+      // every few seconds -- and the constant sending is the one thing that
+      // changed when phone freezes started. So phones are back to the
+      // pre-update behavior (send only finished phrases, still trimmed and
+      // de-duplicated); laptops/desktops, where nonstop speech really can
+      // go a minute without a "finished" phrase, keep the in-progress sends.
+      if(LIVE_CAPTIONS_ON_PHONE && !gotNewFinal){
+        updateLiveCaptionInterimDisplay(lastWords(interimText, LIVE_CAPTION_WORDS * 2));
+        return;
+      }
+      const showing = lastWords(mergeWords(liveCaptionPrevSessions, LIVE_CAPTIONS_ON_PHONE ? sessionFinal : sessionAll), LIVE_CAPTION_WORDS);
       if(showing){
         if(!liveTranslationOn) setLiveCaptionStatus('Caption sent'); // with translation on, broadcastTranslation() reports its own progress
         broadcastCaptionText(code, showing);

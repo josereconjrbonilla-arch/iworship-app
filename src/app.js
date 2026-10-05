@@ -151,6 +151,29 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         if(lag > 1500) diagLog('lag', 'app ran ' + (lag/1000).toFixed(1) + 's behind');
         if(now - lastFrame > 3000 && !frameStallLogged){ frameStallLogged = true; diagLog('screen', 'stopped updating for ' + ((now-lastFrame)/1000).toFixed(1) + 's (app still running)'); }
       }, 1000);
+      // [2026-10-06, Jared: profile photos showed as empty circles until a
+      // couple of refreshes] Photos load straight from Firebase Storage; if
+      // one fails (slow or dropped connection), the browser just leaves a
+      // blank box. Now any failed image is retried twice (1.5s, then 3s
+      // later), a profile photo that still fails falls back to the
+      // person's initial, and each failure is logged to App diagnostics.
+      document.addEventListener('error', function(e){
+        const img = e.target;
+        if(!img || img.tagName !== 'IMG' || !img.src) return;
+        const tries = +(img.getAttribute('data-retry') || 0);
+        let host = ''; try{ host = new URL(img.src).host; }catch(err){}
+        diagLog('image', 'failed to load from ' + host + (tries ? ' (retry ' + tries + ')' : ''));
+        if(tries < 2){
+          img.setAttribute('data-retry', String(tries + 1));
+          setTimeout(function(){ if(!img.isConnected) return; const src = img.src; img.removeAttribute('src'); img.src = src; }, 1500 * (tries + 1));
+        } else if(img.classList.contains('avatar-circle')){
+          const span = document.createElement('span');
+          span.className = 'avatar-fallback';
+          span.style.cssText = img.style.cssText + ';font-size:' + Math.round((parseFloat(img.style.width) || 40) * 0.42) + 'px;';
+          span.textContent = img.getAttribute('data-initial') || '?';
+          img.replaceWith(span);
+        }
+      }, true);
       if(typeof PerformanceObserver !== 'undefined'){
         try{
           new PerformanceObserver(function(list){
@@ -15589,8 +15612,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       d = { photoURL: state.profile.photoURL || (d && d.photoURL) || null, displayName: (d && d.displayName) || state.profile.displayName || '' };
     }
     const px = size || 40;
-    if(d && d.photoURL) return '<img class="avatar-circle" src="'+escapeAttr(d.photoURL)+'" alt="" style="width:'+px+'px;height:'+px+'px;">';
     const initial = d && d.displayName ? d.displayName.trim().charAt(0).toUpperCase() : '?';
+    if(d && d.photoURL) return '<img class="avatar-circle" src="'+escapeAttr(d.photoURL)+'" alt="" data-initial="'+escapeAttr(initial)+'" style="width:'+px+'px;height:'+px+'px;">';
     return '<span class="avatar-fallback" style="width:'+px+'px;height:'+px+'px;font-size:'+Math.round(px*0.42)+'px;">'+escapeHtml(initial)+'</span>';
   }
   function isBlockedByMe(uid){ return !!(state.profile && (state.profile.blockedUids||[]).includes(uid)); }

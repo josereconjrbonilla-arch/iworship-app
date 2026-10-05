@@ -139,10 +139,22 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       window.addEventListener('pagehide', function(){ const d = diagRead(); d.open = false; diagWrite(d); });
       window.addEventListener('error', function(e){ diagLog('error', (e && e.message) || 'error'); });
       window.addEventListener('unhandledrejection', function(e){ diagLog('promise', (e && e.reason && (e.reason.message || e.reason)) || 'rejected'); });
+      // [2026-10-05] Freezes that DON'T stop JavaScript (so no "got stuck"
+      // report) -- e.g. the screen stops repainting, or the main thread is
+      // so busy that 1s timers fire seconds late. Both get logged here.
+      let lastFrame = performance.now(), frameStallLogged = false, lastTick = performance.now();
+      (function frameLoop(){ lastFrame = performance.now(); frameStallLogged = false; requestAnimationFrame(frameLoop); })();
+      setInterval(function(){
+        const now = performance.now();
+        const lag = now - lastTick - 1000; lastTick = now;
+        if(document.hidden) return;
+        if(lag > 1500) diagLog('lag', 'app ran ' + (lag/1000).toFixed(1) + 's behind');
+        if(now - lastFrame > 3000 && !frameStallLogged){ frameStallLogged = true; diagLog('screen', 'stopped updating for ' + ((now-lastFrame)/1000).toFixed(1) + 's (app still running)'); }
+      }, 1000);
       if(typeof PerformanceObserver !== 'undefined'){
         try{
           new PerformanceObserver(function(list){
-            list.getEntries().forEach(function(en){ if(en.duration >= 700) diagLog('stall', Math.round(en.duration) + ' ms'); });
+            list.getEntries().forEach(function(en){ if(en.duration >= 300) diagLog('stall', Math.round(en.duration) + ' ms'); });
           }).observe({ type: 'longtask', buffered: true });
         }catch(e){}
       }
@@ -157,7 +169,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       (!r ? ('<p class="hint" style="margin:0 0 8px;">No freezes recorded on this device.</p>' +
           // Also show this run's own log -- a "freeze" where the app is
           // slow but still technically alive never produces a report above,
-          // but its long stalls (700ms+) still land here.
+          // but its stalls (300ms+) still land here.
           (function(){ const ev = (diagRead().events || []).slice(-10); return ev.length ?
             '<p class="hint" style="margin:0 0 4px;">Recent slowdowns and errors (this run):</p><div style="font-family:monospace;font-size:.75rem;max-height:160px;overflow:auto;background:var(--surface-2, #f4ecd8);padding:8px;border-radius:8px;">' +
             ev.map(function(e){ return escapeHtml(new Date(e.t).toLocaleTimeString() + ' ' + e.type + ' [' + e.view + '] ' + e.msg); }).join('<br>') + '</div>' : ''; })()) :
@@ -3210,8 +3222,25 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // already running, finish the current one and render once more right
   // after, instead of recursing until the call stack overflows.
   var renderDepth = 0; // var, not let: render() can run during module load before this line (same TDZ trap as renderScheduled)
+  var renderReentryWindowStart = 0, renderReentryCount = 0;
   function render(){
-    if(renderDepth > 0){ scheduleRender(); return; }
+    if(renderDepth > 0){
+      // Log WHO re-entered (once a second at most) so App diagnostics can
+      // name the culprit, and never let re-entries ping-pong forever: more
+      // than 20 in a second is a loop -- log it and drop the extra render
+      // instead of freezing the screen.
+      const now = Date.now();
+      if(now - renderReentryWindowStart > 1000){ renderReentryWindowStart = now; renderReentryCount = 0; }
+      renderReentryCount++;
+      if(renderReentryCount === 1){
+        try{ diagLog('re-render', ((new Error().stack || '').split('\n').slice(2,5).join(' < ')).replace(/https?:\/\/[^\s)]+\//g,'')); }catch(e){}
+      }
+      if(renderReentryCount > 20){
+        if(renderReentryCount === 21) diagLog('render-loop', 'stopped a render loop (20+ nested renders in 1s)');
+        return;
+      }
+      scheduleRender(); return;
+    }
     renderDepth++;
     try{ renderInner(); }
     finally{ renderDepth--; }
@@ -11284,7 +11313,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       // of how long the real shutdown takes to actually finish.
       const old = liveCaptionsRecognition;
       liveCaptionsRecognition = null;
-      try{ old.stop(); }catch(e){}
+      // abort(), not stop() [2026-10-04, Jared: "the app becomes slow after
+      // turning captions off"]: stop() asks the engine to finish
+      // recognizing whatever audio it already has (on Android that keeps
+      // the speech service and mic busy for a while after "off"), and we
+      // throw those last results away anyway. abort() ends it immediately.
+      try{ old.abort ? old.abort() : old.stop(); }catch(e){ try{ old.stop(); }catch(e2){} }
     }
     if(state.activeRoomCode){
       updateRoom(state.activeRoomCode, { liveCaptionOn: false, liveCaptionText: '', liveTranslationOn: false, liveTranslationText: '' }).catch(function(){});

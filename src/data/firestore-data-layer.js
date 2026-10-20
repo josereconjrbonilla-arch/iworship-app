@@ -1904,3 +1904,68 @@ export function watchForegroundPush(callback) {
   }).catch(() => {});
   return () => unsub();
 }
+
+// ============================================================ VERSE STUDY
+// [2026-10-20] See firestore.rules' bibleMarks/{uid} and verseNotes/{noteId}
+// blocks and interface.md's "Verse Study" section.
+// Personal highlights / bookmarks / private notes -- one doc per verse,
+// id "<book>|<chapter>|<verse>" (slashes never appear in book names).
+function bibleMarkId(book, chapter, verse) { return String(book) + '|' + chapter + '|' + verse; }
+export function watchBibleMarks(uid, callback) {
+  return onSnapshot(collection(db, 'bibleMarks', uid, 'marks'), (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  }, () => callback([]));
+}
+// mark: {book, chapter, verse, color|null, bookmarked:bool, note:string}.
+// An all-empty mark deletes the doc so the collection only holds real marks.
+export async function setBibleMark(uid, mark) {
+  const id = bibleMarkId(mark.book, mark.chapter, mark.verse);
+  const empty = !mark.color && !mark.bookmarked && !(mark.note || '').trim();
+  if (empty) { await deleteDoc(doc(db, 'bibleMarks', uid, 'marks', id)); return; }
+  await setDoc(doc(db, 'bibleMarks', uid, 'marks', id), {
+    book: mark.book, chapter: Number(mark.chapter), verse: Number(mark.verse),
+    color: mark.color || null, bookmarked: !!mark.bookmarked, note: (mark.note || '').slice(0, 4000),
+    updatedAt: serverTimestamp()
+  });
+}
+// Pastor's notes on a verse, visible to everyone in that pastor's church.
+export function watchVerseNotes(churchId, book, chapter, callback) {
+  const q = query(collection(db, 'verseNotes'), where('churchId', '==', churchId), where('book', '==', book), where('chapter', '==', Number(chapter)));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillis(a.createdAt) - toMillis(b.createdAt));
+    callback(list);
+  }, () => callback([]));
+}
+export async function addVerseNote(note) {
+  await addDoc(collection(db, 'verseNotes'), {
+    churchId: note.churchId, book: note.book, chapter: Number(note.chapter), verse: Number(note.verse),
+    text: String(note.text || '').slice(0, 4000),
+    authorUid: auth.currentUser ? auth.currentUser.uid : null, authorName: note.authorName || '',
+    createdAt: serverTimestamp()
+  });
+}
+export async function deleteVerseNote(noteId) {
+  await deleteDoc(doc(db, 'verseNotes', noteId));
+}
+// Church discussion on a verse -- short comments any member of the same
+// church can add (see firestore.rules' verseComments/{commentId}).
+export function watchVerseComments(churchId, book, chapter, callback) {
+  const q = query(collection(db, 'verseComments'), where('churchId', '==', churchId), where('book', '==', book), where('chapter', '==', Number(chapter)));
+  return onSnapshot(q, (snap) => {
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillis(a.createdAt) - toMillis(b.createdAt));
+    callback(list);
+  }, () => callback([]));
+}
+export async function addVerseComment(c) {
+  await addDoc(collection(db, 'verseComments'), {
+    churchId: c.churchId, book: c.book, chapter: Number(c.chapter), verse: Number(c.verse),
+    text: String(c.text || '').slice(0, 1000),
+    authorUid: auth.currentUser ? auth.currentUser.uid : null, authorName: c.authorName || '',
+    createdAt: serverTimestamp()
+  });
+}
+export async function deleteVerseComment(id) {
+  await deleteDoc(doc(db, 'verseComments', id));
+}

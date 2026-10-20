@@ -55,6 +55,29 @@ registerRoute(
   })
 );
 
+// Berean Standard Bible [2026-10-20] -- same rule again for the third
+// translation (src/content/bsb.json, ~4MB, its own lazy chunk).
+registerRoute(
+  /\/assets\/bsb-.*\.js$/,
+  new CacheFirst({
+    cacheName: 'bsb-bible-text',
+    plugins: [new ExpirationPlugin({ maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 365 })]
+  })
+);
+
+// Verse Study data [2026-10-20] -- one small JSON file per chapter under
+// /study/<BOOK>/<ch>.json (Matthew Henry, Geneva notes, cross references;
+// see scripts/build-study-data.mjs). Fetched only when someone opens a
+// chapter's study, then kept so re-reading (and reading offline) is instant.
+// The app adds ?v=<version> to the URL, so a data rebuild gets fresh copies.
+registerRoute(
+  /\/study\/[A-Z0-9]{3}\/\d+\.json/,
+  new CacheFirst({
+    cacheName: 'verse-study-data',
+    plugins: [new ExpirationPlugin({ maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 180 })]
+  })
+);
+
 self.skipWaiting();
 // no clientsClaim() here -- registerType stays 'prompt' (see vite.config.js
 // and app.js's registerSW() call): a new worker installs and WAITS rather

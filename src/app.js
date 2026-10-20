@@ -25,6 +25,8 @@ import {
   watchJournalEntries, addJournalEntry, deleteJournalEntry,
   watchGrowthTopics, addGrowthTopic, deleteGrowthTopic,
   watchReadingPlanProgress, markReadingPlanDayDone,
+  watchBibleMarks, setBibleMark, watchVerseNotes, addVerseNote, deleteVerseNote,
+  watchVerseComments, addVerseComment, deleteVerseComment,
   watchTestimonies, addTestimony, deleteTestimony,
   watchPublicPrayerRequests, watchMyPrayerRequests, addPrayerRequest,
   markPrayerRequestAnswered, setPrayerRequestPrivacy, deletePrayerRequest,
@@ -3792,7 +3794,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   }
   function renderLandingHubSection(signedIn){
     return renderLandingHubGroup('Bible & Teaching', [
-      { id:'openBibleBtn', icon:'book', label:'Bible (KJV / Tagalog)', show:true },
+      { id:'openBibleBtn', icon:'book', label:'Bible & Study', show:true },
       { id:'openDevotionalsBtn', icon:'sun', label:'Daily Devotionals', show:true },
       { id:'openSermonArchiveBtn', icon:'mic', label:'Sermon Archive', show:true }
     ]) +
@@ -6895,14 +6897,29 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
      WHICH dataset they read from switches, via activeBibleData() below. */
   let tagalogData = null;
   let tagalogLoading = false;
-  let bibleTranslation = safeGet('bibleTranslation', 'kjv'); // 'kjv' | 'tl' -- per-device, like the color theme/split-screen prefs
-  if(bibleTranslation !== 'kjv' && bibleTranslation !== 'tl') bibleTranslation = 'kjv';
+  // Berean Standard Bible [2026-10-20] -- Jared: "add another English
+  // translation that's easier to understand" -> "BSB is good." Public domain
+  // since 2023-04-30 (berean.bible/terms.htm). Built by
+  // scripts/build-study-data.mjs into src/content/bsb.json with the SAME
+  // {books,text} shape and the SAME 66 English book keys as kjv.json (zero
+  // chapter/verse-count mismatches against KJV, checked at build time), so
+  // every helper below works for it unchanged, exactly like Tagalog.
+  let bsbData = null;
+  let bsbLoading = false;
+  let bibleTranslation = safeGet('bibleTranslation', 'kjv'); // 'kjv' | 'bsb' | 'tl' -- per-device, like the color theme/split-screen prefs
+  if(bibleTranslation !== 'kjv' && bibleTranslation !== 'tl' && bibleTranslation !== 'bsb') bibleTranslation = 'kjv';
 
   function activeBibleData(){
-    return bibleTranslation === 'tl' ? tagalogData : kjvData;
+    return bibleTranslation === 'tl' ? tagalogData : (bibleTranslation === 'bsb' ? bsbData : kjvData);
   }
   function activeBibleLoading(){
-    return bibleTranslation === 'tl' ? tagalogLoading : kjvLoading;
+    return bibleTranslation === 'tl' ? tagalogLoading : (bibleTranslation === 'bsb' ? bsbLoading : kjvLoading);
+  }
+  // Short label for the active translation ("KJV" / "BSB" / "ADB"), used on
+  // verse references, the study panel and shared verses.
+  function bibleTranslationLabel(t){
+    t = t || bibleTranslation;
+    return t === 'tl' ? 'ADB' : (t === 'bsb' ? 'BSB' : 'KJV');
   }
   function bibleDisplayBookName(book){
     if(bibleTranslation === 'tl' && tagalogData && tagalogData.bookNamesTagalog && tagalogData.bookNamesTagalog[book]){
@@ -6933,16 +6950,39 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return state.view === 'bible' ||
       (state.view === 'session-host' && hostVersePickerOpen);
   }
+  // A translation finished loading. The ACTIVE one repaints whatever
+  // Bible-dependent screen is open (same as before); any OTHER one was only
+  // loaded for the Verse Study panel's "Compare translations" row
+  // [2026-10-20], so just that panel is patched in place -- a full repaint
+  // would jump the reader away from the verse they're studying.
+  function onBibleDataLoaded(which){
+    if(which === bibleTranslation){ if(viewNeedsKjvRerender()) render(); return; }
+    if(state.view === 'bible') patchStudyPanelIfOpen();
+  }
+  function bibleDataFor(t){ return t === 'tl' ? tagalogData : (t === 'bsb' ? bsbData : kjvData); }
+  function loadBibleDataFor(t){ if(t === 'tl') loadTagalogData(); else if(t === 'bsb') loadBsbData(); else loadKjvData(); }
   function loadKjvData(){
     if(kjvData || kjvLoading) return;
     kjvLoading = true;
     import('./content/kjv.json').then(function(mod){
       kjvData = mod.default || mod;
       kjvLoading = false;
-      if(viewNeedsKjvRerender()) render();
+      onBibleDataLoaded('kjv');
     }).catch(function(){
       kjvLoading = false;
-      if(viewNeedsKjvRerender()) render();
+      onBibleDataLoaded('kjv');
+    });
+  }
+  function loadBsbData(){
+    if(bsbData || bsbLoading) return;
+    bsbLoading = true;
+    import('./content/bsb.json').then(function(mod){
+      bsbData = mod.default || mod;
+      bsbLoading = false;
+      onBibleDataLoaded('bsb');
+    }).catch(function(){
+      bsbLoading = false;
+      onBibleDataLoaded('bsb');
     });
   }
   function loadTagalogData(){
@@ -6951,10 +6991,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     import('./content/tagalog-bible.json').then(function(mod){
       tagalogData = mod.default || mod;
       tagalogLoading = false;
-      if(viewNeedsKjvRerender()) render();
+      onBibleDataLoaded('tl');
     }).catch(function(){
       tagalogLoading = false;
-      if(viewNeedsKjvRerender()) render();
+      onBibleDataLoaded('tl');
     });
   }
   // Loads whichever translation is currently active (or both, once each has
@@ -6962,7 +7002,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // loadKjvData() alone, so switching languages never needs its own special
   // first-load handling.
   function loadActiveBibleData(){
-    if(bibleTranslation === 'tl') loadTagalogData(); else loadKjvData();
+    if(bibleTranslation === 'tl') loadTagalogData(); else if(bibleTranslation === 'bsb') loadBsbData(); else loadKjvData();
   }
   // Switches the app-wide translation (persisted per-device) and makes sure
   // the newly-selected translation's data is loading/loaded. bibleBook/
@@ -6971,7 +7011,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // keys and chapter/verse numbering (verified at build time), so a reader
   // stays on the exact same passage when they switch languages mid-read.
   function setBibleTranslation(t){
-    if(t !== 'kjv' && t !== 'tl') return;
+    if(t !== 'kjv' && t !== 'tl' && t !== 'bsb') return;
     if(bibleTranslation === t) return;
     bibleTranslation = t;
     safeSet('bibleTranslation', t);
@@ -7154,14 +7194,17 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // never mistakenly matches the other's markup.
   function bibleTranslationSwitcher(idPrefix){
     return '<div class="content-segmented" style="margin-bottom:14px;">' +
-      '<button type="button" class="segment-btn'+(bibleTranslation!=='tl'?' active':'')+'" id="'+idPrefix+'TransKjvBtn">KJV (ENGLISH)</button>' +
-      '<button type="button" class="segment-btn'+(bibleTranslation==='tl'?' active':'')+'" id="'+idPrefix+'TransTlBtn">TAGALOG (ADB)</button>' +
+      '<button type="button" class="segment-btn'+(bibleTranslation==='kjv'?' active':'')+'" id="'+idPrefix+'TransKjvBtn">KJV</button>' +
+      '<button type="button" class="segment-btn'+(bibleTranslation==='bsb'?' active':'')+'" id="'+idPrefix+'TransBsbBtn" title="Berean Standard Bible -- easier modern English">BSB (EASY ENGLISH)</button>' +
+      '<button type="button" class="segment-btn'+(bibleTranslation==='tl'?' active':'')+'" id="'+idPrefix+'TransTlBtn">TAGALOG</button>' +
     '</div>';
   }
   function attachBibleTranslationSwitcherHandlers(idPrefix, container){
     const kjvBtn = document.getElementById(idPrefix+'TransKjvBtn');
     const tlBtn = document.getElementById(idPrefix+'TransTlBtn');
     if(kjvBtn) kjvBtn.addEventListener('click', function(){ setBibleTranslation('kjv'); });
+    const bsbBtn = document.getElementById(idPrefix+'TransBsbBtn');
+    if(bsbBtn) bsbBtn.addEventListener('click', function(){ setBibleTranslation('bsb'); });
     if(tlBtn) tlBtn.addEventListener('click', function(){ setBibleTranslation('tl'); });
   }
 
@@ -7172,7 +7215,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '<div class="back-row"><button class="back-btn" id="bibleBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
       '<div class="landing-hero">' +
         '<p class="display landing-greeting">Bible</p>' +
-        '<p class="landing-sub">'+(bibleTranslation==='tl' ? 'Ang Dating Biblia (1905) &mdash; public domain Tagalog translation, built in.' : 'King James Version (1769) &mdash; public domain, built in.')+'</p>' +
+        '<p class="landing-sub">'+(bibleTranslation==='tl' ? 'Ang Dating Biblia (1905) &mdash; public domain Tagalog translation, built in.' : (bibleTranslation==='bsb' ? 'Berean Standard Bible &mdash; easy-to-read modern English, public domain, built in.' : 'King James Version (1769) &mdash; public domain, built in.'))+' Tap any verse to study it.'+'</p>' +
       '</div>' +
       bibleTranslationSwitcher('bible') +
       (!data ?
@@ -7189,6 +7232,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       state.view='landing'; render(); window.scrollTo(0,0);
     });
     attachBibleTranslationSwitcherHandlers('bible');
+    ensureBibleMarksWatch();
+    ensureVerseNotesWatch();
 
     if(!data) return;
 
@@ -7206,20 +7251,31 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // here and keeps working across the innerHTML patches above and the
     // full re-renders below, since #bibleBody itself is never replaced,
     // only its children.
+    function resetStudy(){ studyVerse = null; studyDetailed = false; studyChapterOverviewOpen = false; studyNoteEditing = false; studyPastorEditing = false; studyMemorizeLevel = 0; }
     document.getElementById('bibleBody').addEventListener('click', function(e){
       const bookBtn = e.target.closest('[data-open-book]');
-      if(bookBtn){ bibleBook = bookBtn.getAttribute('data-open-book'); bibleChapter=null; bibleQuery=''; render(); window.scrollTo(0,0); return; }
+      if(bookBtn){ bibleBook = bookBtn.getAttribute('data-open-book'); bibleChapter=null; bibleQuery=''; resetStudy(); render(); window.scrollTo(0,0); return; }
       const chBtn = e.target.closest('[data-open-chapter]');
-      if(chBtn){ bibleChapter = Number(chBtn.getAttribute('data-open-chapter')); render(); window.scrollTo(0,0); return; }
+      if(chBtn){ bibleChapter = Number(chBtn.getAttribute('data-open-chapter')); resetStudy(); render(); window.scrollTo(0,0); return; }
       const navBtn = e.target.closest('[data-goto-chapter-nav]:not([disabled])');
-      if(navBtn){ bibleChapter = Number(navBtn.getAttribute('data-goto-chapter-nav')); render(); window.scrollTo(0,0); return; }
+      if(navBtn){ bibleChapter = Number(navBtn.getAttribute('data-goto-chapter-nav')); resetStudy(); render(); window.scrollTo(0,0); return; }
       const resultBtn = e.target.closest('[data-goto-book]');
       if(resultBtn){
         bibleBook = resultBtn.getAttribute('data-goto-book');
         bibleChapter = Number(resultBtn.getAttribute('data-goto-chapter'));
         bibleQuery = '';
-        render(); window.scrollTo(0,0);
+        resetStudy();
+        // A search result / typed reference points at one verse -- open its study straight away.
+        const gv = Number(resultBtn.getAttribute('data-goto-verse')) || null;
+        if(gv) studyVerse = gv;
+        render();
+        if(gv) setTimeout(function(){ scrollToVerse(gv); }, 30); else window.scrollTo(0,0);
+        return;
       }
+      if(bibleBook && bibleChapter && !bibleQuery.trim()) handleStudyClick(e);
+    });
+    document.getElementById('bibleBody').addEventListener('keydown', function(e){
+      if((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-study-verse]')){ e.preventDefault(); handleStudyClick(e); }
     });
   }
 
@@ -7240,7 +7296,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       if(found){
         return '<div class="verse-block" style="margin-bottom:14px;"><p class="section-label uc">'+escapeHtml(found.refLabel)+'</p>' +
             '<p class="lyric-line">'+escapeHtml(found.text)+'</p></div>' +
-          '<button type="button" class="btn btn-primary btn-block" data-goto-book="'+escapeAttr(found.book)+'" data-goto-chapter="'+found.chapter+'">READ '+escapeHtml(bibleDisplayBookName(found.book))+' '+found.chapter+' IN FULL</button>';
+          '<button type="button" class="btn btn-primary btn-block" data-goto-book="'+escapeAttr(found.book)+'" data-goto-chapter="'+found.chapter+'"'+(found.verse?(' data-goto-verse="'+found.verse+'"'):'')+'>READ &amp; STUDY '+escapeHtml(bibleDisplayBookName(found.book))+' '+found.chapter+'</button>';
       }
       // [Bug found 2026-09-10] this screen used to try bibleSearch() at 2
       // characters, but bibleSearch() itself silently returns [] under 3
@@ -7255,7 +7311,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       const results = bibleSearch(q);
       return '<p class="hint" style="margin-bottom:10px;">'+results.length+' match'+(results.length===1?'':'es')+(results.length>=60?' (showing the first 60)':'')+'</p>' +
         (results.length ? results.map(function(r){
-          return '<button type="button" class="bible-search-result" data-goto-book="'+escapeAttr(r.book)+'" data-goto-chapter="'+r.chapter+'">' +
+          return '<button type="button" class="bible-search-result" data-goto-book="'+escapeAttr(r.book)+'" data-goto-chapter="'+r.chapter+'" data-goto-verse="'+r.verse+'">' +
             '<span class="hymn-title" style="font-size:1rem;">'+escapeHtml(bibleDisplayBookName(r.book))+' '+r.chapter+':'+r.verse+'</span>' +
             '<p class="hint">'+escapeHtml(r.text)+'</p>' +
           '</button>';
@@ -7268,10 +7324,11 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       const prevCh = idx > 0 ? chapters[idx-1] : null;
       const nextCh = idx < chapters.length-1 ? chapters[idx+1] : null;
       return '<p class="bible-crumb">'+escapeHtml(bibleDisplayBookName(bibleBook))+'</p>' +
-        '<h2 style="margin:0 0 16px;">'+escapeHtml(bibleDisplayBookName(bibleBook))+' '+bibleChapter+'</h2>' +
-        '<div class="lyric-sheet">' + verses.map(function(v){
-          return '<p class="bible-verse-p"><span class="bible-verse-num">'+v.verse+'</span>'+escapeHtml(cleanVerseText(v.text))+'</p>';
-        }).join('') + '</div>' +
+        '<div class="study-chapter-head"><h2 style="margin:0;">'+escapeHtml(bibleDisplayBookName(bibleBook))+' '+bibleChapter+'</h2>' +
+          '<span class="study-chapter-listen"><button type="button" class="study-act" data-study-listen-chapter="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('volumeOn')+'</svg><span>'+stl('LISTEN','PAKINGGAN')+'</span></button>' +
+          '<button type="button" class="study-act" data-study-listen-stop="1" aria-label="'+stl('Stop listening','Itigil')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('pause')+'</svg><span>'+stl('STOP','ITIGIL')+'</span></button></span></div>' +
+        '<p class="hint study-tip">'+stl('Tap any verse for an overview, notes, highlights and a detailed study.','I-tap ang anumang talata para sa buod, tala, highlight at detalyadong pag-aaral.')+'</p>' +
+        renderStudyChapter(verses) +
         '<div class="slide-nav" style="margin-top:18px;">' +
           '<button type="button" class="btn btn-ghost" data-goto-chapter-nav="'+(prevCh||'')+'" '+(prevCh?'':'disabled')+'>&larr; '+(prevCh?('CHAPTER '+prevCh):'PREV')+'</button>' +
           '<button type="button" class="btn btn-ghost" data-goto-chapter-nav="'+(nextCh||'')+'" '+(nextCh?'':'disabled')+'>'+(nextCh?('CHAPTER '+nextCh):'NEXT')+' &rarr;</button>' +
@@ -7303,6 +7360,604 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     }
     return '<div class="section-heading"><h2 class="uc">Old Testament</h2></div>' + bookChips(otBooks) +
       '<div class="section-heading"><h2 class="uc">New Testament</h2></div>' + bookChips(ntBooks);
+  }
+
+  /* ============ VERSE STUDY [2026-10-20] ============
+     Jared: "users can tap verses and a complete study appears underneath,
+     first it's an overview, then the user has the option to view a detailed
+     version" -- plus "try looking for an available study bible that aligns
+     with our beliefs" (1689 London Baptist Confession). No free, digitized
+     1689-Baptist study Bible could be obtained, so the closest public-domain
+     Reformed sources are bundled instead (see scripts/build-study-data.mjs):
+       - Geneva Bible notes (1599) -- short verse notes, used as the OVERVIEW
+       - Matthew Henry's Commentary -- chapter overview + passage comments,
+         used for the CHAPTER OVERVIEW and the DETAILED study
+       - OpenBible.info cross references (CC-BY)
+     Both commentators are Reformed and agree with the 1689 Confession on the
+     gospel; both held infant baptism, so baptism passages get a short note
+     (studyBaptismNote below). A pastor's note, when one exists, always shows
+     FIRST. AI pieces (reflection questions, kids' version, quizzes, the chat
+     companion) are deliberately NOT here -- Jared: "Skip AI for now."
+     Data is one small JSON file per chapter under /study/<USFM>/<ch>.json,
+     fetched on demand and runtime-cached by src/sw.js. */
+  var STUDY_DATA_VERSION = '1';
+  var STUDY_USFM = ['GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL','MAT','MRK','LUK','JHN','ACT','ROM','1CO','2CO','GAL','EPH','PHP','COL','1TH','2TH','1TI','2TI','TIT','PHM','HEB','JAS','1PE','2PE','1JN','2JN','3JN','JUD','REV'];
+  var STUDY_BOOKS = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Proverbs','Ecclesiastes',"Solomon's Song",'Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
+  var HIGHLIGHT_COLORS = ['gold','green','blue','pink'];
+  var studyVerse = null;          // verse number whose panel is open in the current chapter
+  var studyDetailed = false;      // overview vs detailed
+  var studyHenryShown = 6;        // paragraphs of Matthew Henry shown before "SHOW MORE"
+  var studyChapterOverviewOpen = false;
+  var studyNoteEditing = false;   // my private note editor open
+  var studyPastorEditing = false; // pastor note editor open
+  var studyMemorizeLevel = 0;     // 0 = off, 1..4 = how many words are hidden
+  var studyRevealed = {};         // word index -> true, tapped to reveal while memorizing
+  var studyCache = {};            // "JHN/3" -> data | 'loading' | 'error'
+  var bibleMarks = {};            // "<book>|<ch>|<v>" -> mark
+  var bibleMarksUid = null, bibleMarksUnsub = null;
+  var verseNotesKey = null, verseNotesUnsub = null, verseNotesList = [];
+  var verseCommentsUnsub = null, verseCommentsList = [];
+  var studyDiscussOpen = false;
+
+  function studyTl(){ return bibleTranslation === 'tl'; }
+  // Tagalog labels when the reader is in Tagalog (the commentary text itself
+  // is English-only -- no public-domain Tagalog commentary exists).
+  function stl(en, tl){ return studyTl() ? tl : en; }
+  function studyCode(book){ var i = STUDY_BOOKS.indexOf(book); return i >= 0 ? STUDY_USFM[i] : null; }
+  function studyKey(book, ch){ return studyCode(book) + '/' + ch; }
+  function loadStudyChapter(book, ch){
+    var key = studyKey(book, ch);
+    if(studyCache[key]) return studyCache[key];
+    studyCache[key] = 'loading';
+    fetch('/study/' + key + '.json?v=' + STUDY_DATA_VERSION).then(function(r){
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function(d){
+      studyCache[key] = d;
+      if(state.view === 'bible' && bibleBook === book && bibleChapter === ch) patchStudyPanelIfOpen();
+      else if(state.view === 'session-view' && sessionStudyOpen) render();
+    }).catch(function(){
+      studyCache[key] = 'error';
+      if(state.view === 'bible' && bibleBook === book && bibleChapter === ch) patchStudyPanelIfOpen();
+    });
+    return 'loading';
+  }
+  function canWritePastorNotes(){
+    if(!state.user || !state.profile || !state.profile.churchId) return false;
+    return !!state.isAdmin || myRole() === 'seniorPastor' || myRole() === 'pastor';
+  }
+  function markKey(book, ch, v){ return book + '|' + ch + '|' + v; }
+  function markFor(book, ch, v){ return bibleMarks[markKey(book, ch, v)] || null; }
+
+  // Personal marks: one live watch per signed-in uid, started the first time
+  // the Bible is opened and swapped if a different account signs in.
+  function ensureBibleMarksWatch(){
+    var uid = state.user ? state.user.uid : null;
+    if(uid === bibleMarksUid) return;
+    if(bibleMarksUnsub){ try{ bibleMarksUnsub(); }catch(e){} bibleMarksUnsub = null; }
+    bibleMarks = {}; bibleMarksUid = uid;
+    if(!uid) return;
+    bibleMarksUnsub = watchBibleMarks(uid, function(list){
+      var next = {};
+      (list || []).forEach(function(m){ next[markKey(m.book, m.chapter, m.verse)] = m; });
+      bibleMarks = next;
+      if(state.view === 'bible' && bibleBook && bibleChapter) patchStudyPanelIfOpen();
+    });
+  }
+  // Pastor notes: one live watch for the chapter currently open.
+  function ensureVerseNotesWatch(){
+    var church = state.profile && state.profile.churchId;
+    var key = (state.user && church && state.view === 'bible' && bibleBook && bibleChapter) ? (church + '|' + bibleBook + '|' + bibleChapter) : null;
+    if(key === verseNotesKey) return;
+    if(verseNotesUnsub){ try{ verseNotesUnsub(); }catch(e){} verseNotesUnsub = null; }
+    if(verseCommentsUnsub){ try{ verseCommentsUnsub(); }catch(e){} verseCommentsUnsub = null; }
+    verseNotesKey = key; verseNotesList = []; verseCommentsList = [];
+    if(!key) return;
+    verseNotesUnsub = watchVerseNotes(church, bibleBook, bibleChapter, function(list){
+      verseNotesList = list || [];
+      if(state.view === 'bible') patchStudyPanelIfOpen();
+    });
+    verseCommentsUnsub = watchVerseComments(church, bibleBook, bibleChapter, function(list){
+      verseCommentsList = list || [];
+      if(state.view === 'bible') patchStudyPanelIfOpen();
+    });
+  }
+
+  // Repaints just #bibleBody, keeping whatever is typed in any textarea and
+  // which field has focus -- a live snapshot (a pastor note, a mark) landing
+  // mid-typing must never eat someone's words.
+  function patchStudyPanelIfOpen(){
+    var body = document.getElementById('bibleBody');
+    if(!body || state.view !== 'bible' || bibleQuery.trim()) return;
+    var saved = {};
+    body.querySelectorAll('textarea[id]').forEach(function(t){ saved[t.id] = t.value; });
+    var active = document.activeElement && document.activeElement.id;
+    var sel = (active && saved[active] !== undefined) ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    body.innerHTML = renderBibleBody();
+    Object.keys(saved).forEach(function(id){ var t = document.getElementById(id); if(t) t.value = saved[id]; });
+    if(active){ var a = document.getElementById(active); if(a){ a.focus(); if(sel && a.setSelectionRange) a.setSelectionRange(sel[0], sel[1]); } }
+  }
+
+  function studyRefLabel(book, ch, v, toV){
+    return bibleDisplayBookName(book) + ' ' + ch + ':' + v + (toV ? ('-' + toV) : '');
+  }
+  function verseTextIn(t, book, ch, v){
+    var d = bibleDataFor(t);
+    if(!d || !d.text[book] || !d.text[book][String(ch)] || !d.text[book][String(ch)][String(v)]) return null;
+    return cleanVerseText(d.text[book][String(ch)][String(v)]);
+  }
+  function studySectionFor(data, v){
+    if(!data || !data.sections) return null;
+    for(var i=0; i<data.sections.length; i++){ var s = data.sections[i]; if(v >= s.from && v <= s.to) return s; }
+    return null;
+  }
+  function trimSentences(text, maxChars){
+    if(!text || text.length <= maxChars) return text || '';
+    var cut = text.slice(0, maxChars);
+    var dot = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('; '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+    return (dot > maxChars * 0.5 ? cut.slice(0, dot + 1) : cut.replace(/\s+\S*$/, '')) + ' …';
+  }
+  function studyBaptismNote(texts){
+    var hit = texts.some(function(t){ return /baptiz|baptis|bautismo|binyag|bawtismo/i.test(t || ''); });
+    if(!hit) return '';
+    return '<p class="study-doctrine-note">' + stl(
+      'Note: Matthew Henry and the Geneva notes held infant baptism. Our church follows the 1689 Baptist Confession, which teaches believer’s baptism (Confession ch. 29).',
+      'Paalala: Si Matthew Henry at ang Geneva notes ay naniniwala sa pagbibinyag ng sanggol. Ang ating iglesia ay sumusunod sa 1689 Baptist Confession, na nagtuturo ng pagbibinyag sa mga sumasampalataya (Confession kab. 29).'
+    ) + '</p>';
+  }
+
+  // The verse list of an open chapter (replaces the old plain <p> list).
+  function renderStudyChapter(verses){
+    loadStudyChapter(bibleBook, bibleChapter);
+    var data = studyCache[studyKey(bibleBook, bibleChapter)];
+    return renderChapterOverview(data) +
+      '<div class="lyric-sheet study-sheet">' + verses.map(function(v){
+        var m = markFor(bibleBook, bibleChapter, v.verse);
+        var cls = 'bible-verse-p study-verse' + (m && m.color ? (' hl-' + m.color) : '') + (studyVerse === v.verse ? ' study-open' : '');
+        var flags = (m && m.bookmarked ? '<span class="study-flag" title="Bookmarked"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none">'+icon('bookmark')+'</svg></span>' : '') +
+          (m && m.note ? '<span class="study-flag" title="Has your note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('pen')+'</svg></span>' : '') +
+          (verseNotesList.some(function(n){ return n.verse === v.verse; }) ? '<span class="study-flag study-flag-pastor" title="Pastor’s note">P</span>' : '');
+        return '<p class="'+cls+'" id="verse-'+v.verse+'" data-study-verse="'+v.verse+'" role="button" tabindex="0" aria-expanded="'+(studyVerse===v.verse?'true':'false')+'">' +
+            '<span class="bible-verse-num">'+v.verse+'</span>'+escapeHtml(cleanVerseText(v.text))+flags+'</p>' +
+          (studyVerse === v.verse ? renderStudyPanel(v.verse, cleanVerseText(v.text), data) : '');
+      }).join('') + '</div>';
+  }
+
+  function renderChapterOverview(data){
+    var head = '<button type="button" class="study-chapter-toggle" data-study-chapter-toggle="1" aria-expanded="'+(studyChapterOverviewOpen?'true':'false')+'">' +
+      '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg> ' + stl('CHAPTER OVERVIEW', 'BUOD NG KABANATA') + '</span>' +
+      '<span class="study-chev'+(studyChapterOverviewOpen?' open':'')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span></button>';
+    if(!studyChapterOverviewOpen) return '<div class="study-chapter">' + head + '</div>';
+    var body;
+    if(data === 'loading' || !data) body = '<p class="hint">' + stl('Loading…', 'Naglo-load…') + '</p>';
+    else if(data === 'error') body = '<p class="hint">' + stl('Couldn’t load the study notes. Check your connection and try again.', 'Hindi ma-load ang mga tala. Subukang muli.') + ' <button type="button" class="link-btn" data-study-retry="1">' + stl('RETRY', 'SUBUKAN MULI') + '</button></p>';
+    else {
+      body = (data.intro || []).map(function(p){ return '<p class="study-para">'+escapeHtml(p)+'</p>'; }).join('') +
+        (data.sections && data.sections.length ? '<p class="study-label">' + stl('SECTIONS', 'MGA BAHAGI') + '</p><div class="study-sections">' + data.sections.map(function(s){
+          return '<button type="button" class="study-section-btn" data-study-jump-verse="'+s.from+'"><span class="study-section-range">'+s.from+(s.to!==s.from?('–'+(s.to===999?'':s.to)):'')+'</span>'+escapeHtml(s.title || '')+'</button>';
+        }).join('') + '</div>' : '') +
+        '<p class="study-source">' + stl('Matthew Henry’s Commentary (public domain). Text in English.', 'Komentaryo ni Matthew Henry (public domain). Nasa Ingles ang teksto.') + '</p>';
+    }
+    return '<div class="study-chapter open">' + head + '<div class="study-chapter-body">' + body + '</div></div>';
+  }
+
+  function renderStudyPanel(v, text, data){
+    var book = bibleBook, ch = bibleChapter;
+    var m = markFor(book, ch, v) || {};
+    var pastorNotes = verseNotesList.filter(function(n){ return n.verse === v; });
+    var signedIn = !!state.user;
+    var actions =
+      '<div class="study-actions">' +
+        '<div class="study-swatches" role="group" aria-label="'+stl('Highlight color','Kulay ng highlight')+'">' +
+          HIGHLIGHT_COLORS.map(function(c){ return '<button type="button" class="study-swatch sw-'+c+(m.color===c?' active':'')+'" data-study-color="'+c+'" aria-label="'+stl('Highlight ','I-highlight ')+c+'"></button>'; }).join('') +
+          (m.color ? '<button type="button" class="study-swatch sw-none" data-study-color="" aria-label="'+stl('Remove highlight','Alisin ang highlight')+'">&times;</button>' : '') +
+        '</div>' +
+        studyActionBtn('bookmark', m.bookmarked ? stl('SAVED','NAKA-SAVE') : stl('BOOKMARK','I-BOOKMARK'), 'data-study-bookmark="1"', m.bookmarked) +
+        studyActionBtn('pen', stl('MY NOTE','AKING TALA'), 'data-study-note-toggle="1"', studyNoteEditing || !!m.note) +
+        studyActionBtn('volumeOn', stl('LISTEN','PAKINGGAN'), 'data-study-listen="1"', false) +
+        studyActionBtn('bulb', stl('MEMORIZE','ISAULO'), 'data-study-memorize="1"', studyMemorizeLevel > 0) +
+        (signedIn ? studyActionBtn('share', stl('SHARE','IBAHAGI'), 'data-study-share="1"', false) : '') +
+      '</div>';
+
+    var noteEditor = '';
+    if(studyNoteEditing){
+      noteEditor = signedIn ?
+        ('<div class="study-box"><label class="study-label" for="studyMyNote">' + stl('MY PRIVATE NOTE (only you can see this)', 'AKING PRIBADONG TALA (ikaw lang ang makakakita)') + '</label>' +
+          '<textarea id="studyMyNote" rows="3" maxlength="4000">'+escapeHtml(m.note || '')+'</textarea>' +
+          '<div class="study-row"><button type="button" class="btn btn-primary btn-sm" data-study-note-save="1">' + stl('SAVE NOTE','I-SAVE') + '</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-study-journal="1" title="'+stl('Also add this to your Spiritual Growth journal','Idagdag din sa iyong journal')+'">' + stl('SAVE TO MY JOURNAL','I-SAVE SA JOURNAL') + '</button>' +
+          (m.note ? '<button type="button" class="btn btn-ghost btn-sm" data-study-note-delete="1">' + stl('DELETE','BURAHIN') + '</button>' : '') + '</div></div>')
+        : '<p class="hint">' + stl('Sign in to save highlights, bookmarks and notes.', 'Mag-sign in para mag-save ng highlight, bookmark at tala.') + '</p>';
+    } else if(m.note){
+      noteEditor = '<div class="study-box study-mynote"><p class="study-label">' + stl('MY NOTE','AKING TALA') + '</p><p class="study-para">'+escapeHtml(m.note)+'</p></div>';
+    }
+
+    var memorize = studyMemorizeLevel > 0 ? renderMemorize(text) : '';
+
+    var pastor = pastorNotes.map(function(n){
+      return '<div class="study-box study-pastor"><p class="study-label">' + stl('PASTOR’S NOTE','TALA NG PASTOR') + (n.authorName ? (' &middot; ' + escapeHtml(n.authorName)) : '') + '</p>' +
+        '<p class="study-para">'+escapeHtml(n.text)+'</p>' +
+        ((state.user && (n.authorUid === state.user.uid || state.isAdmin)) ? '<button type="button" class="link-btn" data-study-pastor-delete="'+escapeAttr(n.id)+'">' + stl('DELETE','BURAHIN') + '</button>' : '') +
+      '</div>';
+    }).join('');
+    var pastorTools = '';
+    if(canWritePastorNotes()){
+      pastorTools = studyPastorEditing ?
+        ('<div class="study-box"><label class="study-label" for="studyPastorNote">' + stl('ADD A PASTOR’S NOTE (everyone in your church will see it)', 'MAGDAGDAG NG TALA NG PASTOR (makikita ng buong iglesia)') + '</label>' +
+          '<textarea id="studyPastorNote" rows="3" maxlength="4000"></textarea>' +
+          '<div class="study-row"><button type="button" class="btn btn-primary btn-sm" data-study-pastor-save="1">' + stl('POST NOTE','I-POST') + '</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-study-pastor-toggle="1">' + stl('CANCEL','KANSELAHIN') + '</button></div></div>')
+        : '<button type="button" class="link-btn study-pastor-add" data-study-pastor-toggle="1">+ ' + stl('ADD PASTOR’S NOTE','MAGDAGDAG NG TALA NG PASTOR') + '</button>';
+    }
+
+    var overview;
+    if(data === 'loading' || !data) overview = '<p class="hint">' + stl('Loading the study…', 'Naglo-load ang pag-aaral…') + '</p>';
+    else if(data === 'error') overview = '<p class="hint">' + stl('Couldn’t load the study notes. Check your connection.', 'Hindi ma-load ang mga tala. Suriin ang koneksyon.') + ' <button type="button" class="link-btn" data-study-retry="1">' + stl('RETRY','SUBUKAN MULI') + '</button></p>';
+    else {
+      var sec = studySectionFor(data, v);
+      var gen = data.geneva && data.geneva[String(v)];
+      var firstHenry = sec && sec.paras && sec.paras.length ? sec.paras[0] : '';
+      overview =
+        (sec && sec.title ? '<p class="study-section-title">' + escapeHtml(sec.title) + ' <span class="study-range">(' + stl('vv. ','tal. ') + sec.from + (sec.to!==sec.from?('–'+(sec.to===999?'':sec.to)):'') + ')</span></p>' : '') +
+        (gen ? ('<p class="study-para">' + escapeHtml(trimSentences(gen, 600)) + '</p><p class="study-source">' + stl('Geneva Bible notes (1599)', 'Geneva Bible notes (1599)') + '</p>')
+             : (firstHenry ? ('<p class="study-para">' + escapeHtml(trimSentences(firstHenry, 520)) + '</p><p class="study-source">' + stl('Matthew Henry','Matthew Henry') + '</p>')
+                           : '<p class="hint">' + stl('No overview note for this verse. Open the detailed study below.', 'Walang buod para sa talatang ito. Buksan ang detalyadong pag-aaral.') + '</p>')) +
+        studyBaptismNote([text, gen, firstHenry, sec && sec.title]) +
+        (studyTl() ? '<p class="study-source">' + 'Ang mga komentaryo ay nasa Ingles pa lamang.' + '</p>' : '');
+    }
+
+    var detailedBtn = '<button type="button" class="btn btn-ghost btn-block study-detail-btn" data-study-detailed="1" aria-expanded="'+(studyDetailed?'true':'false')+'">' +
+      (studyDetailed ? stl('HIDE DETAILED STUDY','ITAGO ANG DETALYE') : stl('VIEW DETAILED STUDY','TINGNAN ANG DETALYADONG PAG-AARAL')) + '</button>';
+
+    return '<div class="study-panel" id="studyPanel" data-study-panel="'+v+'">' +
+      '<div class="study-head"><p class="study-ref">' + escapeHtml(studyRefLabel(book, ch, v)) + ' <span class="study-trans">' + bibleTranslationLabel() + '</span></p>' +
+        '<button type="button" class="study-close" data-study-close="1" aria-label="'+stl('Close study','Isara')+'">&times;</button></div>' +
+      actions + memorize + noteEditor +
+      '<p class="study-label">' + stl('OVERVIEW','BUOD') + '</p>' +
+      pastor + overview + pastorTools +
+      renderVerseDiscussion(v) +
+      detailedBtn +
+      (studyDetailed ? renderStudyDetailed(v, data) : '') +
+    '</div>';
+  }
+  // Church discussion under a verse (only members of the same church see it).
+  function renderVerseDiscussion(v){
+    if(!state.user || !state.profile || !state.profile.churchId) return '';
+    var list = verseCommentsList.filter(function(c){ return c.verse === v; });
+    var canModerate = !!state.isAdmin || myRole() === 'seniorPastor' || myRole() === 'pastor';
+    return '<details class="study-ent study-discuss"'+(studyDiscussOpen?' open':'')+'><summary>' + stl('CHURCH DISCUSSION','TALAKAYAN NG IGLESIA') + ' (' + list.length + ')</summary>' +
+      list.map(function(c){
+        var mine = c.authorUid === state.user.uid;
+        return '<div class="study-comment"><p class="study-comment-who">'+escapeHtml(c.authorName || 'Member')+'</p><p class="study-para" style="white-space:pre-wrap;">'+escapeHtml(c.text)+'</p>' +
+          ((mine || canModerate) ? '<button type="button" class="link-btn" data-study-comment-delete="'+escapeAttr(c.id)+'">' + stl('DELETE','BURAHIN') + '</button>' : '') + '</div>';
+      }).join('') +
+      '<textarea id="studyComment" rows="2" maxlength="1000" placeholder="'+escapeAttr(stl('Share a thought with your church…','Magbahagi ng kaisipan sa iglesia…'))+'"></textarea>' +
+      '<div class="study-row"><button type="button" class="btn btn-primary btn-sm" data-study-comment-post="1">' + stl('POST','I-POST') + '</button></div>' +
+    '</details>';
+  }
+  function studyActionBtn(iconName, label, attr, active){
+    return '<button type="button" class="study-act'+(active?' active':'')+'" '+attr+'><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon(iconName)+'</svg><span>'+label+'</span></button>';
+  }
+
+  function renderStudyDetailed(v, data){
+    var book = bibleBook, ch = bibleChapter;
+    // Compare translations: the other two load on demand (onBibleDataLoaded patches this panel).
+    var compare = ['kjv','bsb','tl'].map(function(t){
+      var d = bibleDataFor(t);
+      if(!d){ loadBibleDataFor(t); }
+      var txt = d ? verseTextIn(t, book, ch, v) : null;
+      return '<div class="study-compare-row"><span class="study-trans">'+bibleTranslationLabel(t)+'</span><p>' + (txt ? escapeHtml(txt) : '<span class="hint">' + stl('Loading…','Naglo-load…') + '</span>') + '</p></div>';
+    }).join('');
+    var xrefs = '';
+    var henry = '';
+    if(data && typeof data === 'object'){
+      var list = (data.xrefs && data.xrefs[String(v)]) || [];
+      xrefs = list.length ? list.map(function(x){
+        var b = STUDY_BOOKS[x[0]];
+        var t = verseTextIn(bibleTranslation, b, x[1], x[2]);
+        return '<button type="button" class="study-xref" data-study-goto="'+escapeAttr(b)+'|'+x[1]+'|'+x[2]+'"><span class="study-xref-ref">'+escapeHtml(studyRefLabel(b, x[1], x[2], x[3]))+'</span>' +
+          (t ? '<span class="study-xref-text">'+escapeHtml(trimSentences(t, 140))+'</span>' : '') + '</button>';
+      }).join('') : '<p class="hint">' + stl('No cross references for this verse.','Walang kaugnay na talata.') + '</p>';
+      var sec = studySectionFor(data, v);
+      if(sec && sec.paras && sec.paras.length){
+        var shown = sec.paras.slice(0, studyHenryShown);
+        henry = '<p class="study-section-title">' + escapeHtml(sec.title || '') + ' <span class="study-range">(' + stl('vv. ','tal. ') + sec.from + (sec.to!==sec.from?('–'+(sec.to===999?'':sec.to)):'') + ')</span></p>' +
+          shown.map(function(p){ return '<p class="study-para">'+escapeHtml(p)+'</p>'; }).join('') +
+          (sec.paras.length > shown.length ? '<button type="button" class="btn btn-ghost btn-sm" data-study-more="1">' + stl('SHOW MORE','IPAKITA PA') + ' (' + (sec.paras.length - shown.length) + ')</button>' : '');
+      }
+    }
+    var words = '', who = '';
+    if(data && typeof data === 'object'){
+      var wl = (data.words && data.words[String(v)]) || [];
+      var isOT = STUDY_BOOKS.indexOf(book) < 39;
+      words = renderWordStudy(data, v, isOT, wl);
+      var ids = (data.who && data.who[String(v)]) || [];
+      who = ids.length ? ('<p class="study-label">' + stl('PEOPLE & PLACES','MGA TAO AT LUGAR') + '</p><div class="study-who">' + ids.map(function(id){
+        var en = data.ents && data.ents[id]; if(!en) return '';
+        var map = (en.k === 'l' && en.lat && en.lon) ? (' <a class="link-btn" href="https://www.openstreetmap.org/?mlat='+en.lat+'&amp;mlon='+en.lon+'#map=9/'+en.lat+'/'+en.lon+'" target="_blank" rel="noopener">' + stl('MAP','MAPA') + '</a>') : '';
+        return '<details class="study-ent"><summary><span class="study-ent-kind">' + (en.k === 'l' ? stl('PLACE','LUGAR') : stl('PERSON','TAO')) + '</span> ' + escapeHtml(en.n || '') + '</summary>' +
+          (en.b ? '<p class="study-para">' + escapeHtml(en.b) + '</p>' : '<p class="hint">' + stl('No dictionary entry.','Walang entry sa diksyunaryo.') + '</p>') + map + '</details>';
+      }).join('') + '</div>') : '';
+    }
+    return '<div class="study-detailed">' +
+      '<p class="study-label">' + stl('COMPARE TRANSLATIONS','IHAMBING ANG MGA SALIN') + '</p>' + compare +
+      words + who +
+      '<p class="study-label">' + stl('CROSS REFERENCES','KAUGNAY NA MGA TALATA') + '</p><div class="study-xrefs">' + xrefs + '</div>' +
+      (henry ? '<p class="study-label">' + stl('COMMENTARY','KOMENTARYO') + '</p>' + henry : '') +
+      '<p class="study-source">' + stl(
+        'Sources: Matthew Henry’s Commentary and the Geneva Bible notes (1599), both public domain; cross references from OpenBible.info (CC BY); original-language text and word study from STEP Bible, www.STEPBible.org (CC BY 4.0); people & places from Theographic Bible Metadata (CC BY-SA 4.0) with Easton’s Bible Dictionary (public domain). Reformed commentaries chosen to fit our 1689 Baptist Confession; a pastor’s note always comes first.',
+        'Pinagmulan: Komentaryo ni Matthew Henry at Geneva Bible notes (1599), parehong public domain; kaugnay na talata mula sa OpenBible.info (CC BY); mahahalagang salita mula sa STEP Bible, www.STEPBible.org (CC BY 4.0); mga tao at lugar mula sa Theographic Bible Metadata (CC BY-SA 4.0) at Easton’s Bible Dictionary (public domain).') + '</p>' +
+    '</div>';
+  }
+
+  // Word study [2026-10-20] -- Jared: "make sure to include original text
+  // (hebrew, aramaic, greek, and etc) in the word studies." Shows the whole
+  // verse in its original language (STEP Bible: Nestle-Aland Greek, Leningrad
+  // Hebrew; Aramaic in Daniel/Ezra/Jer 10:11 detected from STEP's own tags,
+  // plus Aramaic words written in Greek letters like "Talitha koum"), with a
+  // transliteration, then the key words. Where the KJV's Greek (Textus
+  // Receptus) differs from the Nestle-Aland text, both are shown, described
+  // neutrally -- no side taken on which manuscripts are better.
+  function studyLangName(c){
+    return c === 'A' ? stl('Aramaic','Arameo') : (c === 'H' ? stl('Hebrew','Hebreo') : stl('Greek','Griego'));
+  }
+  function renderWordStudy(data, v, isOT, wl){
+    var o = data.orig && data.orig[String(v)];
+    var out = '';
+    if(o && o[0]){
+      var langs = String(o[2] || '');
+      var names = [];
+      if(langs.indexOf('H') >= 0) names.push(studyLangName('H'));
+      if(langs.indexOf('A') >= 0) names.push(studyLangName('A'));
+      if(langs.indexOf('G') >= 0 || !names.length) names.push(studyLangName('G'));
+      var heb = isOT;
+      out += '<p class="study-label">' + stl('ORIGINAL TEXT','ORIHINAL NA TEKSTO') + ' (' + names.join(' & ').toUpperCase() + ')</p>' +
+        '<div class="study-box study-orig">' +
+          '<p class="study-orig-text" lang="'+(heb?'he':'grc')+'" dir="'+(heb?'rtl':'ltr')+'">'+escapeHtml(o[0])+'</p>' +
+          '<p class="study-orig-tl">'+escapeHtml(o[1] || '')+'</p>' +
+          (langs.indexOf('a') >= 0 ? '<p class="hint">' + stl('This verse quotes Aramaic words written in Greek letters (marked ARAMAIC below).','May mga salitang Arameo sa talatang ito na nakasulat sa letrang Griego.') + '</p>' : '') +
+          (langs.indexOf('A') >= 0 && heb ? '<p class="hint">' + stl('Parts of Daniel and Ezra (and Jeremiah 10:11) were written in Aramaic, the common language of the empire at the time.','Ang ilang bahagi ng Daniel at Ezra (at Jeremias 10:11) ay isinulat sa Arameo.') + '</p>' : '') +
+          (o[5] === 'tr-only' ? '<p class="hint">' + stl('This verse is in the Greek text the KJV was translated from (the Textus Receptus); many older manuscripts do not include it, so some modern translations print it as a footnote.','Ang talatang ito ay nasa Griegong teksto ng KJV (Textus Receptus); wala ito sa ilang mas lumang manuskrito.') + '</p>' : '') +
+          ((o[3] && o[5] !== 'tr-only') ? ('<details class="study-ent" style="margin-top:6px;"><summary>' + stl('KJV\u2019s Greek text reads a little differently','Medyo iba ang Griegong teksto ng KJV') + '</summary>' +
+            '<p class="study-orig-text" lang="grc">'+escapeHtml(o[3])+'</p><p class="study-orig-tl">'+escapeHtml(o[4] || '')+'</p>' +
+            '<p class="hint">' + stl('The KJV was translated from the Textus Receptus; the BSB and most modern translations follow the Nestle-Aland text, based on older manuscripts. Both are shown so you can compare.','Ang KJV ay isinalin mula sa Textus Receptus; ang BSB ay sumusunod sa Nestle-Aland. Parehong ipinapakita para maihambing.') + '</p></details>') : '') +
+        '</div>';
+    }
+    if(wl.length){
+      out += '<p class="study-label">' + stl('WORD STUDY','PAG-AARAL NG SALITA') + '</p><div class="study-words">' +
+        wl.map(function(w){
+          var lc = w[5] || (isOT ? 'H' : 'G');
+          var rtl = (lc === 'H' || lc === 'A') && isOT;
+          var lang = lc === 'G' || !isOT ? 'grc' : (lc === 'A' ? 'arc' : 'he');
+          return '<div class="study-word"><span class="study-word-lang">'+escapeHtml(studyLangName(lc).toUpperCase())+'</span>' +
+            '<span class="study-word-orig" lang="'+lang+'" dir="'+(rtl?'rtl':'ltr')+'">'+escapeHtml(w[0])+'</span>' +
+            '<span class="study-word-tr">'+escapeHtml(w[1])+'</span>' +
+            '<span class="study-word-ctx">\u201C'+escapeHtml(w[2])+'\u201D</span>' +
+            '<span class="study-word-gloss">' + stl('dictionary form ','anyong diksyunaryo ') + '<span lang="'+lang+'">'+escapeHtml(w[3] || '')+'</span> &mdash; '+escapeHtml(w[4] || '')+'</span></div>';
+        }).join('') + '</div>';
+    }
+    return out;
+  }
+
+  // Memorize: hide more words each step; tap a hidden word to peek at it.
+  function renderMemorize(text){
+    var words = text.split(/\s+/);
+    var hiddenEvery = [0, 4, 2, 4, 1][studyMemorizeLevel]; // level 1: 1 in 4, 2: 1 in 2, 3: 3 in 4, 4: all
+    var html = words.map(function(w, i){
+      var hide = studyMemorizeLevel === 4 || (studyMemorizeLevel === 3 ? (i % 4 !== 0) : (i % hiddenEvery === (hiddenEvery - 1)));
+      if(!hide || studyRevealed[i]) return '<span class="mem-word">'+escapeHtml(w)+'</span>';
+      var lead = w.match(/^[^A-Za-z0-9À-ɏ]*/)[0];
+      var core = w.slice(lead.length);
+      return '<button type="button" class="mem-blank" data-mem-reveal="'+i+'">'+escapeHtml(lead + (core.charAt(0) || '')) + '<span>'+ '_'.repeat(Math.max(2, Math.min(8, core.length - 1))) +'</span></button>';
+    }).join(' ');
+    return '<div class="study-box study-memorize"><p class="study-label">' + stl('MEMORIZE','ISAULO') + ' &middot; ' + stl('step ','hakbang ') + studyMemorizeLevel + '/4</p>' +
+      '<p class="mem-text">' + html + '</p>' +
+      '<div class="study-row">' +
+        (studyMemorizeLevel < 4 ? '<button type="button" class="btn btn-primary btn-sm" data-mem-step="1">' + stl('HIDE MORE','ITAGO PA') + '</button>' : '<span class="hint">' + stl('Say it from memory!','Bigkasin mula sa alaala!') + '</span>') +
+        '<button type="button" class="btn btn-ghost btn-sm" data-mem-reset="1">' + stl('START OVER','ULITIN') + '</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-study-memorize="1">' + stl('DONE','TAPOS') + '</button>' +
+      '</div></div>';
+  }
+
+  // Listen: the browser's built-in text-to-speech (free, offline-capable on
+  // most phones). Tagalog uses a Filipino voice when the device has one.
+  function speakText(text){
+    if(!('speechSynthesis' in window)){ showToast(stl('Listening isn’t supported on this device.','Hindi suportado ang pakikinig sa device na ito.')); return; }
+    try{
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = studyTl() ? 'fil-PH' : 'en-US';
+      u.rate = 0.95;
+      window.speechSynthesis.speak(u);
+    }catch(e){ showToast(stl('Couldn’t start listening.','Hindi masimulan ang pakikinig.')); }
+  }
+
+  function studyOpenVerse(v){
+    if(studyVerse === v){ studyVerse = null; }
+    else { studyVerse = v; studyDetailed = false; studyHenryShown = 6; studyNoteEditing = false; studyPastorEditing = false; studyMemorizeLevel = 0; studyRevealed = {}; }
+    patchStudyPanelIfOpen();
+  }
+  function scrollToVerse(v){
+    var el = document.getElementById('verse-' + v);
+    if(el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  async function saveMark(patch){
+    if(!state.user){ showToast(stl('Sign in to save highlights, bookmarks and notes.','Mag-sign in para mag-save.')); return; }
+    var cur = markFor(bibleBook, bibleChapter, studyVerse) || {};
+    var next = { book: bibleBook, chapter: bibleChapter, verse: studyVerse,
+      color: cur.color || null, bookmarked: !!cur.bookmarked, note: cur.note || '' };
+    Object.keys(patch).forEach(function(k){ next[k] = patch[k]; });
+    // optimistic, so the color/bookmark shows instantly even on a slow connection
+    var key = markKey(bibleBook, bibleChapter, studyVerse);
+    var prev = bibleMarks[key];
+    if(!next.color && !next.bookmarked && !(next.note||'').trim()) delete bibleMarks[key]; else bibleMarks[key] = next;
+    patchStudyPanelIfOpen();
+    try{ await setBibleMark(state.user.uid, next); }
+    catch(e){ if(prev) bibleMarks[key] = prev; else delete bibleMarks[key]; patchStudyPanelIfOpen(); showToast(stl('Couldn’t save — try again.','Hindi na-save — subukang muli.') + describeError(e)); }
+  }
+
+  // Click handling for everything inside #bibleBody's chapter view. Called
+  // from renderBible()'s existing delegated listener; returns true when it
+  // handled the click.
+  function handleStudyClick(e){
+    var t = e.target;
+    var memReveal = t.closest('[data-mem-reveal]');
+    if(memReveal){ studyRevealed[memReveal.getAttribute('data-mem-reveal')] = true; patchStudyPanelIfOpen(); return true; }
+    if(t.closest('[data-mem-step]')){ studyMemorizeLevel = Math.min(4, studyMemorizeLevel + 1); studyRevealed = {}; patchStudyPanelIfOpen(); return true; }
+    if(t.closest('[data-mem-reset]')){ studyMemorizeLevel = 1; studyRevealed = {}; patchStudyPanelIfOpen(); return true; }
+    if(t.closest('[data-study-chapter-toggle]')){ studyChapterOverviewOpen = !studyChapterOverviewOpen; patchStudyPanelIfOpen(); return true; }
+    if(t.closest('[data-study-retry]')){ delete studyCache[studyKey(bibleBook, bibleChapter)]; patchStudyPanelIfOpen(); return true; }
+    var jump = t.closest('[data-study-jump-verse]');
+    if(jump){ var jv = Number(jump.getAttribute('data-study-jump-verse')); studyVerse = null; studyOpenVerse(jv); scrollToVerse(jv); return true; }
+    if(t.closest('[data-study-close]')){ var cv = studyVerse; studyVerse = null; patchStudyPanelIfOpen(); if(cv) scrollToVerse(cv); return true; }
+    if(t.closest('[data-study-detailed]')){ studyDetailed = !studyDetailed; patchStudyPanelIfOpen(); return true; }
+    if(t.closest('[data-study-more]')){ studyHenryShown += 10; patchStudyPanelIfOpen(); return true; }
+    var color = t.closest('[data-study-color]');
+    if(color){ var c = color.getAttribute('data-study-color') || null; var curM = markFor(bibleBook, bibleChapter, studyVerse) || {}; saveMark({ color: (curM.color === c ? null : c) }); return true; }
+    if(t.closest('[data-study-bookmark]')){ var bm = markFor(bibleBook, bibleChapter, studyVerse) || {}; saveMark({ bookmarked: !bm.bookmarked }); return true; }
+    if(t.closest('[data-study-note-toggle]')){ studyNoteEditing = !studyNoteEditing; patchStudyPanelIfOpen(); var ta = document.getElementById('studyMyNote'); if(ta) ta.focus(); return true; }
+    if(t.closest('[data-study-note-save]')){ var nv = (document.getElementById('studyMyNote')||{}).value || ''; studyNoteEditing = false; saveMark({ note: nv.trim() }); return true; }
+    if(t.closest('[data-study-note-delete]')){ studyNoteEditing = false; saveMark({ note: '' }); return true; }
+    var jbtn = t.closest('[data-study-journal]');
+    if(jbtn){
+      if(!state.user) return true;
+      var jtxt = ((document.getElementById('studyMyNote')||{}).value || '').trim();
+      var jref = studyRefLabel(bibleBook, bibleChapter, studyVerse) + ' (' + bibleTranslationLabel() + ')';
+      var jverse = verseTextIn(bibleTranslation, bibleBook, bibleChapter, studyVerse) || '';
+      jbtn.disabled = true;
+      addJournalEntry(state.user.uid, jref + ' — “' + jverse + '”' + (jtxt ? ('\n\n' + jtxt) : ''), null)
+        .then(function(){ jbtn.disabled = false; showToast(stl('Added to your journal (Growth → Journal).','Naidagdag sa iyong journal.')); if(jtxt){ studyNoteEditing = false; saveMark({ note: jtxt }); } })
+        .catch(function(err){ jbtn.disabled = false; showToast(stl('Couldn’t save to your journal — try again.','Hindi na-save — subukang muli.') + describeError(err)); });
+      return true;
+    }
+    if(t.closest('[data-study-listen]')){ speakText(studyRefLabel(bibleBook, bibleChapter, studyVerse) + '. ' + (verseTextIn(bibleTranslation, bibleBook, bibleChapter, studyVerse) || '')); return true; }
+    if(t.closest('[data-study-listen-chapter]')){
+      var vs = bibleVerseEntries(bibleBook, bibleChapter).map(function(x){ return cleanVerseText(x.text); }).join(' ');
+      speakText(bibleDisplayBookName(bibleBook) + ' ' + bibleChapter + '. ' + vs); return true;
+    }
+    if(t.closest('[data-study-listen-stop]')){ try{ window.speechSynthesis.cancel(); }catch(err){} return true; }
+    if(t.closest('[data-study-memorize]')){ studyMemorizeLevel = studyMemorizeLevel > 0 ? 0 : 1; studyRevealed = {}; patchStudyPanelIfOpen(); return true; }
+    var shareBtn = t.closest('[data-study-share]');
+    if(shareBtn){ shareVerseToFellowship(shareBtn); return true; }
+    if(t.closest('[data-study-pastor-toggle]')){ studyPastorEditing = !studyPastorEditing; patchStudyPanelIfOpen(); var pt = document.getElementById('studyPastorNote'); if(pt) pt.focus(); return true; }
+    var psave = t.closest('[data-study-pastor-save]');
+    if(psave){
+      var txt = ((document.getElementById('studyPastorNote')||{}).value || '').trim();
+      if(!txt){ showToast(stl('Write the note first.','Isulat muna ang tala.')); return true; }
+      psave.disabled = true;
+      addVerseNote({ churchId: state.profile.churchId, book: bibleBook, chapter: bibleChapter, verse: studyVerse, text: txt, authorName: currentDisplayName() || '' })
+        .then(function(){ studyPastorEditing = false; patchStudyPanelIfOpen(); showToast(stl('Pastor’s note posted for your church.','Na-post ang tala para sa iyong iglesia.')); })
+        .catch(function(err){ psave.disabled = false; showToast(stl('Couldn’t post the note — try again.','Hindi na-post — subukang muli.') + describeError(err)); });
+      return true;
+    }
+    var pdel = t.closest('[data-study-pastor-delete]');
+    if(pdel){
+      if(pdel.getAttribute('data-confirm') !== '1'){ pdel.setAttribute('data-confirm','1'); pdel.textContent = stl('TAP AGAIN TO DELETE','I-TAP MULI PARA BURAHIN'); return true; }
+      deleteVerseNote(pdel.getAttribute('data-study-pastor-delete')).catch(function(err){ showToast(stl('Couldn’t delete — try again.','Hindi nabura — subukang muli.') + describeError(err)); });
+      return true;
+    }
+    var dsum = t.closest('.study-discuss > summary');
+    if(dsum){ studyDiscussOpen = !dsum.parentElement.open; return true; }
+    var cpost = t.closest('[data-study-comment-post]');
+    if(cpost){
+      var ctext = ((document.getElementById('studyComment')||{}).value || '').trim();
+      if(!ctext){ showToast(stl('Write something first.','Sumulat muna.')); return true; }
+      cpost.disabled = true;
+      addVerseComment({ churchId: state.profile.churchId, book: bibleBook, chapter: bibleChapter, verse: studyVerse, text: ctext, authorName: currentDisplayName() || '' })
+        .then(function(){ var ta = document.getElementById('studyComment'); if(ta) ta.value = ''; cpost.disabled = false; patchStudyPanelIfOpen(); var ta2 = document.getElementById('studyComment'); if(ta2) ta2.value = ''; })
+        .catch(function(err){ cpost.disabled = false; showToast(stl('Couldn’t post — try again.','Hindi na-post — subukang muli.') + describeError(err)); });
+      return true;
+    }
+    var cdel = t.closest('[data-study-comment-delete]');
+    if(cdel){
+      if(cdel.getAttribute('data-confirm') !== '1'){ cdel.setAttribute('data-confirm','1'); cdel.textContent = stl('TAP AGAIN TO DELETE','I-TAP MULI PARA BURAHIN'); return true; }
+      deleteVerseComment(cdel.getAttribute('data-study-comment-delete')).catch(function(err){ showToast(stl('Couldn’t delete — try again.','Hindi nabura — subukang muli.') + describeError(err)); });
+      return true;
+    }
+    var go = t.closest('[data-study-goto]');
+    if(go){
+      var parts = go.getAttribute('data-study-goto').split('|');
+      bibleBook = parts[0]; bibleChapter = Number(parts[1]);
+      var gv = Number(parts[2]);
+      studyVerse = gv; studyDetailed = false; studyHenryShown = 6; studyNoteEditing = false; studyPastorEditing = false; studyMemorizeLevel = 0; studyChapterOverviewOpen = false;
+      render();
+      setTimeout(function(){ scrollToVerse(gv); }, 30);
+      return true;
+    }
+    var verseP = t.closest('[data-study-verse]');
+    if(verseP){ studyOpenVerse(Number(verseP.getAttribute('data-study-verse'))); return true; }
+    return false;
+  }
+
+  // "John 3:16", "Juan 3:16-18 (BSB)" -> {book, chapter, verse} using English
+  // or (when loaded) Tagalog book names. Used by the live-session study
+  // box and the host's STAGE STUDY NOTE button.
+  function parseStudyRef(ref){
+    var m = String(ref || '').match(/^(.+?)\s+(\d+):(\d+)/);
+    if(!m) return null;
+    var name = m[1].trim(), book = null;
+    if(STUDY_BOOKS.indexOf(name) >= 0) book = name;
+    else if(tagalogData && tagalogData.bookNamesTagalog){
+      Object.keys(tagalogData.bookNamesTagalog).forEach(function(k){ if(tagalogData.bookNamesTagalog[k] === name) book = k; });
+    }
+    if(!book && name === 'Song of Solomon') book = "Solomon's Song";
+    return book ? { book: book, chapter: Number(m[2]), verse: Number(m[3]) } : null;
+  }
+  // Short overview for one verse: Geneva note, else the opening of Matthew
+  // Henry's comment on its passage. Returns 'loading' while the chapter's
+  // study file is still on its way.
+  function studyOverviewFor(book, ch, v){
+    var data = loadStudyChapter(book, ch);
+    if(data === 'loading') return 'loading';
+    if(!data || data === 'error') return null;
+    var sec = studySectionFor(data, v);
+    var gen = data.geneva && data.geneva[String(v)];
+    var text = gen ? trimSentences(gen, 600) : (sec && sec.paras && sec.paras[0] ? trimSentences(sec.paras[0], 520) : '');
+    if(!text) return null;
+    return { title: sec ? sec.title : '', text: text, source: gen ? 'Geneva Bible notes (1599)' : 'Matthew Henry', data: data, section: sec };
+  }
+  // Live session: a congregant's phone shows a "STUDY THIS VERSE" box under
+  // the verse the host is presenting -- Jared's "follow along: member phones
+  // open the study of the verse on screen".
+  var sessionStudyOpen = false;
+  function renderSessionVerseStudy(ref){
+    var r = parseStudyRef(ref);
+    if(!r) return '';
+    var head = '<button type="button" class="study-chapter-toggle" id="sessionStudyToggle" aria-expanded="'+(sessionStudyOpen?'true':'false')+'">' +
+      '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg> ' + stl('STUDY THIS VERSE','PAG-ARALAN ANG TALATANG ITO') + '</span>' +
+      '<span class="study-chev'+(sessionStudyOpen?' open':'')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'+icon('chevron')+'</svg></span></button>';
+    if(!sessionStudyOpen) return '<div class="study-chapter" style="margin-top:12px;">' + head + '</div>';
+    var o = studyOverviewFor(r.book, r.chapter, r.verse);
+    var body;
+    if(o === 'loading') body = '<p class="hint">' + stl('Loading…','Naglo-load…') + '</p>';
+    else if(!o) body = '<p class="hint">' + stl('No study note for this verse.','Walang tala para sa talatang ito.') + '</p>';
+    else {
+      var words = (o.data.words && o.data.words[String(r.verse)]) || [];
+      body = (o.title ? '<p class="study-section-title">'+escapeHtml(o.title)+'</p>' : '') +
+        '<p class="study-para">'+escapeHtml(o.text)+'</p><p class="study-source">'+escapeHtml(o.source)+'</p>' +
+        (words.length ? '<p class="study-label">' + stl('WORD STUDY','PAG-AARAL NG SALITA') + '</p><p class="study-para">' + words.slice(0,5).map(function(w){ var he = STUDY_BOOKS.indexOf(r.book) < 39; return '<span lang="'+(he?'he':'grc')+'" dir="'+(he?'rtl':'ltr')+'">'+escapeHtml(w[0])+'</span> <strong>'+escapeHtml(w[1])+'</strong> — '+escapeHtml(w[4]); }).join(' &middot; ') + '</p>' : '') +
+        '<p class="hint">' + stl('Open Bible → tap the verse for the full study, highlights and notes.','Buksan ang Bible → i-tap ang talata para sa buong pag-aaral.') + '</p>';
+    }
+    return '<div class="study-chapter open" style="margin-top:12px;">' + head + '<div class="study-chapter-body">' + body + '</div></div>';
+  }
+
+  async function shareVerseToFellowship(btn){
+    if(!state.user) return;
+    var text = verseTextIn(bibleTranslation, bibleBook, bibleChapter, studyVerse) || '';
+    var ref = studyRefLabel(bibleBook, bibleChapter, studyVerse) + ' (' + bibleTranslationLabel() + ')';
+    var m = markFor(bibleBook, bibleChapter, studyVerse);
+    btn.disabled = true;
+    try{
+      await createPost({
+        authorUid: state.user.uid, authorName: currentDisplayName() || 'Someone',
+        kind: 'verse', verseRef: ref,
+        text: ('“' + text + '” — ' + ref + (m && m.note ? ('\n\n' + m.note) : '')).slice(0, 2000),
+        mediaUrl: null, mediaKind: null, mediaStoragePath: null
+      });
+      showToast(stl('Verse shared to Fellowship.','Naibahagi ang talata sa Fellowship.'));
+    }catch(e){ showToast(stl('Couldn’t share — try again.','Hindi naibahagi — subukang muli.') + describeError(e)); }
+    btn.disabled = false;
   }
 
   function renderDevotionals(){
@@ -7433,7 +8088,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         { title:'One shared library', desc:'Add a song once and every church on iWorship can find and sing it -- a hymnal that keeps growing on its own.' },
         { title:'Two ways to add a song', desc:'Paste in lyrics and let iWorship auto-detect verses/choruses, or build a song section by section by hand. CSV and ChordPro files import in bulk too.' },
         { title:'Sing Mode & Play Mode', desc:'Huge, simple lyrics for the congregation to follow along with; a musician’s view with live chords and tap-to-transpose for any key.' },
-        { title:'Scripture built right in', desc:'A complete Bible in English (King James Version) and Tagalog (Ang Dating Biblia, 1905) -- switch languages any time, in the Bible tab or live on stage.' },
+        { title:'Scripture built right in', desc:'A complete Bible in the King James Version, the easy-to-read Berean Standard Bible, and Tagalog (Ang Dating Biblia, 1905) -- switch any time, in the Bible tab or live on stage.' },
+        { title:'Study every verse', desc:'Tap any verse for a short overview, then a detailed study: classic Reformed commentary (Matthew Henry, Geneva notes), the key Greek and Hebrew words, cross references, people and places, and all three translations side by side. Pastors can add notes for their church, members can discuss a verse together, and everyone can highlight, bookmark, take private notes, listen, and practice memorizing.' },
         { title:'Daily Devotionals', desc:'A fresh Spurgeon "Morning and Evening" reading posts automatically every day, or browse any day of the year.' },
         { title:'Built for a real church team', desc:'A self-service Church Team Roster, role-based access from Senior Pastor down to Musician, and a Song Requests queue for anyone to suggest a hymn.' },
         { title:'Practice Mode', desc:'Chords and transpose like Play Mode, plus a built-in metronome and hands-free autoscroll so the team can rehearse at tempo.' },
@@ -8234,7 +8890,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return (
       '<div class="about-section-card">' +
         '<p class="about-section-title">Bible Reading Plan</p>' +
-        '<p class="about-section-intro">A structured read-through-the-Bible tracker &mdash; '+READING_PLAN.days.length+' days, in either KJV or Tagalog. A plan turns good intentions into a habit.</p>' +
+        '<p class="about-section-intro">A structured read-through-the-Bible tracker &mdash; '+READING_PLAN.days.length+' days, in KJV, easy-English BSB or Tagalog, with a study for every verse. A plan turns good intentions into a habit.</p>' +
         '<div style="display:flex;gap:24px;justify-content:center;margin:10px 0 22px;flex-wrap:wrap;">' +
           '<div style="text-align:center;"><p class="display" style="margin:0;font-size:32px;">'+streak.current+'</p><p class="hint">Day streak</p></div>' +
           '<div style="text-align:center;"><p class="display" style="margin:0;font-size:32px;">'+doneCount+'/'+READING_PLAN.days.length+'</p><p class="hint">Days read</p></div>' +
@@ -8243,7 +8899,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           '<p class="hint" style="margin:0 0 6px;">DAY '+dayNum+' OF '+READING_PLAN.days.length+'</p>' +
           '<p class="about-section-title" style="font-size:22px;">'+escapeHtml(readingLine)+'</p>' +
           '<div style="display:flex;flex-direction:column;gap:10px;align-items:center;margin-top:16px;">' +
-            '<button type="button" class="btn btn-ghost" id="rpOpenBibleBtn" style="width:100%;max-width:340px;">OPEN IN THE BIBLE</button>' +
+            '<button type="button" class="btn btn-ghost" id="rpOpenBibleBtn" style="width:100%;max-width:340px;">READ &amp; STUDY IN THE BIBLE</button>' +
             '<button type="button" class="btn'+(todayDone?'':' btn-primary')+'" id="rpMarkDoneBtn" style="width:100%;max-width:340px;">'+(todayDone?'COMPLETED ✓ (tap to un-mark)':'MARK TODAY’S READING DONE')+'</button>' +
           '</div>' +
           (!doneCount ? '<p class="hint" style="margin-top:14px;">Just getting started &mdash; every plan begins with day one.</p>' :
@@ -8260,6 +8916,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       if(!dayRefs.length) return;
       bibleBook = dayRefs[0].book;
       bibleChapter = dayRefs[0].chapter;
+      // Verse Study [2026-10-20]: open with the chapter overview showing, so
+      // the day's reading starts with Matthew Henry's summary of it.
+      studyVerse = null; studyDetailed = false; studyChapterOverviewOpen = true;
       loadActiveBibleData();
       state.view = 'bible'; render(); window.scrollTo(0,0);
     });
@@ -10450,7 +11109,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
           '<button type="button" class="btn btn-ghost btn-sm" data-add-block="body" data-slide-idx="'+i+'">ADD TEXT</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" data-add-block="bullets" data-slide-idx="'+i+'">ADD BULLET LIST</button>' +
           '<label class="btn btn-ghost btn-sm" style="cursor:pointer;">ADD IMAGE<input type="file" accept="image/*" data-add-image="'+i+'" style="display:none;"></label>' +
-          '<button type="button" class="btn btn-ghost btn-sm" data-toggle-verse-row="'+i+'">ADD VERSE ('+(bibleTranslation==='tl'?'TAGALOG':'KJV')+')</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-toggle-verse-row="'+i+'">ADD VERSE ('+(bibleTranslation==='tl'?'TAGALOG':bibleTranslationLabel())+')</button>' +
         '</div>' +
         (sermonEditVerseRowOpenIdx === i ?
           ('<div class="verse-insert-row">' +
@@ -12802,6 +13461,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     return '<div class="session-card">' +
       '<p class="control-label uc" style="margin-bottom:10px;">Present a Bible Verse</p>' +
       bibleTranslationSwitcher('hostVerse') +
+      renderHostStudyNoteRow() +
       (recentVerses.length ?
         ('<p class="hint" style="margin:0 0 8px;">RECENTLY SHOWN</p>' +
           '<div class="now-live-jump-row" style="margin-bottom:14px;">' +
@@ -12930,8 +13590,30 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     '';
   }
 
+  // Verse Study [2026-10-20]: once a verse is staged in the preview, the
+  // host can stage its short study note as the next slide (same 'verse'
+  // content type, so it flows through Preview/GO LIVE, the projector and
+  // every phone exactly like a verse does).
+  function renderHostStudyNoteRow(){
+    if(!hostPreview || hostPreview.type !== 'verse' || / \u2014 Study note$/.test(hostPreview.verseRef || '')) return '';
+    var r = parseStudyRef(hostPreview.verseRef);
+    if(!r) return '';
+    loadStudyChapter(r.book, r.chapter); // warm it so the first tap usually works
+    return '<div class="study-host-row"><span class="hint">Staged: '+escapeHtml(hostPreview.verseRef)+'</span>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="hostStageStudyNoteBtn">STAGE ITS STUDY NOTE</button></div>';
+  }
   function attachVersePickerHandlers(){
     attachBibleTranslationSwitcherHandlers('hostVerse');
+    const stageNoteBtn = document.getElementById('hostStageStudyNoteBtn');
+    if(stageNoteBtn && !stageNoteBtn.dataset.wired) stageNoteBtn.dataset.wired = '1';
+    if(stageNoteBtn && stageNoteBtn.dataset.wired === '1') { stageNoteBtn.dataset.wired = '2'; stageNoteBtn.addEventListener('click', function(){
+      const r = hostPreview && parseStudyRef(hostPreview.verseRef);
+      if(!r) return;
+      const o = studyOverviewFor(r.book, r.chapter, r.verse);
+      if(o === 'loading'){ showToast('Loading the study note &mdash; tap again in a moment.'); return; }
+      if(!o){ showToast('No study note for this verse.'); return; }
+      presentVerse(r.book + ' ' + r.chapter + ':' + r.verse + ' \u2014 Study note', (o.title ? (o.title + ' ') : '') + o.text + ' (' + o.source + ')');
+    }); }
     const input = document.getElementById('hostVerseRefInput');
     if(input) input.addEventListener('input', function(e){
       hostVerseRefInput = e.target.value;
@@ -14569,7 +15251,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       ) : content.type==='verse' ? (
         content.verseText ? (
           '<div class="slide-card">' + sermonLinesAsCardHtml(verseAsSlide(content.verseRef, content.verseText, content.verseSegments)) + '</div>' +
-          '<p class="slide-progress">SCRIPTURE</p>'
+          '<p class="slide-progress">SCRIPTURE</p>' +
+          (/ \u2014 Study note$/.test(content.verseRef || '') ? '' : renderSessionVerseStudy(content.verseRef))
         ) : '<div class="slide-card"><p class="lyric-line" style="color:var(--ink-soft);">Waiting for the host to present a verse&hellip;</p></div>'
       ) : content.type==='media' ? (
         // Media/AVP [2026-09-06]: a congregant's own phone shows media
@@ -14615,6 +15298,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
 
     attachChatHandlers(code);
 
+    const sessionStudyToggle = document.getElementById('sessionStudyToggle');
+    if(sessionStudyToggle) sessionStudyToggle.addEventListener('click', function(){ sessionStudyOpen = !sessionStudyOpen; render(); });
     document.getElementById('leaveSessionBtn').addEventListener('click', function(){
       stopRoomWatch();
       stopChatWatch();
@@ -16483,6 +17168,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
             ' <span class="hint">&middot; '+postAge(p.createdAt)+(p.repostOf?' &middot; reposted':'')+'</span></p>' +
           (isDevotional ? ('<p class="devotional-tag">DAILY DEVOTIONAL'+((p.devotionalTitle||p.devotionalRef) ?
             (' &middot; '+escapeHtml(p.devotionalTitle||'')+(p.devotionalRef?(' ('+escapeHtml(p.devotionalRef)+')'):'')) : '')+'</p>') : '') +
+          (p.kind === 'verse' ? ('<p class="devotional-tag">SCRIPTURE'+(p.verseRef?(' &middot; '+escapeHtml(p.verseRef)):'')+'</p>') : '') +
           (p.text ? ('<p style="white-space:pre-wrap;margin-top:4px;">'+escapeHtml(p.text)+'</p>') : '') +
           renderPostMediaBlock(p.mediaUrl, p.mediaKind) +
           renderRepostQuote(p.repostOf) +

@@ -1956,3 +1956,66 @@ export function watchShortsFeed(callback) {
 // Trending (Explore/Discover) is computed client-side in app.js from
 // state.feedPosts -- see firestore-data-layer.js's matching comment for why
 // there's no separate watchTrendingPosts() query in either layer.
+
+// ============================================================ VERSE STUDY
+// [2026-10-20] Demo-mode mirror of the real layer's bibleMarks/{uid} and
+// verseNotes/{noteId} (see that file's matching comment).
+const LS_BIBLE_MARKS_PREFIX = 'iworship:local:bibleMarks:';
+const LS_VERSE_NOTES = 'iworship:local:verseNotes';
+export function watchBibleMarks(uid, callback) {
+  const fire = () => callback(readJSON(LS_BIBLE_MARKS_PREFIX + uid, []));
+  fire();
+  return onBroadcast('bibleMarks:' + uid, fire);
+}
+export async function setBibleMark(uid, mark) {
+  const key = LS_BIBLE_MARKS_PREFIX + uid;
+  const id = String(mark.book) + '|' + mark.chapter + '|' + mark.verse;
+  const list = readJSON(key, []).filter((m) => m.id !== id);
+  const empty = !mark.color && !mark.bookmarked && !(mark.note || '').trim();
+  if (!empty) {
+    list.push({ id: id, book: mark.book, chapter: Number(mark.chapter), verse: Number(mark.verse),
+      color: mark.color || null, bookmarked: !!mark.bookmarked, note: (mark.note || '').slice(0, 4000), updatedAt: Date.now() });
+  }
+  writeJSON(key, list);
+  broadcast('bibleMarks:' + uid);
+}
+export function watchVerseNotes(churchId, book, chapter, callback) {
+  const fire = () => callback(readJSON(LS_VERSE_NOTES, [])
+    .filter((n) => n.churchId === churchId && n.book === book && n.chapter === Number(chapter))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
+  fire();
+  return onBroadcast('verseNotes', fire);
+}
+export async function addVerseNote(note) {
+  const list = readJSON(LS_VERSE_NOTES, []);
+  list.push({ id: 'vnote-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    churchId: note.churchId, book: note.book, chapter: Number(note.chapter), verse: Number(note.verse),
+    text: String(note.text || '').slice(0, 4000), authorUid: currentUser()?.uid || null, authorName: note.authorName || '',
+    createdAt: Date.now() });
+  writeJSON(LS_VERSE_NOTES, list);
+  broadcast('verseNotes');
+}
+export async function deleteVerseNote(noteId) {
+  writeJSON(LS_VERSE_NOTES, readJSON(LS_VERSE_NOTES, []).filter((n) => n.id !== noteId));
+  broadcast('verseNotes');
+}
+const LS_VERSE_COMMENTS = 'iworship:local:verseComments';
+export function watchVerseComments(churchId, book, chapter, callback) {
+  const fire = () => callback(readJSON(LS_VERSE_COMMENTS, [])
+    .filter((n) => n.churchId === churchId && n.book === book && n.chapter === Number(chapter))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
+  fire();
+  return onBroadcast('verseComments', fire);
+}
+export async function addVerseComment(c) {
+  const list = readJSON(LS_VERSE_COMMENTS, []);
+  list.push({ id: 'vc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    churchId: c.churchId, book: c.book, chapter: Number(c.chapter), verse: Number(c.verse),
+    text: String(c.text || '').slice(0, 1000), authorUid: currentUser()?.uid || null, authorName: c.authorName || '', createdAt: Date.now() });
+  writeJSON(LS_VERSE_COMMENTS, list);
+  broadcast('verseComments');
+}
+export async function deleteVerseComment(id) {
+  writeJSON(LS_VERSE_COMMENTS, readJSON(LS_VERSE_COMMENTS, []).filter((n) => n.id !== id));
+  broadcast('verseComments');
+}

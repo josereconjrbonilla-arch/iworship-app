@@ -76,5 +76,11 @@ export const ICONS = {
     // nav entry needed a glyph nothing above already covered (users/flag/
     // gear are all spoken for elsewhere); a plain page-a-day calendar reads
     // clearly as "schedule" at a glance.
-    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/>'
+    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/>',
+    // Verse Study [2026-10-20]: bookmark, highlighter pen, share arrow, and
+    // a "memorize" brain-ish lightbulb for the study panel's action row.
+    bookmark:'<path d="M6 3h12v18l-6-4-6 4V3Z"/>',
+    pen:'<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/>',
+    share:'<path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
+    bulb:'<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3Z"/>'
   };

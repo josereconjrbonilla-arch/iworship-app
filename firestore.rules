@@ -592,6 +592,56 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
 
+    // ================================================== VERSE STUDY
+    // [2026-10-20] The tap-a-verse study panel in the Bible reader. The study
+    // CONTENT itself (Matthew Henry, Geneva notes, cross references) is static
+    // public-domain data served from /study/*.json -- no collection needed.
+    // Two small collections back the personal and church parts:
+    //
+    // bibleMarks/{uid}/marks/{markId}: one person's highlights, bookmarks and
+    // private notes -- strictly owner-only, same reasoning as
+    // readingPlanProgress/{uid} just above (what someone underlines or writes
+    // privately next to a verse is personal).
+    match /bibleMarks/{uid}/marks/{markId} {
+      allow read, delete: if isSignedIn() && request.auth.uid == uid;
+      allow create, update: if isSignedIn() && request.auth.uid == uid &&
+        request.resource.data.get('note', '') is string &&
+        request.resource.data.get('note', '').size() <= 4000;
+    }
+    // verseNotes/{noteId}: a pastor's note on a verse, shown first in the
+    // study panel to everyone in THAT pastor's church. Only a Senior Pastor
+    // or Pastor may write one, and only for their own church (Admins may
+    // write for their own church too). Read needs sign-in; the app filters
+    // by the reader's own churchId. Author (or an Admin) may delete.
+    match /verseNotes/{noteId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        (isAdmin() || myRole() == 'seniorPastor' || myRole() == 'pastor') &&
+        request.resource.data.churchId is string &&
+        request.resource.data.churchId == myProfile().get('churchId', '') &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 4000;
+      allow delete: if isSignedIn() && (resource.data.authorUid == request.auth.uid || isAdmin());
+    }
+    // verseComments/{commentId}: a short church discussion under a verse.
+    // Any signed-in member may comment, only into their OWN church's thread;
+    // the author, that church's Senior Pastor/Pastor, or an Admin may delete.
+    match /verseComments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.churchId is string &&
+        request.resource.data.churchId == myProfile().get('churchId', '') &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 1000;
+      allow delete: if isSignedIn() && (
+        resource.data.authorUid == request.auth.uid || isAdmin() ||
+        ((myRole() == 'seniorPastor' || myRole() == 'pastor') && resource.data.churchId == myProfile().get('churchId', '')));
+    }
+
     // =============================================== TESTIMONY WALL
     // [2026-09-28, "BUILD THEM ALL NOW" batch 1] "A dedicated space,
     // separate from the general Fellowship feed, where members share how

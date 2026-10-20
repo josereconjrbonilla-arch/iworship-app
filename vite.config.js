@@ -79,7 +79,10 @@ export default defineConfig({
         // lazy-loaded chunk, and the default precache size limit (2MiB)
         // fails the build if it's left in the precache list. See src/sw.js
         // for the matching CacheFirst runtime-caching rule.
-        globIgnores: ['**/kjv-*.js', '**/tagalog-bible-*.js']
+        // bsb-*.js and study/** [2026-10-20]: the Berean Standard Bible chunk
+        // and the per-chapter Verse Study files are runtime-cached instead
+        // (see src/sw.js), never precached.
+        globIgnores: ['**/kjv-*.js', '**/tagalog-bible-*.js', '**/bsb-*.js', 'study/**']
       }
     })
   ],

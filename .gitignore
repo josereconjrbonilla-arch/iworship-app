@@ -18,3 +18,4 @@ dist.zip
 
 # Local Netlify folder
 .netlify
+.study-cache/

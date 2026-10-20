@@ -2019,3 +2019,42 @@ export async function deleteVerseComment(id) {
   writeJSON(LS_VERSE_COMMENTS, readJSON(LS_VERSE_COMMENTS, []).filter((n) => n.id !== id));
   broadcast('verseComments');
 }
+
+// ============================================================ SERMON NOTES
+// [2026-10-20] Demo-mode mirror of the real layer's sermonNotes/{noteId}.
+const LS_SERMON_NOTES = 'iworship:local:sermonNotes';
+function notesSorted(list) { return list.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)); }
+export async function createSermonNote(note) {
+  const list = readJSON(LS_SERMON_NOTES, []);
+  const id = 'snote-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  list.push({ ...note, id, sharedWithUids: note.sharedWithUids || [], createdAt: Date.now(), updatedAt: Date.now() });
+  writeJSON(LS_SERMON_NOTES, list);
+  broadcast('sermonNotes');
+  return id;
+}
+export async function updateSermonNote(id, patch) {
+  const list = readJSON(LS_SERMON_NOTES, []);
+  const i = list.findIndex((n) => n.id === id);
+  if (i < 0) throw new Error('not-found');
+  list[i] = { ...list[i], ...patch, updatedAt: Date.now() };
+  writeJSON(LS_SERMON_NOTES, list);
+  broadcast('sermonNotes');
+}
+export async function deleteSermonNote(id) {
+  writeJSON(LS_SERMON_NOTES, readJSON(LS_SERMON_NOTES, []).filter((n) => n.id !== id));
+  broadcast('sermonNotes');
+}
+export function watchSermonNote(id, callback) {
+  const fire = () => callback(readJSON(LS_SERMON_NOTES, []).find((n) => n.id === id) || null);
+  fire();
+  return onBroadcast('sermonNotes', fire);
+}
+function watchNotesWhere(pred, callback) {
+  const fire = () => callback(notesSorted(readJSON(LS_SERMON_NOTES, []).filter(pred)));
+  fire();
+  return onBroadcast('sermonNotes', fire);
+}
+export function watchMySermonNotes(uid, callback) { return watchNotesWhere((n) => n.ownerUid === uid, callback); }
+export function watchSermonNotesSharedWithMe(uid, callback) { return watchNotesWhere((n) => (n.sharedWithUids || []).includes(uid), callback); }
+export function watchChurchSermonNotes(churchId, callback) { return watchNotesWhere((n) => n.visibility === 'church' && n.churchId === churchId, callback); }
+export function watchPublicSermonNotes(callback) { return watchNotesWhere((n) => n.visibility === 'public', callback); }

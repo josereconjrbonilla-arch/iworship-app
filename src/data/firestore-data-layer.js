@@ -1969,3 +1969,44 @@ export async function addVerseComment(c) {
 export async function deleteVerseComment(id) {
   await deleteDoc(doc(db, 'verseComments', id));
 }
+
+// ============================================================ SERMON NOTES
+// [2026-10-20] A pastor's sermon outline / script / study guide -- see
+// firestore.rules' sermonNotes/{noteId} block and interface.md's "Sermon
+// Notes" section. visibility: 'private' | 'church' | 'public'; plus
+// sharedWithUids for specific people regardless of visibility.
+function sortByUpdated(list) { list.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt)); return list; }
+export async function createSermonNote(note) {
+  const ref = await addDoc(collection(db, 'sermonNotes'), {
+    ...note, sharedWithUids: note.sharedWithUids || [],
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  });
+  return ref.id;
+}
+export async function updateSermonNote(id, patch) {
+  await updateDoc(doc(db, 'sermonNotes', id), { ...patch, updatedAt: serverTimestamp() });
+}
+export async function deleteSermonNote(id) {
+  await deleteDoc(doc(db, 'sermonNotes', id));
+}
+export function watchSermonNote(id, callback) {
+  return onSnapshot(doc(db, 'sermonNotes', id), (snap) => {
+    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+  }, () => callback(null));
+}
+export function watchMySermonNotes(uid, callback) {
+  return onSnapshot(query(collection(db, 'sermonNotes'), where('ownerUid', '==', uid)),
+    (snap) => callback(sortByUpdated(snap.docs.map((d) => ({ id: d.id, ...d.data() })))), () => callback([]));
+}
+export function watchSermonNotesSharedWithMe(uid, callback) {
+  return onSnapshot(query(collection(db, 'sermonNotes'), where('sharedWithUids', 'array-contains', uid)),
+    (snap) => callback(sortByUpdated(snap.docs.map((d) => ({ id: d.id, ...d.data() })))), () => callback([]));
+}
+export function watchChurchSermonNotes(churchId, callback) {
+  return onSnapshot(query(collection(db, 'sermonNotes'), where('visibility', '==', 'church'), where('churchId', '==', churchId)),
+    (snap) => callback(sortByUpdated(snap.docs.map((d) => ({ id: d.id, ...d.data() })))), () => callback([]));
+}
+export function watchPublicSermonNotes(callback) {
+  return onSnapshot(query(collection(db, 'sermonNotes'), where('visibility', '==', 'public'), limit(200)),
+    (snap) => callback(sortByUpdated(snap.docs.map((d) => ({ id: d.id, ...d.data() })))), () => callback([]));
+}

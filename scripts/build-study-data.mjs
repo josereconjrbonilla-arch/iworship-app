@@ -114,7 +114,7 @@ async function buildWords(){
       let orig, tr, ctx, lemma, gloss, pos, lang, keep = true;
       if(greek){
         lang = 'G';
-        const om = c[1].match(/^(\S+?)([,.;:·]?)\s*\(([^)]*)\)/); if(!om) return;
+        const om = c[1].replace(/\u00B6/g,'').match(/^(\S+?)([,.;:·]?)\s*\(([^)]*)\)/); if(!om) return;
         // full verse: Nestle-Aland words (N), falling back to the KJV's Greek text (K) for verses NA omits
         const word = [om[1] + om[2], om[3]];
         if(/N/.test(m[4])) fv.n.push(word);

@@ -642,6 +642,45 @@ service cloud.firestore {
         ((myRole() == 'seniorPastor' || myRole() == 'pastor') && resource.data.churchId == myProfile().get('churchId', '')));
     }
 
+    // ================================================== SERMON NOTES
+    // [2026-10-20] A pastor's sermon outline / script / study guide built
+    // with the Bible open beside it. visibility: 'private' (owner + people
+    // they share with), 'church' (+ everyone in the owner's church), or
+    // 'public' (anyone, even signed out). sharedWithUids always grants read
+    // on top of visibility. Only roles that preach/lead may create one (same
+    // people who can host or post pastor notes); only the owner may edit or
+    // delete, except that someone it was shared with may remove themselves.
+    function canReadSermonNote(d) {
+      return d.get('visibility', 'private') == 'public' ||
+        (isSignedIn() && (
+          d.ownerUid == request.auth.uid ||
+          request.auth.uid in d.get('sharedWithUids', []) ||
+          (d.get('visibility', 'private') == 'church' && d.get('churchId', null) != null &&
+            d.get('churchId', null) == myProfile().get('churchId', ''))));
+    }
+    function canBuildSermonNotes() {
+      return hasFullAccess() || isEditor() ||
+        myRole() == 'seniorPastor' || myRole() == 'pastor' || myRole() == 'editor' ||
+        myRole() == 'musicDirector' || myRole() == 'individualPremium';
+    }
+    function validSermonNote(d) {
+      return d.ownerUid == request.auth.uid &&
+        d.get('visibility', 'private') in ['private', 'church', 'public'] &&
+        d.get('title', '') is string && d.get('title', '').size() <= 200 &&
+        d.get('blocks', []) is list && d.get('blocks', []).size() <= 400 &&
+        d.get('sharedWithUids', []) is list && d.get('sharedWithUids', []).size() <= 200;
+    }
+    match /sermonNotes/{noteId} {
+      allow read: if canReadSermonNote(resource.data);
+      allow create: if isSignedIn() && canBuildSermonNotes() && validSermonNote(request.resource.data);
+      allow update: if isSignedIn() && (
+        (resource.data.ownerUid == request.auth.uid && validSermonNote(request.resource.data)) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedWithUids', 'updatedAt']) &&
+          request.auth.uid in resource.data.get('sharedWithUids', []) &&
+          !(request.auth.uid in request.resource.data.get('sharedWithUids', []))));
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
     // =============================================== TESTIMONY WALL
     // [2026-09-28, "BUILD THEM ALL NOW" batch 1] "A dedicated space,
     // separate from the general Fellowship feed, where members share how

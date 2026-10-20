@@ -2913,5 +2913,98 @@ body.stage-page .appfoot{ display:none; }
   .mem-blank{ border:none; border-bottom:2px dashed var(--wine); background:var(--wine-tint); color:var(--wine-ink); border-radius:4px; padding:0 4px; font:inherit; cursor:pointer; }
   .mem-blank span{ letter-spacing:.08em; opacity:.6; }
 
+  /* Bible prominence + Sermon Notes [2026-10-20] */
+  .verse-study-link{ display:block; margin:12px auto 0; border:none; background:none; color:var(--wine); font-weight:800; font-size:.78rem; letter-spacing:.06em; cursor:pointer; }
+  .landing-bible-card{ border:1px solid var(--border); border-radius:18px; background:var(--surface); padding:16px; margin:0 0 22px; box-shadow:var(--shadow); }
+  .landing-bible-head{ display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+  .landing-bible-icon{ flex:none; width:46px; height:46px; border-radius:12px; background:var(--wine); color:var(--gold-tint); display:flex; align-items:center; justify-content:center; }
+  .landing-bible-icon svg{ width:26px; height:26px; }
+  .landing-bible-title{ margin:0; font-weight:800; font-size:1.15rem; }
+  .landing-bible-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .landing-bible-actions .btn{ flex:1 1 auto; }
+  .bible-notes-btn{ margin:0 0 14px; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .bible-notes-btn svg{ width:18px; height:18px; }
+  .bible-return-link{ display:inline-block; margin:0 0 8px; font-weight:800; }
+  .bottom-tab span{ white-space:nowrap; }
+  @media (max-width: 380px){ .bottom-tab span{ font-size:.55rem; letter-spacing:.02em; } .bottom-tab svg{ width:21px; height:21px; } }
+
+  .sn-tabs{ flex-wrap:wrap; }
+  .sn-templates{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:8px; }
+  .sn-template{ text-align:left; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--ink); padding:10px 12px; cursor:pointer; display:flex; flex-direction:column; gap:3px; font:inherit; }
+  .sn-template:hover{ border-color:var(--wine); }
+  .sn-template-name{ font-weight:800; }
+  .sn-card{ display:flex; flex-direction:column; gap:3px; width:100%; text-align:left; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--ink); padding:12px 14px; margin:0 0 8px; cursor:pointer; font:inherit; }
+  .sn-card:hover{ border-color:var(--wine); }
+  .sn-card-title{ font-weight:800; font-size:1.05rem; }
+  .sn-card-meta{ color:var(--ink-soft); font-size:.9rem; }
+  .sn-card-tags{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:2px; }
+  .sn-vis{ display:inline-block; font-size:.62rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--border); border-radius:999px; padding:1px 8px; color:var(--ink-soft); }
+  .sn-vis-public{ border-color:var(--pine); color:var(--pine); }
+  .sn-vis-church{ border-color:var(--gold); color:var(--gold-strong); }
+  .sn-view{ max-width:760px; margin:0 auto; }
+  .sn-v-eyebrow{ color:var(--ink-soft); font-size:.8rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin:0; }
+  .sn-v-title{ margin:4px 0 6px; font-size:1.9rem; line-height:1.2; }
+  .sn-v-meta{ color:var(--ink-soft); margin:0 0 10px; }
+  .sn-actions{ display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 16px; }
+  .sn-v-body{ line-height:1.7; }
+  .sn-v-heading{ margin:22px 0 8px; color:var(--wine); font-size:1.3rem; }
+  .sn-v-text{ margin:0 0 12px; }
+  .sn-v-label{ font-size:.66rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); margin:0 0 3px; }
+  .sn-k-illustration{ border-left:3px solid var(--gold); padding-left:10px; }
+  .sn-k-application, .sn-k-invitation{ border-left:3px solid var(--pine); padding-left:10px; }
+  .sn-k-prayer{ font-style:italic; }
+  .sn-k-speaker{ background:var(--gold-tint); border-radius:10px; padding:8px 10px; }
+  .sn-k-question{ border-left:3px solid var(--wine); padding-left:10px; }
+  .sn-v-scripture{ border:1px solid var(--border); border-left:4px solid var(--wine); border-radius:12px; padding:10px 12px; margin:0 0 12px; background:var(--surface); }
+  .sn-v-study{ border-left-color:var(--pine); background:var(--surface-2); }
+  .sn-v-verse{ margin:4px 0 8px; }
+  .sn-open-study{ display:inline-flex; align-items:center; gap:6px; }
+  .sn-open-study svg{ width:16px; height:16px; }
+  .sn-save-state{ margin-left:auto; color:var(--ink-soft); font-size:.8rem; }
+  .back-row{ display:flex; align-items:center; }
+  .sn-edit-top{ display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 10px; }
+  /* Desktop: outline and Bible side by side, each scrolling on its own, so
+     the Bible stays in view however long the outline gets. (The page's own
+     body is a scroll container, which makes position:sticky unreliable.) */
+  .sn-edit-grid{ display:grid; grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr); gap:18px; height:calc(100vh - 190px); min-height:420px; }
+  .sn-edit-grid .sn-edit-col{ overflow:auto; padding-right:6px; }
+  .sn-bible-side{ overflow:auto; border:1px solid var(--border); border-radius:14px; padding:12px; background:var(--surface); }
+  .sn-edit-grid .sn-addbar{ top:0; }
+  .sn-bible-inline{ border:1px solid var(--border); border-radius:14px; padding:12px; background:var(--surface); margin:0 0 12px; }
+  .sn-meta-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:0 10px; }
+  .sn-addbar{ display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 12px; position:sticky; top:0; z-index:5; background:var(--ground, var(--surface)); padding:6px 0; }
+  .sn-add-more{ appearance:auto; }
+  .sn-b{ border:1px solid var(--border); border-radius:12px; padding:8px 10px; margin:0 0 8px; background:var(--surface); }
+  .sn-b-focus{ border-color:var(--wine); box-shadow:0 0 0 1px var(--wine); }
+  .sn-b-head{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  .sn-b-label{ font-size:.64rem; font-weight:800; letter-spacing:.08em; color:var(--ink-soft); }
+  .sn-b-tools{ display:flex; gap:4px; }
+  .sn-b-tools .icon-btn-sm{ width:30px; height:30px; }
+  .sn-b-input{ width:100%; box-sizing:border-box; border:none; border-bottom:1px solid var(--border); background:none; color:var(--wine); font:inherit; font-size:1.15rem; font-weight:800; padding:6px 2px; }
+  .sn-b-area{ width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--ink); font:inherit; padding:8px; margin-top:4px; resize:vertical; line-height:1.6; }
+  .sn-b-heading{ border-left:4px solid var(--wine); }
+  .sn-b-scripture{ border-left:4px solid var(--pine); }
+  .sn-ref-preview{ border:1px solid var(--border); border-radius:10px; padding:8px 10px; margin:0 0 10px; }
+  .sn-insert-row{ display:flex; gap:6px; flex-wrap:wrap; }
+  .sn-verse-list{ display:flex; flex-direction:column; max-height:360px; overflow:auto; }
+  .sn-verse-row{ text-align:left; border:none; border-bottom:1px solid var(--border); background:none; color:var(--ink); padding:6px 2px; cursor:pointer; font:inherit; line-height:1.5; }
+  .sn-verse-row:hover{ background:var(--surface-2); }
+  .sn-browse summary{ cursor:pointer; font-weight:800; font-size:.75rem; letter-spacing:.06em; margin:4px 0 8px; }
+  .sn-preach-bar{ position:sticky; top:0; z-index:20; display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#111; color:#eee; padding:8px 10px; border-radius:0 0 12px 12px; }
+  .sn-preach-bar .btn{ color:#eee; border-color:#555; }
+  .sn-preach-timer{ font-size:1.4rem; font-weight:800; font-variant-numeric:tabular-nums; margin-left:auto; }
+  body.sn-preaching{ background:#000; }
+  body.sn-preaching main{ max-width:100%; }
+  .sn-preach{ color:#f4efe2; line-height:1.65; padding:16px 6px 120px; }
+  .sn-preach .sn-v-heading{ color:#f2c27b; }
+  .sn-preach .sn-v-scripture, .sn-preach .sn-v-study{ background:#1a1a1a; border-color:#333; }
+  .sn-preach .sn-k-speaker{ background:#3a3018; color:#f4efe2; }
+  .sn-preach .sn-v-label{ color:#bbb; }
+  @media print{
+    .topbar, .bottom-tabs, .sidebar-nav, .appfoot, .back-row, .no-print, .sn-open-study, .chat-dock, #toast{ display:none !important; }
+    main{ padding:0 !important; max-width:100% !important; }
+    .sn-v-scripture{ break-inside:avoid; }
+  }
+
   [hidden]{ display:none !important; }
 

@@ -58,6 +58,7 @@ export const {
   watchReadingPlanProgress, markReadingPlanDayDone,
   watchBibleMarks, setBibleMark, watchVerseNotes, addVerseNote, deleteVerseNote,
   watchVerseComments, addVerseComment, deleteVerseComment,
+  createSermonNote, updateSermonNote, deleteSermonNote, watchSermonNote, watchMySermonNotes, watchSermonNotesSharedWithMe, watchChurchSermonNotes, watchPublicSermonNotes,
   watchTestimonies, addTestimony, deleteTestimony,
   watchPublicPrayerRequests, watchMyPrayerRequests, addPrayerRequest,
   markPrayerRequestAnswered, setPrayerRequestPrivacy, deletePrayerRequest,

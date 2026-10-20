@@ -27,6 +27,7 @@ import {
   watchReadingPlanProgress, markReadingPlanDayDone,
   watchBibleMarks, setBibleMark, watchVerseNotes, addVerseNote, deleteVerseNote,
   watchVerseComments, addVerseComment, deleteVerseComment,
+  createSermonNote, updateSermonNote, deleteSermonNote, watchSermonNote, watchMySermonNotes, watchSermonNotesSharedWithMe, watchChurchSermonNotes, watchPublicSermonNotes,
   watchTestimonies, addTestimony, deleteTestimony,
   watchPublicPrayerRequests, watchMyPrayerRequests, addPrayerRequest,
   markPrayerRequestAnswered, setPrayerRequestPrivacy, deletePrayerRequest,
@@ -1474,6 +1475,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // only the arrays they close over need to exist this early.
   const HOST_VIEWS = ['host-hub','session-setup','session-host','session-join','session-projector','my-sessions','sermons','sermon-edit','media-library','programs','program-edit'];
   const MORE_VIEWS = ['settings','admin','song-request-queue'];
+  const BIBLE_VIEWS = ['bible','sermon-notes','sermon-note-edit','sermon-note-view'];
   const FELLOWSHIP_VIEWS = ['fellowship','profile-edit','profile-view','messages','dm-thread','group-chat-thread','shorts','explore','notifications'];
 
   // Reload-resume whitelist [2026-09-24, Jared: "when I refresh a page
@@ -2028,8 +2030,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   function renderBottomTabs(){
     const bar = document.getElementById('bottomTabs');
     if(!bar) return;
-    const active = state.view === 'spiritual-growth' ? 'growth' : (inFellowshipMode() ? 'fellowship' : (inHostMode() ? 'host' : (MORE_VIEWS.includes(state.view) ? 'more' : (state.view === 'list' || state.view === 'detail' || state.view === 'edit' || state.view === 'add' || state.view === 'bulk-add' ? 'hymnal' : null))));
-    [['tabHymnalBtn','hymnal'],['tabHostBtn','host'],['tabFellowshipBtn','fellowship'],['tabGrowthBtn','growth'],['tabMoreBtn','more']].forEach(function(pair){
+    const active = BIBLE_VIEWS.includes(state.view) ? 'bible' : state.view === 'spiritual-growth' ? 'growth' : (inFellowshipMode() ? 'fellowship' : (inHostMode() ? 'host' : (MORE_VIEWS.includes(state.view) ? 'more' : (state.view === 'list' || state.view === 'detail' || state.view === 'edit' || state.view === 'add' || state.view === 'bulk-add' ? 'hymnal' : null))));
+    [['tabHymnalBtn','hymnal'],['tabBibleBtn','bible'],['tabHostBtn','host'],['tabFellowshipBtn','fellowship'],['tabGrowthBtn','growth'],['tabMoreBtn','more']].forEach(function(pair){
       const btn = document.getElementById(pair[0]);
       if(btn) btn.classList.toggle('bottom-tab-active', active === pair[1]);
     });
@@ -2037,7 +2039,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     // -- same `active` value, just four targets instead of five (there's no
     // sidebar equivalent of the mobile MORE tab -- its contents are always
     // visible in the sidebar already, see renderSidebarExtra()).
-    [['sideHymnalBtn','hymnal'],['sideHostBtn','host'],['sideFellowshipBtn','fellowship'],['sideGrowthBtn','growth']].forEach(function(pair){
+    [['sideHymnalBtn','hymnal'],['sideBibleBtn','bible'],['sideHostBtn','host'],['sideFellowshipBtn','fellowship'],['sideGrowthBtn','growth']].forEach(function(pair){
       const btn = document.getElementById(pair[0]);
       if(btn) btn.classList.toggle('sidebar-item-active', active === pair[1]);
     });
@@ -2067,6 +2069,13 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(!state.user){ showToast('Sign in to use Spiritual Growth.'); state.view='landing'; render(); window.scrollTo(0,0); return; }
     openSpiritualGrowth();
   }
+  // Bible tab [2026-10-20] -- Jared: "make the bible part more prominent in
+  // the app. Had to scroll down to the bottom just to see it." Bible is now
+  // a primary tab (mobile bottom bar + desktop sidebar), and Sermon Notes
+  // lives under it.
+  function goBibleTab(){ bibleReturnTo = null; state.view='bible'; render(); window.scrollTo(0,0); }
+  document.getElementById('tabBibleBtn').addEventListener('click', goBibleTab);
+  document.getElementById('sideBibleBtn').addEventListener('click', goBibleTab);
   document.getElementById('tabHymnalBtn').addEventListener('click', goHymnalTab);
   document.getElementById('tabHostBtn').addEventListener('click', goHostTab);
   document.getElementById('tabFellowshipBtn').addEventListener('click', goFellowshipTab);
@@ -3531,6 +3540,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(state.view==='devotionals') return renderDevotionals();
     if(state.view==='about') return renderAbout();
     if(state.view==='spiritual-growth') return renderSpiritualGrowth();
+    if(snPreach && state.view !== 'sermon-note-view'){ snPreach = false; clearInterval(snPreachTimer); document.body.classList.remove('sn-preaching'); }
+    if(state.view==='sermon-notes') return renderSermonNotes();
+    if(state.view==='sermon-note-view') return renderSermonNoteView();
+    if(state.view==='sermon-note-edit') return renderSermonNoteEdit();
     if(state.view==='sermons') return renderSermons();
     if(state.view==='sermon-edit') return renderSermonEdit();
     if(state.view==='shared-sermon-link') return renderSharedSermonLink();
@@ -3792,9 +3805,61 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       '</div>' +
     '</div>';
   }
+  // Bible card [2026-10-20] -- right under the Verse of the Day, so the
+  // Bible is one tap from the home screen instead of at the very bottom.
+  function bibleLastRead(){
+    const v = safeGet('bibleLastRead', '');
+    const parts = v ? v.split('|') : [];
+    return (parts.length === 2 && STUDY_BOOKS.indexOf(parts[0]) >= 0) ? { book: parts[0], chapter: Number(parts[1]) } : null;
+  }
+  function renderLandingBibleCard(signedIn){
+    const last = bibleLastRead();
+    return '<div class="landing-bible-card">' +
+      '<div class="landing-bible-head"><span class="landing-bible-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18H7.5A1.5 1.5 0 0 1 6 19.5V3Z"/><path d="M6 18.5A1.5 1.5 0 0 1 7.5 17H18"/><path d="M12 6.5v6M9.5 8.8h5"/></svg></span>' +
+        '<div><p class="landing-bible-title">Bible &amp; Study</p><p class="hint" style="margin:0;">KJV, easy-English BSB and Tagalog &mdash; tap any verse for a study.</p></div></div>' +
+      '<div class="landing-bible-actions">' +
+        '<button type="button" class="btn btn-primary" id="landingOpenBibleBtn">'+(last ? ('CONTINUE: '+escapeHtml(last.book.toUpperCase())+' '+last.chapter) : 'OPEN THE BIBLE')+'</button>' +
+        (last ? '<button type="button" class="btn btn-ghost" id="landingBibleBooksBtn">ALL BOOKS</button>' : '') +
+        (signedIn ? '<button type="button" class="btn btn-ghost" id="landingSermonNotesBtn">SERMON NOTES</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+  function attachLandingBibleCardHandlers(verse){
+    const open = document.getElementById('landingOpenBibleBtn');
+    if(open) open.addEventListener('click', function(){
+      const last = bibleLastRead();
+      if(last){ bibleBook = last.book; bibleChapter = last.chapter; bibleQuery = ''; studyVerse = null; }
+      state.view = 'bible'; render(); window.scrollTo(0,0);
+    });
+    const books = document.getElementById('landingBibleBooksBtn');
+    if(books) books.addEventListener('click', function(){ bibleBook = null; bibleChapter = null; bibleQuery = ''; state.view = 'bible'; render(); window.scrollTo(0,0); });
+    const notes = document.getElementById('landingSermonNotesBtn');
+    if(notes) notes.addEventListener('click', function(){ openSermonNotes(); });
+    const votd = document.getElementById('studyVotdBtn');
+    if(votd) votd.addEventListener('click', function(){
+      const r = parseStudyRef(verse.ref);
+      if(!r){ state.view = 'bible'; bibleQuery = verse.ref; render(); return; }
+      openBibleStudyAt(r.book, r.chapter, r.verse);
+    });
+  }
+  // Opens the Bible at a verse with its study panel showing. `returnTo`
+  // (optional) adds a "BACK TO ..." link above the chapter -- used by
+  // Sermon Notes' OPEN STUDY buttons so a pastor can hop into a study and
+  // straight back to their outline.
+  var bibleReturnTo = null; // {label, go: function}
+  function openBibleStudyAt(book, chapter, verse, returnTo){
+    bibleBook = book; bibleChapter = Number(chapter); bibleQuery = '';
+    studyVerse = verse ? Number(verse) : null; studyDetailed = false; studyChapterOverviewOpen = false;
+    studyNoteEditing = false; studyPastorEditing = false; studyMemorizeLevel = 0;
+    bibleReturnTo = returnTo || null;
+    state.view = 'bible'; render();
+    setTimeout(function(){ if(verse) scrollToVerse(Number(verse)); else window.scrollTo(0,0); }, 40);
+  }
+
   function renderLandingHubSection(signedIn){
     return renderLandingHubGroup('Bible & Teaching', [
       { id:'openBibleBtn', icon:'book', label:'Bible & Study', show:true },
+      { id:'openSermonNotesBtn', icon:'pen', label:'Sermon Notes', show:signedIn },
       { id:'openDevotionalsBtn', icon:'sun', label:'Daily Devotionals', show:true },
       { id:'openSermonArchiveBtn', icon:'mic', label:'Sermon Archive', show:true }
     ]) +
@@ -3884,7 +3949,10 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p class="verse-text">&ldquo;'+verse.text+'&rdquo;</p>' +
         '<p class="verse-ref">'+verse.ref+' &middot; KJV</p>' +
         '<span class="verse-tag pill '+(verse.tag==='challenging'?'pill-wine':'pill-pine')+'">'+verse.tag.toUpperCase()+'</span>' +
+        '<button type="button" class="verse-study-link" id="studyVotdBtn">STUDY THIS VERSE &rarr;</button>' +
       '</div>' +
+
+      renderLandingBibleCard(signedIn) +
 
       renderNotifPromptBanner(signedIn, needsProfileSetup) +
 
@@ -4020,6 +4088,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     if(switchBtn) switchBtn.addEventListener('click', async function(){ await signOutUser(); });
     document.getElementById('plansBtn').addEventListener('click', function(){ state.view='plans'; render(); window.scrollTo(0,0); });
     document.getElementById('openBibleBtn').addEventListener('click', function(){ state.view='bible'; render(); window.scrollTo(0,0); });
+    attachLandingBibleCardHandlers(verse);
+    const hubNotes = document.getElementById('openSermonNotesBtn');
+    if(hubNotes) hubNotes.addEventListener('click', openSermonNotes);
     document.getElementById('openDevotionalsBtn').addEventListener('click', function(){ state.view='devotionals'; render(); window.scrollTo(0,0); });
     document.getElementById('openEventsCalendarBtn').addEventListener('click', openEventsCalendar);
     document.getElementById('openSermonArchiveBtn').addEventListener('click', openSermonArchive);
@@ -6956,6 +7027,12 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // [2026-10-20], so just that panel is patched in place -- a full repaint
   // would jump the reader away from the verse they're studying.
   function onBibleDataLoaded(which){
+    if(state.view === 'sermon-note-edit'){
+      // never a full repaint here -- the pastor may be mid-sentence
+      var panel = document.getElementById('snBiblePanel');
+      if(panel && which === bibleTranslation){ panel.innerHTML = renderSnBiblePanel(); attachSnBiblePanelOnly(); }
+      return;
+    }
     if(which === bibleTranslation){ if(viewNeedsKjvRerender()) render(); return; }
     if(state.view === 'bible') patchStudyPanelIfOpen();
   }
@@ -7218,6 +7295,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         '<p class="landing-sub">'+(bibleTranslation==='tl' ? 'Ang Dating Biblia (1905) &mdash; public domain Tagalog translation, built in.' : (bibleTranslation==='bsb' ? 'Berean Standard Bible &mdash; easy-to-read modern English, public domain, built in.' : 'King James Version (1769) &mdash; public domain, built in.'))+' Tap any verse to study it.'+'</p>' +
       '</div>' +
       bibleTranslationSwitcher('bible') +
+      (state.user ? '<button type="button" class="btn btn-ghost btn-block bible-notes-btn" id="bibleSermonNotesBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('pen')+'</svg> SERMON NOTES &mdash; '+(canBuildSermonNotes() ? 'BUILD &amp; SHARE OUTLINES' : 'READ YOUR CHURCH’S OUTLINES')+'</button>' : '') +
       (!data ?
         '<p class="hint" style="text-align:center;">'+(activeBibleLoading() ? 'Loading the Bible text&hellip;' : 'Couldn&rsquo;t load the Bible text. Please try again.')+'</p>'
         :
@@ -7226,12 +7304,15 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       );
 
     document.getElementById('bibleBackBtn').addEventListener('click', function(){
+      if(bibleReturnTo){ const r = bibleReturnTo; bibleReturnTo = null; r.go(); return; }
       if(bibleQuery){ bibleQuery=''; render(); window.scrollTo(0,0); return; }
       if(bibleChapter){ bibleChapter=null; render(); window.scrollTo(0,0); return; }
       if(bibleBook){ bibleBook=null; render(); window.scrollTo(0,0); return; }
       state.view='landing'; render(); window.scrollTo(0,0);
     });
     attachBibleTranslationSwitcherHandlers('bible');
+    const bsnBtn = document.getElementById('bibleSermonNotesBtn');
+    if(bsnBtn) bsnBtn.addEventListener('click', openSermonNotes);
     ensureBibleMarksWatch();
     ensureVerseNotesWatch();
 
@@ -7272,6 +7353,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         if(gv) setTimeout(function(){ scrollToVerse(gv); }, 30); else window.scrollTo(0,0);
         return;
       }
+      if(e.target.closest('[data-bible-return]') && bibleReturnTo){ const r = bibleReturnTo; bibleReturnTo = null; r.go(); return; }
       if(bibleBook && bibleChapter && !bibleQuery.trim()) handleStudyClick(e);
     });
     document.getElementById('bibleBody').addEventListener('keydown', function(e){
@@ -7323,7 +7405,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       const idx = chapters.indexOf(bibleChapter);
       const prevCh = idx > 0 ? chapters[idx-1] : null;
       const nextCh = idx < chapters.length-1 ? chapters[idx+1] : null;
-      return '<p class="bible-crumb">'+escapeHtml(bibleDisplayBookName(bibleBook))+'</p>' +
+      safeSet('bibleLastRead', bibleBook + '|' + bibleChapter);
+      return (bibleReturnTo ? '<button type="button" class="link-btn bible-return-link" data-bible-return="1">&larr; '+escapeHtml(bibleReturnTo.label)+'</button>' : '') +
+        '<p class="bible-crumb">'+escapeHtml(bibleDisplayBookName(bibleBook))+'</p>' +
         '<div class="study-chapter-head"><h2 style="margin:0;">'+escapeHtml(bibleDisplayBookName(bibleBook))+' '+bibleChapter+'</h2>' +
           '<span class="study-chapter-listen"><button type="button" class="study-act" data-study-listen-chapter="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('volumeOn')+'</svg><span>'+stl('LISTEN','PAKINGGAN')+'</span></button>' +
           '<button type="button" class="study-act" data-study-listen-stop="1" aria-label="'+stl('Stop listening','Itigil')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('pause')+'</svg><span>'+stl('STOP','ITIGIL')+'</span></button></span></div>' +
@@ -7901,7 +7985,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
     else if(tagalogData && tagalogData.bookNamesTagalog){
       Object.keys(tagalogData.bookNamesTagalog).forEach(function(k){ if(tagalogData.bookNamesTagalog[k] === name) book = k; });
     }
-    if(!book && name === 'Song of Solomon') book = "Solomon's Song";
+    if(!book && (name === 'Song of Solomon' || name === 'Song of Songs')) book = "Solomon's Song";
+    if(!book && name === 'Psalm') book = 'Psalms';
+    if(!book && name === 'Revelation of John') book = 'Revelation';
     return book ? { book: book, chapter: Number(m[2]), verse: Number(m[3]) } : null;
   }
   // Short overview for one verse: Geneva note, else the opening of Matthew
@@ -7958,6 +8044,668 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       showToast(stl('Verse shared to Fellowship.','Naibahagi ang talata sa Fellowship.'));
     }catch(e){ showToast(stl('Couldn’t share — try again.','Hindi naibahagi — subukang muli.') + describeError(e)); }
     btn.disabled = false;
+  }
+
+  /* ============ SERMON NOTES [2026-10-20] ============
+     Jared: "what if pastors could build their sermon outlines and scripts
+     inside the app? ... make the bible accessible inside it, and add a
+     feature where pastors can add a segment of the study or the bible verse
+     itself where the study can be opened using a button in the sermon
+     outline. Give them an option to make their sermon outlines public or
+     private or shareable to other members." + "add some more features that
+     you think is helpful in that context".
+     Separate from the existing Sermons screen (slide PRESENTATIONS) -- this
+     is the pastor's own outline/script/study guide. Extras: templates,
+     section types (point/script/illustration/application/prayer/transition
+     + speaker-only notes), preaching-time estimate, Preach Mode (big text,
+     timer, keeps the screen awake), Make Slides (turns the outline into a
+     Sermons presentation), Save a copy, Print/PDF, copy link (?note=<id>),
+     series + search, autosave. Data: sermonNotes/{noteId} (see
+     firestore.rules). */
+  var SN_TEXT_KINDS = {
+    script: 'Script', intro: 'Introduction', illustration: 'Illustration', application: 'Application',
+    transition: 'Transition', prayer: 'Prayer', conclusion: 'Conclusion', invitation: 'Invitation',
+    question: 'Discussion question', speaker: 'Speaker note (only you see this)'
+  };
+  var SN_STUDY_PARTS = { overview: 'Study overview', commentary: 'Commentary', words: 'Word study', xrefs: 'Cross references', context: 'Context' };
+  var SN_TEMPLATES = [
+    { key:'blank', name:'Blank', desc:'Start from nothing.', blocks:[] },
+    { key:'expository', name:'Expository', desc:'Walk through one passage: context, big idea, points, application.', blocks:[
+      ['intro','Open with a question, story or need the passage answers.'],
+      ['heading','Context'], ['script','Where this passage sits and what was happening.'],
+      ['heading','Big idea'], ['script','The one sentence you want people to remember.'],
+      ['heading','1. '], ['script',''], ['illustration',''], ['application',''],
+      ['heading','2. '], ['script',''], ['application',''],
+      ['heading','3. '], ['script',''], ['application',''],
+      ['conclusion',''], ['invitation',''], ['prayer','']
+    ]},
+    { key:'topical', name:'Three-point topical', desc:'A theme with three points, each backed by Scripture.', blocks:[
+      ['intro',''], ['heading','1. '], ['script',''], ['heading','2. '], ['script',''], ['heading','3. '], ['script',''], ['conclusion',''], ['prayer','']
+    ]},
+    { key:'devotional', name:'Short devotional', desc:'A 5–10 minute talk: one verse, one thought, one step.', blocks:[
+      ['heading','Read'], ['heading','Reflect'], ['script',''], ['heading','Respond'], ['application',''], ['prayer','']
+    ]},
+    { key:'smallgroup', name:'Small-group guide', desc:'Read, discuss, apply, pray — for Bible studies and cell groups.', blocks:[
+      ['heading','Read together'], ['heading','Discuss'], ['question',''], ['question',''], ['question',''],
+      ['heading','Apply this week'], ['application',''], ['heading','Pray'], ['prayer','']
+    ]}
+  ];
+  var sermonNotesTab = 'mine';           // mine | shared | church | public
+  var sermonNotesQuery = '';
+  var sermonNotesMine = [], sermonNotesShared = [], sermonNotesChurch = [], sermonNotesPublic = [];
+  var sermonNotesUnsubs = [];
+  var sermonNotesWatchKey = null;
+  var sermonNotesPicking = false;        // template chooser open
+  var snId = null;                       // note open in view/edit
+  var snDoc = null;                      // live doc (view)
+  var snUnsub = null;
+  var snDraft = null;                    // editor's local copy
+  var snSaveTimer = null, snSaving = false, snDirty = false, snSaveError = '';
+  var snFocusIdx = null;                 // block to insert after
+  var snBibleOpen = false;
+  var snBibleRef = '';
+  var snBibleBrowseBook = null, snBibleBrowseChapter = null;
+  var snShareOpen = false, snShareQuery = '';
+  var snDeleteConfirm = false;
+  var snPreach = false, snPreachSize = 1.25, snPreachStart = null, snPreachTimer = null, snWakeLock = null;
+
+  function canBuildSermonNotes(){
+    if(!state.user) return false;
+    if(hasFullAccess() || state.isEditor) return true;
+    return ['seniorPastor','pastor','editor','musicDirector','individualPremium'].includes(myRole());
+  }
+  function snNewId(){ return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  // Template guidance goes in `hint` (shown as the empty box's placeholder),
+  // never in the text itself -- so it isn't counted, saved as content, or
+  // shown to readers.
+  function snBlock(type, text){
+    if(type === 'heading') return { id: snNewId(), type: 'heading', text: text || '' };
+    return { id: snNewId(), type: 'text', kind: type, text: '', hint: text || '' };
+  }
+  function snIsOwner(n){ return !!(n && state.user && n.ownerUid === state.user.uid); }
+  function snWordCount(n){
+    var w = 0;
+    (n.blocks || []).forEach(function(b){
+      if(b.type === 'text' && b.kind === 'speaker') return;
+      var t = b.type === 'scripture' ? b.verseText : (b.type === 'study' ? '' : b.text);
+      w += String(t || '').trim().split(/\s+/).filter(Boolean).length;
+    });
+    return w;
+  }
+  function snMinutes(n){ return Math.max(1, Math.round(snWordCount(n) / 130)); } // ~130 spoken words a minute
+  function snVisibilityLabel(v){ return v === 'public' ? 'Public' : (v === 'church' ? 'My church' : 'Private'); }
+  function snLink(id){ return window.location.origin + window.location.pathname + '?note=' + encodeURIComponent(id); }
+
+  function stopSermonNotesWatches(){ sermonNotesUnsubs.forEach(function(u){ try{ u(); }catch(e){} }); sermonNotesUnsubs = []; sermonNotesWatchKey = null; }
+  function startSermonNotesWatches(){
+    var uid = state.user ? state.user.uid : null;
+    var church = state.profile && state.profile.churchId;
+    var key = (uid || '-') + '|' + (church || '-');
+    if(key === sermonNotesWatchKey) return;
+    stopSermonNotesWatches(); sermonNotesWatchKey = key;
+    function rr(){ if(state.view === 'sermon-notes') render(); }
+    sermonNotesUnsubs.push(watchPublicSermonNotes(function(l){ sermonNotesPublic = l || []; rr(); }));
+    if(uid){
+      sermonNotesUnsubs.push(watchMySermonNotes(uid, function(l){ sermonNotesMine = l || []; rr(); }));
+      sermonNotesUnsubs.push(watchSermonNotesSharedWithMe(uid, function(l){ sermonNotesShared = l || []; rr(); }));
+    }
+    if(uid && church) sermonNotesUnsubs.push(watchChurchSermonNotes(church, function(l){ sermonNotesChurch = l || []; rr(); }));
+  }
+  function openSermonNotes(){
+    if(!state.user){ showToast('Sign in to use Sermon Notes.'); }
+    startSermonNotesWatches();
+    if(state.user) startDirectoryWatch();
+    if(!canBuildSermonNotes() && sermonNotesTab === 'mine') sermonNotesTab = 'church';
+    sermonNotesPicking = false;
+    state.view = 'sermon-notes'; render(); window.scrollTo(0,0);
+  }
+  function watchOpenNote(id){
+    if(snUnsub){ try{ snUnsub(); }catch(e){} snUnsub = null; }
+    snId = id; snDoc = undefined;
+    snUnsub = watchSermonNote(id, function(n){
+      snDoc = n;
+      if(state.view === 'sermon-note-view') render();
+    });
+  }
+  function openSermonNote(id){
+    watchOpenNote(id);
+    snShareOpen = false; snDeleteConfirm = false; snPreach = false;
+    if(state.user) startDirectoryWatch();
+    state.view = 'sermon-note-view'; render(); window.scrollTo(0,0);
+  }
+  function openSermonNoteEditor(note){
+    snId = note.id;
+    snDraft = JSON.parse(JSON.stringify(note));
+    snDraft.blocks = snDraft.blocks || [];
+    snDirty = false; snSaveError = ''; snFocusIdx = null; snShareOpen = false;
+    loadActiveBibleData();
+    state.view = 'sermon-note-edit'; render(); window.scrollTo(0,0);
+  }
+  async function createSermonNoteFromTemplate(tpl, base){
+    if(!canBuildSermonNotes()){ showToast('Only pastors and ministry leaders can build sermon notes.'); return; }
+    var blocks = base ? JSON.parse(JSON.stringify(base.blocks || [])).filter(function(b){ return !(b.type === 'text' && b.kind === 'speaker'); }).map(function(b){ b.id = snNewId(); return b; })
+      : tpl.blocks.map(function(x){ return snBlock(x[0], x[1]); });
+    var note = {
+      title: base ? ('Copy of ' + (base.title || 'sermon')).slice(0, 200) : '',
+      mainRef: base ? (base.mainRef || '') : '', series: base ? (base.series || '') : '', datePreached: '',
+      visibility: 'private', churchId: (state.profile && state.profile.churchId) || null,
+      ownerUid: state.user.uid, ownerName: currentDisplayName() || '',
+      template: base ? (base.template || 'blank') : tpl.key, blocks: blocks,
+      copiedFrom: base ? { id: base.id, title: base.title || '', ownerName: base.ownerName || '' } : null
+    };
+    try{
+      var id = await createSermonNote(note);
+      note.id = id;
+      openSermonNoteEditor(note);
+      if(base) showToast('Saved a copy to your Sermon Notes.');
+    }catch(e){ showToast('Couldn’t create the sermon notes — try again.' + describeError(e)); }
+  }
+
+  // ---------- list screen ----------
+  function renderSermonNotes(){
+    startSermonNotesWatches();
+    var canBuild = canBuildSermonNotes();
+    var lists = { mine: sermonNotesMine, shared: sermonNotesShared, church: sermonNotesChurch, public: sermonNotesPublic };
+    var q = sermonNotesQuery.trim().toLowerCase();
+    var list = (lists[sermonNotesTab] || []).filter(function(n){
+      if(sermonNotesTab !== 'mine' && state.user && n.ownerUid === state.user.uid) return false;
+      if(!q) return true;
+      return [n.title, n.series, n.mainRef, n.ownerName].join(' ').toLowerCase().indexOf(q) >= 0;
+    });
+    var tabs = [['mine','MINE'],['shared','SHARED WITH ME'],['church','MY CHURCH'],['public','PUBLIC']].filter(function(t){
+      if(t[0] === 'mine') return canBuild;
+      if(t[0] === 'shared' || t[0] === 'church') return !!state.user;
+      return true;
+    });
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="snBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+      '<div class="landing-hero"><p class="display landing-greeting">Sermon Notes</p>' +
+        '<p class="landing-sub">Outlines, scripts and study guides, built with the Bible and its study notes right beside you.</p></div>' +
+      (canBuild ? (sermonNotesPicking ? renderSnTemplatePicker() : '<button type="button" class="btn btn-primary btn-block" id="snNewBtn">+ NEW SERMON NOTES</button>') : '') +
+      '<div class="content-segmented sn-tabs" style="margin:16px 0 12px;">' + tabs.map(function(t){
+        return '<button type="button" class="segment-btn'+(sermonNotesTab===t[0]?' active':'')+'" data-sn-tab="'+t[0]+'">'+t[1]+'</button>';
+      }).join('') + '</div>' +
+      '<div class="field"><div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+        '<input type="text" id="snSearch" placeholder="Search title, series, passage or pastor" value="'+escapeAttr(sermonNotesQuery)+'" autocomplete="off"></div></div>' +
+      '<div id="snList">' + renderSnList(list) + '</div>';
+    document.getElementById('snBackBtn').addEventListener('click', function(){ state.view = 'bible'; render(); window.scrollTo(0,0); });
+    var nb = document.getElementById('snNewBtn'); if(nb) nb.addEventListener('click', function(){ sermonNotesPicking = true; render(); });
+    document.querySelectorAll('[data-sn-tab]').forEach(function(b){ b.addEventListener('click', function(){ sermonNotesTab = b.getAttribute('data-sn-tab'); render(); }); });
+    var sb = document.getElementById('snSearch');
+    sb.addEventListener('input', function(){ sermonNotesQuery = sb.value; render(); });
+    main.querySelectorAll('[data-sn-open]').forEach(function(b){ b.addEventListener('click', function(){ openSermonNote(b.getAttribute('data-sn-open')); }); });
+    main.querySelectorAll('[data-sn-template]').forEach(function(b){ b.addEventListener('click', function(){
+      var t = SN_TEMPLATES.find(function(x){ return x.key === b.getAttribute('data-sn-template'); });
+      b.disabled = true; createSermonNoteFromTemplate(t);
+    }); });
+    var cancel = document.getElementById('snTplCancel'); if(cancel) cancel.addEventListener('click', function(){ sermonNotesPicking = false; render(); });
+  }
+  function renderSnTemplatePicker(){
+    return '<div class="session-card"><p class="control-label uc" style="margin-bottom:10px;">Start from a template</p><div class="sn-templates">' +
+      SN_TEMPLATES.map(function(t){
+        return '<button type="button" class="sn-template" data-sn-template="'+t.key+'"><span class="sn-template-name">'+escapeHtml(t.name)+'</span><span class="hint">'+escapeHtml(t.desc)+'</span></button>';
+      }).join('') + '</div><button type="button" class="switch-account" id="snTplCancel" style="margin-top:10px;">CANCEL</button></div>';
+  }
+  function renderSnList(list){
+    var empty = {
+      mine: 'No sermon notes yet. Tap + NEW SERMON NOTES to start one.',
+      shared: 'Nothing shared with you yet.',
+      church: (state.profile && state.profile.churchId) ? 'No sermon notes shared with your church yet.' : 'Join a church (ask your pastor or an Admin) to see your church’s sermon notes.',
+      public: 'No public sermon notes yet.'
+    }[sermonNotesTab];
+    if(!list.length) return '<p class="hint" style="text-align:center;padding:20px 0;">'+(sermonNotesQuery.trim() ? 'No matches.' : empty)+'</p>';
+    return list.map(function(n){
+      return '<button type="button" class="sn-card" data-sn-open="'+escapeAttr(n.id)+'">' +
+        '<span class="sn-card-title">'+escapeHtml(n.title || 'Untitled sermon')+'</span>' +
+        '<span class="sn-card-meta">' + [n.mainRef, n.series ? ('Series: ' + n.series) : '', (sermonNotesTab !== 'mine' && n.ownerName) ? ('by ' + n.ownerName) : ''].filter(Boolean).map(escapeHtml).join(' &middot; ') + '</span>' +
+        '<span class="sn-card-tags"><span class="sn-vis sn-vis-'+escapeAttr(n.visibility||'private')+'">'+snVisibilityLabel(n.visibility)+'</span>' +
+          ((n.sharedWithUids||[]).length && snIsOwner(n) ? '<span class="sn-vis">Shared with '+n.sharedWithUids.length+'</span>' : '') +
+          '<span class="hint">~'+snMinutes(n)+' min</span></span>' +
+      '</button>';
+    }).join('');
+  }
+
+  // ---------- read view ----------
+  function renderSnBlockView(b, owner, idx){
+    if(b.type === 'heading') return '<h3 class="sn-v-heading">'+escapeHtml(b.text || '')+'</h3>';
+    if(b.type === 'text'){
+      if(b.kind === 'speaker' && !owner) return '';
+      if(!String(b.text || '').trim()) return '';
+      return '<div class="sn-v-text sn-k-'+escapeAttr(b.kind||'script')+'">' + (b.kind && b.kind !== 'script' ? '<p class="sn-v-label">'+escapeHtml(SN_TEXT_KINDS[b.kind] || '')+'</p>' : '') +
+        '<p style="white-space:pre-wrap;margin:0;">'+escapeHtml(b.text)+'</p></div>';
+    }
+    if(b.type === 'scripture' || b.type === 'study'){
+      return '<div class="sn-v-scripture'+(b.type==='study'?' sn-v-study':'')+'">' +
+        '<p class="sn-v-label">'+(b.type === 'study' ? escapeHtml((SN_STUDY_PARTS[b.part] || 'Study') + ' · ') : '')+escapeHtml(b.refLabel || '')+(b.translation ? ' <span class="study-trans">'+escapeHtml(b.translation)+'</span>' : '')+'</p>' +
+        '<p class="sn-v-verse" style="white-space:pre-wrap;">'+escapeHtml(b.type === 'study' ? (b.studyText || '') : (b.verseText || ''))+'</p>' +
+        (b.type === 'study' && b.source ? '<p class="study-source">'+escapeHtml(b.source)+'</p>' : '') +
+        '<button type="button" class="btn btn-ghost btn-sm sn-open-study" data-sn-study="'+idx+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon('book')+'</svg> OPEN STUDY</button>' +
+      '</div>';
+    }
+    return '';
+  }
+  function snOpenStudyFromBlock(n, b, backView){
+    if(!b || !b.book) return;
+    var noteId = n.id;
+    openBibleStudyAt(b.book, b.chapter, b.verse, { label: 'BACK TO ' + (n.title || 'SERMON NOTES').toUpperCase(), go: function(){
+      if(backView === 'sermon-note-edit' && snDraft && snDraft.id === noteId){ state.view = 'sermon-note-edit'; render(); }
+      else openSermonNote(noteId);
+    }});
+    if(b.type === 'study' && b.part && b.part !== 'overview'){ studyDetailed = true; patchStudyPanelIfOpen(); setTimeout(function(){ scrollToVerse(Number(b.verse)); }, 60); }
+  }
+  function renderSermonNoteView(){
+    var n = snDoc;
+    if(n === undefined){ main.innerHTML = '<p class="hint" style="text-align:center;padding:60px 20px;">Loading&hellip;</p>'; return; }
+    if(!n){
+      main.innerHTML = '<div class="back-row"><button class="back-btn" id="snvBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>BACK</button></div>' +
+        '<p class="hint" style="text-align:center;padding:40px 20px;">'+(state.user ? 'These sermon notes don’t exist or aren’t shared with you.' : 'Sign in to open these sermon notes (they may be private or shared with a church).')+'</p>';
+      document.getElementById('snvBackBtn').addEventListener('click', openSermonNotes);
+      return;
+    }
+    var owner = snIsOwner(n);
+    var blocks = (n.blocks || []);
+    if(snPreach) return renderSnPreach(n, owner);
+    var canBuild = canBuildSermonNotes();
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="snvBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>SERMON NOTES</button></div>' +
+      '<div class="sn-view">' +
+        '<p class="sn-v-eyebrow">'+escapeHtml([n.series ? ('Series: ' + n.series) : '', n.datePreached].filter(Boolean).join(' · '))+'</p>' +
+        '<h1 class="sn-v-title">'+escapeHtml(n.title || 'Untitled sermon')+'</h1>' +
+        '<p class="sn-v-meta">'+[n.mainRef ? escapeHtml(n.mainRef) : '', n.ownerName ? ('by ' + escapeHtml(n.ownerName)) : '', '~' + snMinutes(n) + ' min', '<span class="sn-vis sn-vis-'+escapeAttr(n.visibility||'private')+'">'+snVisibilityLabel(n.visibility)+'</span>'].filter(Boolean).join(' &middot; ')+'</p>' +
+        (n.copiedFrom ? '<p class="hint">Based on &ldquo;'+escapeHtml(n.copiedFrom.title||'')+'&rdquo;'+(n.copiedFrom.ownerName?(' by '+escapeHtml(n.copiedFrom.ownerName)):'')+'</p>' : '') +
+        '<div class="sn-actions no-print">' +
+          (owner ? '<button type="button" class="btn btn-primary btn-sm" id="snEditBtn">EDIT</button>' : '') +
+          '<button type="button" class="btn btn-ghost btn-sm" id="snPreachBtn">PREACH MODE</button>' +
+          (owner ? '<button type="button" class="btn btn-ghost btn-sm" id="snShareBtn">SHARE</button>' : '') +
+          '<button type="button" class="btn btn-ghost btn-sm" id="snCopyLinkBtn">COPY LINK</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="snPrintBtn">PRINT / PDF</button>' +
+          ((owner && canHost()) ? '<button type="button" class="btn btn-ghost btn-sm" id="snSlidesBtn">MAKE SLIDES</button>' : '') +
+          ((!owner && canBuild) ? '<button type="button" class="btn btn-ghost btn-sm" id="snCopyBtn">SAVE A COPY</button>' : '') +
+          ((!owner && state.user && (n.sharedWithUids||[]).includes(state.user.uid)) ? '<button type="button" class="btn btn-ghost btn-sm" id="snLeaveBtn">REMOVE FROM MY LIST</button>' : '') +
+          (owner ? '<button type="button" class="btn btn-ghost btn-sm" id="snDeleteBtn">'+(snDeleteConfirm ? 'TAP AGAIN TO DELETE' : 'DELETE')+'</button>' : '') +
+        '</div>' +
+        (owner && snShareOpen ? '<div class="session-card no-print">' + renderSnSharePanel(n) + '</div>' : '') +
+        '<div class="sn-v-body">' + (blocks.length ? blocks.map(function(b, i){ return renderSnBlockView(b, owner, i); }).join('') : '<p class="hint">Nothing here yet.</p>') + '</div>' +
+      '</div>';
+    attachSnViewHandlers(n, owner);
+  }
+  function attachSnViewHandlers(n, owner){
+    document.getElementById('snvBackBtn').addEventListener('click', openSermonNotes);
+    var on = function(id, fn){ var el = document.getElementById(id); if(el) el.addEventListener('click', fn); };
+    on('snEditBtn', function(){ openSermonNoteEditor(n); });
+    on('snPreachBtn', function(){ startPreachMode(); });
+    on('snShareBtn', function(){ snShareOpen = !snShareOpen; render(); });
+    on('snCopyLinkBtn', function(){ copyText(snLink(n.id)); showToast(n.visibility === 'private' ? 'Link copied. Only you and people you share with can open it.' : 'Link copied.'); });
+    on('snPrintBtn', function(){ window.print(); });
+    on('snSlidesBtn', function(){ makeSlidesFromNote(n); });
+    on('snCopyBtn', function(){ createSermonNoteFromTemplate(null, n); });
+    on('snLeaveBtn', function(){
+      updateSermonNote(n.id, { sharedWithUids: (n.sharedWithUids||[]).filter(function(u){ return u !== state.user.uid; }) })
+        .then(function(){ showToast('Removed from your list.'); openSermonNotes(); })
+        .catch(function(e){ showToast('Couldn’t remove — try again.' + describeError(e)); });
+    });
+    on('snDeleteBtn', function(){
+      if(!snDeleteConfirm){ snDeleteConfirm = true; render(); return; }
+      deleteSermonNote(n.id).then(function(){ showToast('Sermon notes deleted.'); snDeleteConfirm = false; openSermonNotes(); })
+        .catch(function(e){ showToast('Couldn’t delete — try again.' + describeError(e)); });
+    });
+    main.querySelectorAll('[data-sn-study]').forEach(function(b){ b.addEventListener('click', function(){
+      snOpenStudyFromBlock(n, (n.blocks||[])[Number(b.getAttribute('data-sn-study'))], 'sermon-note-view');
+    }); });
+    if(owner && snShareOpen) attachSnSharePanel(n, false);
+  }
+  function copyText(t){
+    try{ navigator.clipboard.writeText(t); }catch(e){
+      var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); }catch(e2){} ta.remove();
+    }
+  }
+
+  // ---------- share panel (visibility + specific people) ----------
+  function renderSnSharePanel(n){
+    var shared = n.sharedWithUids || [];
+    var hasChurch = !!(state.profile && state.profile.churchId);
+    var q = snShareQuery.trim(), ql = q.toLowerCase();
+    var matches = q ? state.directory.filter(function(u){
+      if(u.uid === n.ownerUid || shared.includes(u.uid)) return false;
+      return u.uid === q || (u.displayName||'').toLowerCase().includes(ql) || (u.churchName||'').toLowerCase().includes(ql);
+    }).slice(0, 8) : [];
+    return '<p class="control-label uc" style="margin-bottom:8px;">Who can see this</p>' +
+      '<div class="content-segmented" style="margin-bottom:6px;">' +
+        [['private','PRIVATE'],['church','MY CHURCH'],['public','PUBLIC']].map(function(v){
+          return '<button type="button" class="segment-btn'+((n.visibility||'private')===v[0]?' active':'')+'" data-sn-vis="'+v[0]+'"'+((v[0]==='church' && !hasChurch)?' disabled title="Join a church first"':'')+'>'+v[1]+'</button>';
+        }).join('') + '</div>' +
+      '<p class="hint" style="margin:0 0 12px;">' + ({ private: 'Only you, plus anyone you add below.', church: 'Everyone in your church (and anyone you add below).', public: 'Anyone with the app or the link, even signed out.' })[n.visibility || 'private'] + ' Speaker notes are always visible to you only.</p>' +
+      '<p class="control-label uc" style="margin-bottom:8px;">Share with specific people</p>' +
+      (shared.length ? ('<ul class="setlist-items">' + shared.map(function(uid){
+        var p = state.directory.find(function(d){ return d.uid === uid; });
+        return '<li class="setlist-item"><span class="setlist-title">'+(p ? (escapeHtml(p.displayName||'(no name set)')+(p.churchName?' <span class="hint">&middot; '+escapeHtml(p.churchName)+'</span>':'')) : '<code>'+escapeHtml(uid)+'</code>')+'</span>' +
+          '<span class="setlist-controls"><button type="button" class="icon-btn-sm" data-sn-unshare="'+escapeAttr(uid)+'" aria-label="Remove access" style="width:auto;padding:0 8px;">&times;</button></span></li>';
+      }).join('') + '</ul>') : '<p class="hint">Not shared with anyone yet.</p>') +
+      '<div class="field" style="margin-top:8px;"><div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+icon('search')+'</svg>' +
+        '<input type="text" id="snShareSearch" placeholder="Find by Account ID, name or church" value="'+escapeAttr(snShareQuery)+'" autocomplete="off"></div></div>' +
+      (q ? (matches.length ? ('<ul class="setlist-items">' + matches.map(function(u){
+        return '<li class="setlist-item"><span class="setlist-title">'+escapeHtml(u.displayName||'(no name set)')+(u.churchName?' <span class="hint">&middot; '+escapeHtml(u.churchName)+'</span>':'')+'</span>' +
+          '<span class="setlist-controls"><button type="button" class="icon-btn-sm" data-sn-share="'+escapeAttr(u.uid)+'" style="width:auto;padding:0 8px;">SHARE</button></span></li>';
+      }).join('') + '</ul>') : '<p class="hint">No matching accounts &mdash; try their exact Account ID, or copy the link instead.</p>') : '');
+  }
+  function attachSnSharePanel(n, inEditor){
+    function apply(patch, msg){
+      if(inEditor){ Object.assign(snDraft, patch); snScheduleSave(true); render(); if(msg) showToast(msg); return; }
+      updateSermonNote(n.id, patch).then(function(){ if(msg) showToast(msg); }).catch(function(e){ showToast('Couldn’t update sharing — try again.' + describeError(e)); });
+    }
+    main.querySelectorAll('[data-sn-vis]').forEach(function(b){ b.addEventListener('click', function(){
+      var v = b.getAttribute('data-sn-vis');
+      apply({ visibility: v, churchId: (state.profile && state.profile.churchId) || null }, 'Now ' + snVisibilityLabel(v).toLowerCase() + '.');
+    }); });
+    main.querySelectorAll('[data-sn-share]').forEach(function(b){ b.addEventListener('click', function(){
+      snShareQuery = '';
+      apply({ sharedWithUids: (n.sharedWithUids||[]).concat([b.getAttribute('data-sn-share')]) }, 'Shared.');
+    }); });
+    main.querySelectorAll('[data-sn-unshare]').forEach(function(b){ b.addEventListener('click', function(){
+      var uid = b.getAttribute('data-sn-unshare');
+      apply({ sharedWithUids: (n.sharedWithUids||[]).filter(function(u){ return u !== uid; }) }, 'Access removed.');
+    }); });
+    var s = document.getElementById('snShareSearch');
+    if(s) s.addEventListener('input', function(){ snShareQuery = s.value; render(); });
+  }
+
+  // ---------- preach mode ----------
+  function startPreachMode(){
+    snPreach = true; snPreachStart = Date.now();
+    try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l){ snWakeLock = l; }).catch(function(){}); }catch(e){}
+    clearInterval(snPreachTimer);
+    snPreachTimer = setInterval(function(){ var el = document.getElementById('snTimer'); if(el && snPreachStart) el.textContent = snFmtTime(Date.now() - snPreachStart); else if(!el) { clearInterval(snPreachTimer); } }, 1000);
+    document.body.classList.add('sn-preaching');
+    render(); window.scrollTo(0,0);
+  }
+  function stopPreachMode(){
+    snPreach = false; clearInterval(snPreachTimer); snPreachTimer = null;
+    try{ if(snWakeLock) snWakeLock.release(); }catch(e){} snWakeLock = null;
+    document.body.classList.remove('sn-preaching');
+    render(); window.scrollTo(0,0);
+  }
+  function snFmtTime(ms){ var s = Math.floor(ms/1000); return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
+  function renderSnPreach(n, owner){
+    main.innerHTML =
+      '<div class="sn-preach-bar"><button type="button" class="btn btn-ghost btn-sm" id="snExitPreach">EXIT</button>' +
+        '<span class="sn-preach-timer" id="snTimer">'+snFmtTime(snPreachStart ? Date.now() - snPreachStart : 0)+'</span>' +
+        '<span class="hint">of ~'+snMinutes(n)+' min</span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="snTimerReset">RESET</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="snSmaller" aria-label="Smaller text">A&minus;</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="snBigger" aria-label="Bigger text">A+</button></div>' +
+      '<div class="sn-preach" style="font-size:'+snPreachSize+'rem;"><h1 class="sn-v-title">'+escapeHtml(n.title || '')+'</h1>' +
+        (n.blocks||[]).map(function(b, i){ return renderSnBlockView(b, owner, i); }).join('') + '</div>';
+    document.getElementById('snExitPreach').addEventListener('click', stopPreachMode);
+    document.getElementById('snTimerReset').addEventListener('click', function(){ snPreachStart = Date.now(); document.getElementById('snTimer').textContent = '0:00'; });
+    document.getElementById('snSmaller').addEventListener('click', function(){ snPreachSize = Math.max(.9, snPreachSize - .15); render(); });
+    document.getElementById('snBigger').addEventListener('click', function(){ snPreachSize = Math.min(2.6, snPreachSize + .15); render(); });
+    main.querySelectorAll('[data-sn-study]').forEach(function(b){ b.addEventListener('click', function(){
+      stopPreachMode(); snOpenStudyFromBlock(n, (n.blocks||[])[Number(b.getAttribute('data-sn-study'))], 'sermon-note-view');
+    }); });
+  }
+
+  // ---------- make slides (Sermons presentation) ----------
+  async function makeSlidesFromNote(n){
+    var slides = [];
+    var sid = function(){ return 'slide-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); };
+    slides.push({ id: sid(), template: 'title', heading: n.title || 'Sermon', subtitle: n.mainRef || '' });
+    var current = null;
+    (n.blocks || []).forEach(function(b){
+      if(b.type === 'heading'){ current = { id: sid(), template: 'point', heading: b.text || '', points: [] }; slides.push(current); }
+      else if(b.type === 'scripture'){ current = null; slides.push({ id: sid(), template: 'verse', heading: '', verseRef: (b.refLabel || '') + (b.translation ? (' ' + b.translation) : ''), verseText: b.verseText || '' }); }
+      else if(b.type === 'text' && current && ['application','question'].indexOf(b.kind) >= 0 && String(b.text||'').trim()){
+        current.points.push(String(b.text).split('\n')[0].slice(0, 140));
+      }
+    });
+    slides = slides.map(function(sl){ return migrateLegacySlideToBlocks(sl); });
+    try{
+      var id = await createSermon({ title: n.title || 'Sermon', speaker: n.ownerName || '', slides: slides,
+        createdByUid: state.user.uid, createdByName: (state.profile && state.profile.displayName) || 'Someone' });
+      showToast('Slides created — adjust them, then present from Host.');
+      openSermonEditor({ id: id, title: n.title || 'Sermon', speaker: n.ownerName || '', slides: slides }, 'sermons');
+    }catch(e){ showToast('Couldn’t make slides — try again.' + describeError(e)); }
+  }
+
+  // ---------- editor ----------
+  function snScheduleSave(now){
+    snDirty = true; snSaveError = '';
+    var st = document.getElementById('snSaveState'); if(st) st.textContent = 'Saving…';
+    clearTimeout(snSaveTimer);
+    snSaveTimer = setTimeout(snSaveNow, now ? 0 : 1200);
+  }
+  async function snSaveNow(){
+    if(!snDraft || !snDirty) return;
+    clearTimeout(snSaveTimer);
+    snDirty = false; snSaving = true;
+    var d = snDraft;
+    try{
+      await updateSermonNote(d.id, { title: d.title || '', mainRef: d.mainRef || '', series: d.series || '', datePreached: d.datePreached || '',
+        visibility: d.visibility || 'private', churchId: d.churchId || null, sharedWithUids: d.sharedWithUids || [], blocks: d.blocks || [] });
+      snSaving = false;
+      var st = document.getElementById('snSaveState'); if(st) st.textContent = snDirty ? 'Saving…' : 'All changes saved';
+    }catch(e){
+      snSaving = false; snDirty = true; snSaveError = 'Couldn’t save — check your connection.' + describeError(e);
+      var st2 = document.getElementById('snSaveState'); if(st2) st2.textContent = 'Not saved';
+      showToast(snSaveError);
+    }
+  }
+  function snInsertBlock(b){
+    var at = (snFocusIdx != null && snFocusIdx < snDraft.blocks.length) ? snFocusIdx + 1 : snDraft.blocks.length;
+    snDraft.blocks.splice(at, 0, b);
+    snFocusIdx = at;
+    snScheduleSave(true);
+    render();
+    setTimeout(function(){
+      var el = document.querySelector('[data-snb="'+at+'"]');
+      if(el){ el.scrollIntoView({ block: 'center', behavior: 'smooth' }); var inp = el.querySelector('textarea, input'); if(inp && !(b.type === 'scripture' || b.type === 'study')) inp.focus(); }
+    }, 30);
+  }
+  function renderSermonNoteEdit(){
+    var d = snDraft;
+    if(!d){ openSermonNotes(); return; }
+    var wide = window.innerWidth >= 1100;
+    var editor =
+      '<div class="sn-edit-col">' +
+        '<div class="field"><label for="snTitle">TITLE</label><input type="text" id="snTitle" maxlength="200" placeholder="e.g. Born Again" value="'+escapeAttr(d.title||'')+'"></div>' +
+        '<div class="sn-meta-row">' +
+          '<div class="field"><label for="snMainRef">MAIN PASSAGE</label><input type="text" id="snMainRef" placeholder="e.g. John 3:1-21" value="'+escapeAttr(d.mainRef||'')+'"></div>' +
+          '<div class="field"><label for="snSeries">SERIES <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="snSeries" placeholder="e.g. The Gospel of John" value="'+escapeAttr(d.series||'')+'"></div>' +
+          '<div class="field"><label for="snDate">DATE <span style="text-transform:none;font-weight:400;">(optional)</span></label><input type="text" id="snDate" placeholder="e.g. Oct 26, 2026" value="'+escapeAttr(d.datePreached||'')+'"></div>' +
+        '</div>' +
+        '<div class="sn-addbar">' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-sn-add="heading">+ POINT</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-sn-add="script">+ SCRIPT</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-sn-add="illustration">+ ILLUSTRATION</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-sn-add="application">+ APPLICATION</button>' +
+          '<select id="snAddMore" class="btn btn-ghost btn-sm sn-add-more" aria-label="Add another section type"><option value="">+ MORE&hellip;</option>' +
+            ['intro','transition','prayer','conclusion','invitation','question','speaker'].map(function(k){ return '<option value="'+k+'">'+escapeHtml(SN_TEXT_KINDS[k])+'</option>'; }).join('') + '</select>' +
+          (!wide ? '<button type="button" class="btn btn-primary btn-sm" id="snBibleToggle">'+(snBibleOpen ? 'HIDE BIBLE' : '+ BIBLE VERSE / STUDY')+'</button>' : '') +
+        '</div>' +
+        (!wide && snBibleOpen ? '<div class="sn-bible-inline" id="snBiblePanel">' + renderSnBiblePanel() + '</div>' : '') +
+        '<div class="sn-blocks">' + (d.blocks.length ? d.blocks.map(renderSnBlockEdit).join('') : '<p class="hint" style="text-align:center;padding:20px;">Add a point, some script, or a Bible verse to begin.</p>') + '</div>' +
+      '</div>';
+    var prevCol = document.querySelector('.sn-edit-grid .sn-edit-col'), prevSide = document.querySelector('.sn-bible-side');
+    var keepCol = prevCol ? prevCol.scrollTop : 0, keepSide = prevSide ? prevSide.scrollTop : 0;
+    main.innerHTML =
+      '<div class="back-row"><button class="back-btn" id="sneBackBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'+icon('back')+'</svg>DONE</button>' +
+        '<span class="sn-save-state" id="snSaveState">'+(snSaveError ? 'Not saved' : (snDirty || snSaving ? 'Saving…' : 'All changes saved'))+'</span></div>' +
+      '<div class="sn-edit-top"><span class="hint">~'+snMinutes(d)+' min &middot; '+snWordCount(d)+' words</span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="snEditShareBtn">'+snVisibilityLabel(d.visibility).toUpperCase()+((d.sharedWithUids||[]).length?(' + '+d.sharedWithUids.length):'')+' &middot; SHARING</button></div>' +
+      (snShareOpen ? '<div class="session-card">' + renderSnSharePanel(d) + '</div>' : '') +
+      (wide ? ('<div class="sn-edit-grid">' + editor + '<aside class="sn-bible-side" id="snBiblePanel">' + renderSnBiblePanel() + '</aside></div>') : editor);
+    var newCol = document.querySelector('.sn-edit-grid .sn-edit-col'), newSide = document.querySelector('.sn-bible-side');
+    if(newCol) newCol.scrollTop = keepCol;
+    if(newSide) newSide.scrollTop = keepSide;
+    attachSnEditHandlers();
+  }
+  function renderSnBlockEdit(b, i){
+    var tools = '<span class="sn-b-tools">' +
+      '<button type="button" class="icon-btn-sm" data-sn-up="'+i+'" aria-label="Move up"'+(i===0?' disabled':'')+'>&uarr;</button>' +
+      '<button type="button" class="icon-btn-sm" data-sn-down="'+i+'" aria-label="Move down"'+(i===snDraft.blocks.length-1?' disabled':'')+'>&darr;</button>' +
+      '<button type="button" class="icon-btn-sm" data-sn-del="'+i+'" aria-label="Remove">&times;</button></span>';
+    var cls = 'sn-b' + (snFocusIdx === i ? ' sn-b-focus' : '');
+    if(b.type === 'heading'){
+      return '<div class="'+cls+' sn-b-heading" data-snb="'+i+'"><div class="sn-b-head"><span class="sn-b-label">POINT</span>'+tools+'</div>' +
+        '<input type="text" class="sn-b-input" id="snb-'+escapeAttr(b.id)+'" data-sn-text="'+i+'" value="'+escapeAttr(b.text||'')+'" placeholder="Point / section heading"></div>';
+    }
+    if(b.type === 'text'){
+      return '<div class="'+cls+' sn-k-'+escapeAttr(b.kind||'script')+'" data-snb="'+i+'"><div class="sn-b-head"><span class="sn-b-label">'+escapeHtml((SN_TEXT_KINDS[b.kind]||'Script').toUpperCase())+'</span>'+tools+'</div>' +
+        '<textarea class="sn-b-area" id="snb-'+escapeAttr(b.id)+'" data-sn-text="'+i+'" rows="'+Math.min(14, Math.max(2, Math.ceil(String(b.text||'').length / 60) + 1))+'" placeholder="'+escapeAttr(b.hint || 'Write here…')+'">'+escapeHtml(b.text||'')+'</textarea></div>';
+    }
+    return '<div class="'+cls+' sn-b-scripture" data-snb="'+i+'"><div class="sn-b-head"><span class="sn-b-label">'+escapeHtml(b.type === 'study' ? (SN_STUDY_PARTS[b.part] || 'Study').toUpperCase() : 'SCRIPTURE')+' &middot; '+escapeHtml(b.refLabel||'')+(b.translation?(' <span class="study-trans">'+escapeHtml(b.translation)+'</span>'):'')+'</span>'+tools+'</div>' +
+      '<p class="sn-v-verse" style="white-space:pre-wrap;margin:6px 0;">'+escapeHtml(b.type === 'study' ? (b.studyText||'') : (b.verseText||''))+'</p>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-sn-edit-study="'+i+'">OPEN STUDY</button></div>';
+  }
+
+  // Bible panel inside the editor -- type a reference or browse, then insert
+  // the verse itself or a piece of its study.
+  function renderSnBiblePanel(){
+    var data = activeBibleData();
+    var head = '<p class="control-label uc" style="margin:0 0 8px;">Bible</p>' + bibleTranslationSwitcher('sn');
+    if(!data) return head + '<p class="hint">'+(activeBibleLoading() ? 'Loading the Bible&hellip;' : 'Couldn’t load the Bible.')+'</p>';
+    var found = snBibleRef.trim() ? parseVerseRef(snBibleRef) : null;
+    var out = head +
+      '<div class="field"><input type="text" id="snRefInput" placeholder="Type a reference, e.g. Romans 8:28-30" value="'+escapeAttr(snBibleRef)+'" autocomplete="off"></div>' +
+      '<div id="snRefResult">' + renderSnRefResult(found) + '</div>';
+    // browse
+    if(snBibleBrowseBook && snBibleBrowseChapter){
+      var verses = bibleVerseEntries(snBibleBrowseBook, snBibleBrowseChapter);
+      out += '<p class="bible-crumb"><button type="button" class="link-btn" data-snb-books="1">All books</button> &rsaquo; <button type="button" class="link-btn" data-snb-book="'+escapeAttr(snBibleBrowseBook)+'">'+escapeHtml(bibleDisplayBookName(snBibleBrowseBook))+'</button> &rsaquo; '+snBibleBrowseChapter+'</p>' +
+        '<div class="sn-verse-list">' + verses.map(function(v){
+          return '<button type="button" class="sn-verse-row" data-snb-verse="'+v.verse+'"><span class="bible-verse-num">'+v.verse+'</span> '+escapeHtml(cleanVerseText(v.text))+'</button>';
+        }).join('') + '</div>';
+    } else if(snBibleBrowseBook){
+      out += '<p class="bible-crumb"><button type="button" class="link-btn" data-snb-books="1">All books</button> &rsaquo; '+escapeHtml(bibleDisplayBookName(snBibleBrowseBook))+'</p>' +
+        '<div class="filter-row">' + bibleChapterNumbers(snBibleBrowseBook).map(function(c){ return '<button type="button" class="chip" data-snb-chapter="'+c+'">'+c+'</button>'; }).join('') + '</div>';
+    } else {
+      out += '<details class="sn-browse"><summary>BROWSE BOOKS</summary><div class="filter-row">' + data.books.map(function(b){ return '<button type="button" class="chip" data-snb-book="'+escapeAttr(b)+'">'+escapeHtml(bibleDisplayBookName(b))+'</button>'; }).join('') + '</div></details>';
+    }
+    return out;
+  }
+  function renderSnRefResult(found){
+    if(!snBibleRef.trim()) return '<p class="hint">Tip: tap any verse below to pick it, then add the verse or a part of its study to your outline.</p>';
+    if(!found) return '<p class="hint">Keep typing a full reference, like &ldquo;John 3:16&rdquo; or &ldquo;Psalm 23:1-6&rdquo;.</p>';
+    return '<div class="sn-ref-preview"><p class="sn-v-label">'+escapeHtml(found.refLabel)+' <span class="study-trans">'+bibleTranslationLabel()+'</span></p>' +
+      '<p class="sn-v-verse" style="white-space:pre-wrap;">'+escapeHtml(found.text)+'</p>' +
+      '<div class="sn-insert-row">' +
+        '<button type="button" class="btn btn-primary btn-sm" data-sn-insert="scripture">+ ADD VERSE</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sn-insert="overview">+ STUDY OVERVIEW</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sn-insert="commentary">+ COMMENTARY</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sn-insert="words">+ WORD STUDY</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sn-insert="xrefs">+ CROSS REFS</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sn-insert="context">+ CONTEXT</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sn-insert="open">OPEN FULL STUDY</button>' +
+      '</div></div>';
+  }
+  function getStudyChapter(book, ch){
+    var key = studyKey(book, ch);
+    var c = studyCache[key];
+    if(c && c !== 'loading' && c !== 'error') return Promise.resolve(c);
+    return fetch('/study/' + key + '.json?v=' + STUDY_DATA_VERSION).then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(d){ studyCache[key] = d; return d; });
+  }
+  async function snInsertFromRef(kind){
+    var f = parseVerseRef(snBibleRef);
+    if(!f) return;
+    var base = { book: f.book, chapter: f.chapter, verse: f.verseStart || f.verse, toVerse: f.verseEnd || null, refLabel: f.refLabel, translation: bibleTranslationLabel() };
+    if(kind === 'open'){ snSaveNow(); snOpenStudyFromBlock(snDraft, base, 'sermon-note-edit'); return; }
+    if(kind === 'scripture'){ snInsertBlock(Object.assign({ id: snNewId(), type: 'scripture', verseText: f.text }, base)); return; }
+    var data;
+    try{ data = await getStudyChapter(f.book, f.chapter); }
+    catch(e){ showToast('Couldn’t load the study notes — check your connection.'); return; }
+    var v = base.verse, text = '', source = '';
+    var sec = studySectionFor(data, v);
+    if(kind === 'overview'){
+      var gen = data.geneva && data.geneva[String(v)];
+      text = (sec && sec.title ? sec.title + '\n' : '') + (gen ? trimSentences(gen, 700) : (sec && sec.paras && sec.paras[0] ? trimSentences(sec.paras[0], 700) : ''));
+      source = gen ? 'Geneva Bible notes (1599)' : 'Matthew Henry';
+    } else if(kind === 'commentary'){
+      text = sec && sec.paras ? sec.paras.slice(0, 3).join('\n\n') : '';
+      source = 'Matthew Henry’s Commentary';
+    } else if(kind === 'words'){
+      var o = data.orig && data.orig[String(v)];
+      var wl = (data.words && data.words[String(v)]) || [];
+      text = (o ? (o[0] + '\n' + o[1] + '\n\n') : '') + wl.map(function(w){ return w[0] + ' (' + w[1] + ') — “' + w[2] + '”: ' + w[4]; }).join('\n');
+      source = 'STEP Bible (CC BY 4.0)';
+    } else if(kind === 'xrefs'){
+      text = ((data.xrefs && data.xrefs[String(v)]) || []).map(function(x){
+        var b = STUDY_BOOKS[x[0]]; var t = verseTextIn(bibleTranslation, b, x[1], x[2]);
+        return studyRefLabel(b, x[1], x[2], x[3]) + (t ? ' — ' + trimSentences(t, 120) : '');
+      }).join('\n');
+      source = 'OpenBible.info (CC BY)';
+    } else if(kind === 'context'){
+      text = (data.intro || []).slice(0, 2).join('\n\n') + (sec ? ('\n\nThis passage: ' + (sec.title || '') + ' (vv. ' + sec.from + (sec.to !== sec.from ? '–' + (sec.to === 999 ? '' : sec.to) : '') + ')') : '');
+      source = 'Matthew Henry’s chapter overview';
+    }
+    if(!String(text).trim()){ showToast('No ' + (SN_STUDY_PARTS[kind] || 'study').toLowerCase() + ' for this verse.'); return; }
+    snInsertBlock(Object.assign({ id: snNewId(), type: 'study', part: kind, studyText: text.trim(), source: source }, base));
+  }
+  function attachSnEditHandlers(){
+    var d = snDraft;
+    document.getElementById('sneBackBtn').addEventListener('click', function(){ snSaveNow(); openSermonNote(d.id); });
+    [['snTitle','title'],['snMainRef','mainRef'],['snSeries','series'],['snDate','datePreached']].forEach(function(p){
+      var el = document.getElementById(p[0]);
+      el.addEventListener('input', function(){ d[p[1]] = el.value; snScheduleSave(); });
+    });
+    document.getElementById('snEditShareBtn').addEventListener('click', function(){ snShareOpen = !snShareOpen; if(snShareOpen) startDirectoryWatch(); render(); });
+    if(snShareOpen) attachSnSharePanel(d, true);
+    main.querySelectorAll('[data-sn-add]').forEach(function(b){ b.addEventListener('click', function(){ snInsertBlock(snBlock(b.getAttribute('data-sn-add'))); }); });
+    var more = document.getElementById('snAddMore');
+    more.addEventListener('change', function(){ if(more.value) snInsertBlock(snBlock(more.value)); });
+    var bt = document.getElementById('snBibleToggle');
+    if(bt) bt.addEventListener('click', function(){ snBibleOpen = !snBibleOpen; render(); });
+    main.querySelectorAll('[data-sn-text]').forEach(function(el){
+      var i = Number(el.getAttribute('data-sn-text'));
+      el.addEventListener('input', function(){ d.blocks[i].text = el.value; snScheduleSave();
+        if(el.tagName === 'TEXTAREA'){ el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } });
+      el.addEventListener('focus', function(){
+        snFocusIdx = i;
+        main.querySelectorAll('.sn-b-focus').forEach(function(x){ x.classList.remove('sn-b-focus'); });
+        var host = el.closest('[data-snb]'); if(host) host.classList.add('sn-b-focus');
+      });
+    });
+    main.querySelectorAll('[data-snb]').forEach(function(el){ el.addEventListener('click', function(e){
+      if(e.target.closest('button, textarea, input')) return;
+      snFocusIdx = Number(el.getAttribute('data-snb'));
+      main.querySelectorAll('.sn-b-focus').forEach(function(x){ x.classList.remove('sn-b-focus'); }); el.classList.add('sn-b-focus');
+    }); });
+    function move(i, dir){ var j = i + dir; if(j < 0 || j >= d.blocks.length) return; var t = d.blocks[i]; d.blocks[i] = d.blocks[j]; d.blocks[j] = t; snFocusIdx = j; snScheduleSave(true); render(); }
+    main.querySelectorAll('[data-sn-up]').forEach(function(b){ b.addEventListener('click', function(){ move(Number(b.getAttribute('data-sn-up')), -1); }); });
+    main.querySelectorAll('[data-sn-down]').forEach(function(b){ b.addEventListener('click', function(){ move(Number(b.getAttribute('data-sn-down')), 1); }); });
+    main.querySelectorAll('[data-sn-del]').forEach(function(b){ b.addEventListener('click', function(){
+      if(b.getAttribute('data-confirm') !== '1'){ b.setAttribute('data-confirm','1'); b.textContent = 'SURE?'; b.style.width = 'auto'; b.style.padding = '0 8px'; return; }
+      d.blocks.splice(Number(b.getAttribute('data-sn-del')), 1); snFocusIdx = null; snScheduleSave(true); render();
+    }); });
+    main.querySelectorAll('[data-sn-edit-study]').forEach(function(b){ b.addEventListener('click', function(){
+      snSaveNow(); snOpenStudyFromBlock(d, d.blocks[Number(b.getAttribute('data-sn-edit-study'))], 'sermon-note-edit');
+    }); });
+    attachSnBiblePanelOnly();
+  }
+  function attachSnBiblePanelOnly(){
+    attachBibleTranslationSwitcherHandlers('sn');
+    var ref = document.getElementById('snRefInput');
+    if(ref) ref.addEventListener('input', function(){
+      snBibleRef = ref.value;
+      var box = document.getElementById('snRefResult');
+      if(box){ box.innerHTML = renderSnRefResult(snBibleRef.trim() ? parseVerseRef(snBibleRef) : null); bindSnInsert(); }
+    });
+    bindSnInsert();
+    main.querySelectorAll('[data-snb-books]').forEach(function(b){ b.addEventListener('click', function(){ snBibleBrowseBook = null; snBibleBrowseChapter = null; render(); }); });
+    main.querySelectorAll('[data-snb-book]').forEach(function(b){ b.addEventListener('click', function(){ snBibleBrowseBook = b.getAttribute('data-snb-book'); snBibleBrowseChapter = null; render(); }); });
+    main.querySelectorAll('[data-snb-chapter]').forEach(function(b){ b.addEventListener('click', function(){ snBibleBrowseChapter = Number(b.getAttribute('data-snb-chapter')); render(); }); });
+    main.querySelectorAll('[data-snb-verse]').forEach(function(b){ b.addEventListener('click', function(){
+      snBibleRef = snBibleBrowseBook + ' ' + snBibleBrowseChapter + ':' + b.getAttribute('data-snb-verse');
+      var r = document.getElementById('snRefInput'); if(r) r.value = snBibleRef;
+      var box = document.getElementById('snRefResult');
+      if(box){ box.innerHTML = renderSnRefResult(parseVerseRef(snBibleRef)); bindSnInsert(); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    }); });
+    }
+  function bindSnInsert(){
+    main.querySelectorAll('[data-sn-insert]').forEach(function(b){
+      if(b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', function(){ snInsertFromRef(b.getAttribute('data-sn-insert')); });
+    });
   }
 
   function renderDevotionals(){
@@ -8089,6 +8837,7 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
         { title:'Two ways to add a song', desc:'Paste in lyrics and let iWorship auto-detect verses/choruses, or build a song section by section by hand. CSV and ChordPro files import in bulk too.' },
         { title:'Sing Mode & Play Mode', desc:'Huge, simple lyrics for the congregation to follow along with; a musician’s view with live chords and tap-to-transpose for any key.' },
         { title:'Scripture built right in', desc:'A complete Bible in the King James Version, the easy-to-read Berean Standard Bible, and Tagalog (Ang Dating Biblia, 1905) -- switch any time, in the Bible tab or live on stage.' },
+        { title:'Sermon Notes', desc:'Pastors build sermon outlines, scripts and small-group guides with the Bible open beside them -- add a verse or a piece of its study (overview, commentary, Greek/Hebrew word study, cross references) with an OPEN STUDY button, keep private speaker notes, preach from a big-text Preach Mode with a timer, turn the outline into slides, and keep each one private, share it with chosen people, your church, or everyone.' },
         { title:'Study every verse', desc:'Tap any verse for a short overview, then a detailed study: classic Reformed commentary (Matthew Henry, Geneva notes), the key Greek and Hebrew words, cross references, people and places, and all three translations side by side. Pastors can add notes for their church, members can discuss a verse together, and everyone can highlight, bookmark, take private notes, listen, and practice memorizing.' },
         { title:'Daily Devotionals', desc:'A fresh Spurgeon "Morning and Evening" reading posts automatically every day, or browse any day of the year.' },
         { title:'Built for a real church team', desc:'A self-service Church Team Roster, role-based access from Senior Pastor down to Musician, and a Song Requests queue for anyone to suggest a hymn.' },
@@ -18851,6 +19600,8 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
   // Shared-program ("?program=<id>") deep link [2026-09-24] -- exact mirror
   // of the shared-sermon deep link just above, see its own comment.
   const programLinkId = new URLSearchParams(window.location.search).get('program');
+  // Sermon Notes link ("?note=<id>") [2026-10-20] -- COPY LINK on a note.
+  const noteLinkId = new URLSearchParams(window.location.search).get('note');
   // Session-live push deep link ("?join=<code>") [2026-09-17] -- the OS
   // notification behind a session_live push (see functions/index.js's
   // onNewSessionNotify and src/sw.js's notificationclick handler) opens
@@ -18899,6 +19650,9 @@ qrcodeGen.stringToBytes = qrStringToBytesUtf8;
       state.sharedSermonLinkData = sermon;
       if(state.view === 'shared-sermon-link') render();
     });
+  } else if(noteLinkId){
+    watchOpenNote(noteLinkId);
+    state.view = 'sermon-note-view';
   } else if(programLinkId){
     state.sharedProgramLinkId = programLinkId;
     state.view = 'shared-program-link';
